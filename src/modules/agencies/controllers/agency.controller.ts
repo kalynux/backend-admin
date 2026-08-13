@@ -1,0 +1,389 @@
+import { Request, Response } from 'express';
+import { actorContextOf } from '../../audit/domain/audit-context';
+import { asyncHandler } from '../../../core/http/async-handler';
+import { createAppError } from '../../../core/errors/app-error';
+import { ERROR_CODES } from '../../../core/errors/error-codes';
+import { toPageMeta } from '../../../core/http/list-query';
+import { sendPaginated, sendSuccess } from '../../../core/http/responses';
+import { requireAdminIdentity } from '../../admin-identity/domain/admin-identity.types';
+import { toAuditEntryDto } from '../../audit/domain/audit.dto';
+import { AuditRepository } from '../../audit/repositories/audit.repository';
+import { ListAuditQuery } from '../../audit/validators/audit.validator';
+import * as gateway from '../gateways/agency.gateway';
+import { AgencyReadModel, AgencyReadRepository } from '../repositories/agency.read.repository';
+import { ContractEventReadRepository } from '../repositories/contract-event.read.repository';
+import { ContractReadRepository } from '../repositories/contract.read.repository';
+import { toContractEventDto, toRosterEntryDto } from '../read-models/contract.dto';
+import {
+    DeactivateAgencyBody,
+    ListAgencyActivityQuery,
+    ListContractEventsQuery,
+    ListRosterQuery,
+    ReactivateAgencyBody,
+    SearchAgenciesQuery,
+} from '../validators/agency.validator';
+
+/**
+ * `/api/v1/agencies` — delivery-agency administration.
+ *
+ * Both halves of ADR-004 meet here: the directory, the detail, the roster and the two
+ * feeds are **direct reads**; verify, deactivate and reactivate are **delegated**. The
+ * reason is not symmetry — deactivation is a cascade across products and order items
+ * paired with post-commit events, and reproducing the transaction from here would get the
+ * rows right and the notifications silently wrong.
+ *
+ * ── What this surface deliberately does NOT offer ─────────────────────────────
+ *  - **Editing an agency's policies.** Pricing, returns and damage terms are the agency's
+ *    own commercial record, negotiated with the vendors connected to it, and every edit
+ *    bumps `policy_version`, which pauses those connections for re-approval. An
+ *    administrator changing a price on their behalf would silently re-open every
+ *    relationship they have.
+ *  - **Un-verifying.** Revoking a verification that gates nothing (`requireLegitBusiness`
+ *    has no call sites) would be theatre. `deactivate` is the real lever, and it is the
+ *    one with teeth.
+ *  - **Creating an agency.** Onboarding is a four-step flow with a Magazin provisioned
+ *    along the way; a row inserted from here would be missing it, and every later read
+ *    would report a business with no name.
+ */
+
+const agencies = new AgencyReadRepository();
+const contracts = new ContractReadRepository();
+const contractEvents = new ContractEventReadRepository();
+const audit = new AuditRepository();
+
+interface AgencyDto {
+    id: string;
+    userId: string;
+    /** From the Magazin. `null`, never `""` (ADR-005 D-16) — absent data is absent. */
+    businessName: string | null;
+    /** An opaque id. This service resolves no file URLs — see ADR-008 D-6. */
+    logoFileId: string | null;
+    contactName: string | null;
+    country: string | null;
+    status: string;
+    onboardingComplete: boolean;
+    /**
+     * Both mirrors, deliberately. `kyc_details.legit_verified` is canonical and the
+     * top-level one is deprecated; they are written together by the one writer there is,
+     * so a disagreement means a hand-edited document — and only showing both makes that
+     * visible instead of picking a winner and hiding the fact.
+     */
+    verified: boolean;
+    verifiedLegacyMirror: boolean;
+    autoAssignEnabled: boolean;
+    createdAt: string;
+    updatedAt: string;
+}
+
+interface AgencyDetailDto extends AgencyDto {
+    email: string | null;
+    emailVerified: boolean;
+    phone: string | null;
+    phoneVerified: boolean;
+    coverageAreas: string[];
+    kyc: {
+        registrationNumber: string | null;
+        transportLicenseId: string | null;
+        verifiedAt: string | null;
+        verifiedBy: { id: string | null; source: string; name: string | null } | null;
+    };
+    policies: Record<string, unknown> | null;
+    policyVersion: number;
+    timezone: string | null;
+    preferredLanguage: string | null;
+}
+
+/**
+ * Named-field mapping, not a spread.
+ *
+ * The projection already excludes everything sensitive; naming the fields is the second
+ * of the two locks, and the one that survives somebody widening the projection for a new
+ * screen.
+ */
+function toAgencyDto(agency: AgencyReadModel): AgencyDto {
+    return {
+        id: agency._id.toString(),
+        userId: agency.user_id?.toString() ?? '',
+        businessName: agency.magazin?.name ?? null,
+        logoFileId: agency.magazin?.logo_file_id?.toString() ?? null,
+        contactName: agency.display_name ?? null,
+        country: agency.country ?? null,
+        status: agency.status,
+        // `0` is the COMPLETED sentinel in jovi-mall's onboarding constants, not a
+        // "nothing done yet" — reading it as falsy is the obvious way to get this backwards.
+        onboardingComplete: agency.onboarding_step === 0,
+        verified: agency.kyc_details?.legit_verified === true,
+        verifiedLegacyMirror: agency.legit_verified === true,
+        autoAssignEnabled: agency.assignment_settings?.auto_assign_enabled === true,
+        createdAt: toIso(agency.created_at) ?? String(agency.created_at),
+        updatedAt: toIso(agency.updated_at) ?? String(agency.updated_at),
+    };
+}
+
+function toAgencyDetailDto(agency: AgencyReadModel): AgencyDetailDto {
+    const kyc = agency.kyc_details ?? {};
+    return {
+        ...toAgencyDto(agency),
+        email: agency.email ?? null,
+        emailVerified: agency.email_verified === true,
+        phone: agency.phone ?? null,
+        phoneVerified: agency.phone_verified === true,
+        coverageAreas: agency.magazin?.coverage_areas ?? [],
+        kyc: {
+            registrationNumber: kyc.registration_number ?? null,
+            transportLicenseId: kyc.transport_license_id ?? null,
+            verifiedAt: toIso(kyc.verified_at),
+            // Present only once verified. An unverified agency carrying a stale approver
+            // would read as approved on any screen rendering the block without checking
+            // the flag first — the same rule the user DTO applies to a suspension.
+            verifiedBy:
+                kyc.legit_verified === true
+                    ? {
+                          id: kyc.verified_by_user_id?.toString() ?? null,
+                          source: kyc.verified_by_source ?? 'platform',
+                          name: kyc.verified_by_name ?? null,
+                      }
+                    : null,
+        },
+        policies: agency.policies ?? null,
+        policyVersion: agency.policy_version ?? 0,
+        timezone: agency.timezone ?? null,
+        preferredLanguage: agency.preferred_language ?? null,
+    };
+}
+
+function toIso(value: Date | null | undefined): string | null {
+    if (!value) return null;
+    return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+/** The fields a write can change, as the audit row's `before`. */
+function toAuditState(agency: AgencyReadModel): Record<string, unknown> {
+    return {
+        status: agency.status,
+        verified: agency.kyc_details?.legit_verified === true,
+        businessName: agency.magazin?.name ?? null,
+    };
+}
+
+/**
+ * Load or 404 — and return the row, because every write needs it twice: to refuse a
+ * request against an agency that does not exist, and as the audit `before`.
+ *
+ * Reading before delegating costs one indexed lookup and buys the two things the gateway
+ * cannot get from jovi-mall's answer: the previous state, and a 404 that says "no such
+ * agency" rather than a `PLATFORM_OPERATION_REJECTED` wrapping one.
+ */
+async function loadOr404(agencyId: string): Promise<AgencyReadModel> {
+    const agency = await agencies.findById(agencyId);
+    if (!agency) throw createAppError(ERROR_CODES.NOT_FOUND, 404, 'Delivery agency not found');
+    return agency;
+}
+
+export class AgencyController {
+    /**
+     * GET /api/v1/agencies — search and filter the delivery network.
+     *
+     * `search` matches the business name, the contact name, the email, the phone or the
+     * agency id. `verified` is worth its own filter beside `status` precisely because the
+     * two can disagree: nothing enforces `legit_verified`, so an `active` unverified
+     * agency is a real and findable state.
+     */
+    static search = asyncHandler(async (req: Request, res: Response) => {
+        const query = req.query as unknown as SearchAgenciesQuery;
+
+        const page = await agencies.search({
+            search: query.search,
+            status: query.status,
+            verified: query.verified,
+            autoAssign: query.autoAssign,
+            country: query.country,
+            from: query.from,
+            to: query.to,
+            page: query.page,
+            limit: query.limit,
+            sort: query.sort,
+        });
+
+        sendPaginated(res, page.items.map(toAgencyDto), toPageMeta(page.total, page.page, page.limit));
+    });
+
+    /** GET /api/v1/agencies/:agencyId */
+    static get = asyncHandler(async (req: Request, res: Response) => {
+        sendSuccess(res, toAgencyDetailDto(await loadOr404(req.params.agencyId)));
+    });
+
+    /**
+     * GET /api/v1/agencies/:agencyId/agents — the roster.
+     *
+     * Every contract status by default, terminal rows included. A live-only default would
+     * make a relationship's history impossible to fetch, which on an administrative
+     * surface is most of what the screen is for.
+     *
+     * Note what a roster is NOT: a list of agents this agency can dispatch to. That is an
+     * eligibility question, it is pairwise, and it lives on the agent surface behind the
+     * delegated `eligibility` read.
+     */
+    static roster = asyncHandler(async (req: Request, res: Response) => {
+        const query = req.query as unknown as ListRosterQuery;
+        await loadOr404(req.params.agencyId);
+
+        const page = await contracts.listForAgency(req.params.agencyId, {
+            status: query.status,
+            primaryOnly: query.primaryOnly,
+            page: query.page,
+            limit: query.limit,
+            sort: query.sort,
+        });
+
+        sendPaginated(res, page.items.map(toRosterEntryDto), toPageMeta(page.total, page.page, page.limit));
+    });
+
+    /**
+     * GET /api/v1/agencies/:agencyId/contract-history
+     *
+     * jovi-mall's own record of what happened to this agency's relationships — and its
+     * `actorRole` is `agent | agency | admin | system`, so it is what EVERYONE did. The
+     * sibling `/activity` is what administrators did. They are two endpoints rather than
+     * one merged feed because they live in two databases reached by two MongoClients,
+     * where a merged page total would be a sum of two counts and `meta.pages` a lie.
+     *
+     * It is also the only one of the two with any history in it today: jovi-mall's audit
+     * logger is a console stub, so every deactivation before this phase is unrecoverable.
+     */
+    static contractHistory = asyncHandler(async (req: Request, res: Response) => {
+        const query = req.query as unknown as ListContractEventsQuery;
+        await loadOr404(req.params.agencyId);
+
+        const page = await contractEvents.list(
+            { agencyId: req.params.agencyId },
+            {
+                type: query.type,
+                actorRole: query.actorRole,
+                from: query.from,
+                to: query.to,
+                page: query.page,
+                limit: query.limit,
+                sort: query.sort,
+            },
+        );
+
+        sendPaginated(res, page.items.map(toContractEventDto), toPageMeta(page.total, page.page, page.limit));
+    });
+
+    /**
+     * GET /api/v1/agencies/:agencyId/activity — what administrators did to this agency.
+     *
+     * The audit trail filtered to this agency as its target: every verification,
+     * deactivation and reactivation, who made it, from where, and whether it succeeded.
+     *
+     * It is NOT the agency's platform activity — its shipments, its orders, its COD
+     * remittances. Those live in other domains behind other permissions, and assembling
+     * them here would let `agencies.read` alone reach data those permissions exist to
+     * gate. The audit repository applies its own per-tier read scope on top of this
+     * filter; `agency` rows are `platform_actor`, which every tier may read.
+     */
+    static activity = asyncHandler(async (req: Request, res: Response) => {
+        const identity = requireAdminIdentity(req);
+        const query = req.query as unknown as ListAgencyActivityQuery;
+
+        // 404 first: an activity feed for an agency that does not exist should say so, not
+        // answer an empty page that reads as "nothing ever happened".
+        await loadOr404(req.params.agencyId);
+
+        const page = await audit.search(
+            {
+                page: query.page,
+                limit: query.limit,
+                sort: query.sort,
+                action: query.action,
+                status: query.status,
+                from: query.from,
+                to: query.to,
+                // Fixed by the path — a caller cannot widen it.
+                targetType: 'agency',
+                targetId: req.params.agencyId,
+            } as ListAuditQuery,
+            identity,
+        );
+
+        sendPaginated(res, page.items.map(toAuditEntryDto), page.meta);
+    });
+
+    /**
+     * POST /api/v1/agencies/:agencyId/verify — approve the business verification.
+     *
+     * The exit from `pending_verification`, which had none before this phase: nothing
+     * moved an agency off that status except `reactivate`, an endpoint whose name says the
+     * opposite and which also runs the product-restore cascade.
+     *
+     * jovi-mall performs it as a compare-and-set and answers 409 on a miss, so two
+     * administrators on one screen cannot overwrite each other's stamp.
+     */
+    static verify = asyncHandler(async (req: Request, res: Response) => {
+        const before = await loadOr404(req.params.agencyId);
+
+        const updated = await gateway.verify(
+            req.params.agencyId,
+            toAuditState(before),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, updated, { message: 'Agency verified — it may now operate' });
+    });
+
+    /**
+     * POST /api/v1/agencies/:agencyId/deactivate
+     *
+     * A POST sub-resource rather than jovi-mall's `PATCH`: ADR-005 D-2 — the permission
+     * and the audit row attach to the ACTION, and porting is not transcription.
+     *
+     * The counts come back in `meta` because they describe what the write DID rather than
+     * what the agency now is. They are the number a vendor's support ticket will be about.
+     */
+    static deactivate = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as DeactivateAgencyBody;
+        const before = await loadOr404(req.params.agencyId);
+
+        const { agency, counts } = await gateway.deactivate(
+            req.params.agencyId,
+            body.reason,
+            toAuditState(before),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, agency, {
+            meta: counts,
+            message:
+                `Agency deactivated. ${counts.products} product(s) suspended, `
+                + `${counts.orderItems} order item(s) put on hold.`,
+        });
+    });
+
+    /**
+     * POST /api/v1/agencies/:agencyId/reactivate
+     *
+     * The counts here are the ones worth reading twice: a listing that no longer passes
+     * its own activation gate stays suspended, so `products` restored can legitimately be
+     * lower than the number deactivation suspended. That gap is not a bug and the audit
+     * row's `after` is where it becomes visible.
+     */
+    static reactivate = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as ReactivateAgencyBody;
+        const before = await loadOr404(req.params.agencyId);
+
+        const { agency, counts } = await gateway.reactivate(
+            req.params.agencyId,
+            body.reason,
+            toAuditState(before),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, agency, {
+            meta: counts,
+            message:
+                `Agency reactivated. ${counts.products} product(s) restored, `
+                + `${counts.orderItems} order item(s) resumed.`,
+        });
+    });
+}

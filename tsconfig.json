@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "es2020",
+    "module": "commonjs",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "noUnusedLocals": true,
+    "skipLibCheck": true,
+    "typeRoots": ["./node_modules/@types", "./src/types"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"],
+
+  "ts-node": {
+    "//": [
+      "`files` makes ts-node honour the `include` above instead of resolving only what the",
+      "entry point imports. Without it, the `declare global` blocks that add `req.admin`",
+      "(admin-identity.types.ts) and `req.requestId` (request-id.middleware.ts) are invisible",
+      "to any script whose import graph does not happen to reach those files — so",
+      "`scripts/test/test-authz.ts` failed to compile on `req.requestId` while `tsc --noEmit`",
+      "over the whole project passed. Loading the project's declarations is what `tsc` does;",
+      "this makes ts-node agree with it."
+    ],
+    "files": true
+  }
+}

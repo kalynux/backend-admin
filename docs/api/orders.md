@@ -1,0 +1,502 @@
+# `/orders` — order administration
+
+Base path: `/api/v1/orders`
+
+The directory, the detail, both histories, a refund ceiling, and the four interventions.
+
+Design record: [`../ADR-010-ORDERS-AND-SHIPMENTS.md`](../ADR-010-ORDERS-AND-SHIPMENTS.md).
+
+| Method | Path | Permission | Transport | Audited |
+|---|---|---|---|---|
+| `GET` | `/orders` | `orders.read` | direct read | — |
+| `GET` | `/orders/disputes` | `orders.disputes.read` | direct read | — |
+| `GET` | `/orders/:orderId` | `orders.read` | direct read | — |
+| `GET` | `/orders/:orderId/timeline` | `orders.read` | direct read | — |
+| `GET` | `/orders/:orderId/activity` | `orders.read` **+** `audit.read` | direct read | — |
+| `GET` | `/orders/:orderId/refund-eligibility` | **`orders.refund`** | **delegated** | — |
+| `POST` | `/orders/:orderId/dispute/resolve` | `orders.disputes.resolve` | **delegated** | ✅ |
+| `POST` | `/orders/:orderId/cancel` | `orders.intervene` | **delegated** | ✅ |
+| `POST` | `/orders/:orderId/dispatch` | `orders.intervene` | **delegated** | ✅ |
+| `POST` | `/orders/:orderId/refund` | `orders.refund` | **delegated** | ✅ |
+
+`orders.read` and `orders.disputes.read` are Support-level lookups. The interventions are not:
+`orders.refund` and `orders.disputes.resolve` are flagged `financial` and had to be granted to
+Admin by name rather than by family expansion.
+
+Note `refund-eligibility` sits behind **`orders.refund`**, not `orders.read` — its answer is a
+**ceiling on money**, not a record, so a copy of that arithmetic anywhere else would be a second
+definition of what a customer is owed.
+
+## Two status vocabularies, and they are the platform's
+
+`paymentStatus` and `fulfillmentStatus` are validated by **format, not membership** — jovi-mall
+owns both state machines and adds to them without asking. An unrecognised value returns an empty
+page rather than a `400` telling an administrator their own platform's status does not exist.
+
+Values in use today, for reference only:
+
+| Axis | Values |
+|---|---|
+| `paymentStatus` | `pending`, **`AWAITING_PAYMENT`**, `partially_paid`, `paid`, `disputed`, `failed`, `refunded` |
+| `fulfillmentStatus` | `pending`, `processing`, `partially_shipped`, `shipped`, `partially_delivered`, `delivered`, `fulfilled`, `cancelled`, `returned` |
+
+> `AWAITING_PAYMENT` really is stored in SCREAMING_SNAKE beside snake_case values. The filter
+> accepts `[A-Za-z_]`, so it can express both.
+
+---
+
+## `GET /orders`
+
+| | |
+|---|---|
+| **Permission** | `orders.read` |
+| **Pagination** | `page`, `limit` |
+| **Sorting** | `createdAt` only. Default **`-createdAt`** |
+
+`totalAmount` and `updatedAt` are deliberately not sortable — no index backs them, and adding
+one to a collection this size to serve a sort nobody has asked for is the wrong trade.
+
+### Query parameters
+
+| Parameter | Type | Notes |
+|---|---|---|
+| `search` | string, 1–120 | Order-number **prefix**, or a 24-hex id of an order, customer, vendor or checkout group |
+| `orderType` | `physical` \| `digital` | Pinned — a closed two-value set the platform enforces |
+| `paymentMethod` | `online` \| `cash_on_delivery` | |
+| `paymentStatus` | status token | Format-validated, see above |
+| `fulfillmentStatus` | status token | |
+| `vendorId` | 24-hex | |
+| `customerId` | 24-hex | |
+| `disputed` | boolean flag | Frozen by a payment dispute, or already flagged `disputed` |
+| `completed` | boolean flag | **The escrow gate** (`completion.confirmedAt` set) — orthogonal to fulfilment, not derivable from it |
+| `from` / `to` | ISO-8601 instant | Creation range. **Max span 366 days** |
+
+### Response (200)
+
+```jsonc
+{
+  "success": true,
+  "data": [
+    {
+      "id": "6670aabbccddeeff00112233",
+      "orderNumber": "ORD-2026-008841",
+      "type": "physical",
+      "checkoutGroupId": "6670aabbccddeeff00112200",
+      "vendorId": "6650aa11bb22cc33dd44ee55",
+      "vendorName": "Douala Fresh Market",
+      "customerId": "665f1c2a9b3e4a91c7d2e5f0",
+      "customerName": "Amina B.",
+      "currency": "XAF",
+      "totalAmount": 27500,
+      "paymentMethod": "cash_on_delivery",
+      "paymentStatus": "pending",
+      "fulfillmentStatus": "processing",
+      "disputeHeld": false,
+      "completedAt": null,
+      "itemCount": 3,
+      "createdAt": "2026-08-12T09:14:00.000Z",
+      "updatedAt": "2026-08-13T07:02:00.000Z"
+    }
+  ],
+  "meta": { "total": 12043, "page": 1, "limit": 20, "pages": 603 }
+}
+```
+
+| Field | Notes |
+|---|---|
+| `checkoutGroupId` | The cart id. **One checkout splits into one order per vendor, all sharing it** — this is how a customer's single purchase is reassembled |
+| `disputeHeld` | The order is frozen by a payment dispute |
+| `completedAt` | The escrow gate. `null` while funds are still held |
+
+---
+
+## `GET /orders/disputes`
+
+The dispute queue. **A literal path declared before `/:orderId`.**
+
+| | |
+|---|---|
+| **Permission** | `orders.disputes.read` |
+| **Pagination** | `page`, `limit` |
+| **Sorting** | `disputedAt`, `createdAt`. Default **`-disputedAt`** |
+| **Filters** | `from` / `to` (max 366 days) |
+
+### Response (200)
+
+The same order list-item shape, filtered to orders under dispute.
+
+---
+
+## `GET /orders/:orderId`
+
+| | |
+|---|---|
+| **Permission** | `orders.read` |
+| **Path parameter** | `orderId` — 24-hex |
+
+### Response (200)
+
+Every list field, plus:
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "…all list fields…": "…",
+
+    "priceBreakdown": { "base": 25000, "tax": 1250, "discount": 0, "total": 27500 },
+    "paymentIntentId": "pi_9f2b8c1a…",
+
+    "dispute": {
+      "active": false,
+      "disputedAt": "2026-08-01T10:00:00.000Z",
+      "resolvedAt": "2026-08-04T16:20:00.000Z",
+      "gatewayDisputeId": "dp_44127",
+      "reason": "item_not_received"
+    },
+
+    "completion": { "confirmedAt": null, "confirmedBy": null, "auto": false },
+
+    "deliveryAddress": {
+      "formattedAddress": "Rue Njo-Njo 14, Bonapriso, Douala, Littoral, CM",
+      "components": { "city": "Douala", "state": "Littoral", "country": "CM" }
+    },
+
+    "items": [
+      {
+        "id": "6670aabbccddeeff00112240",
+        "productId": "66601122334455667788990a",
+        "variantId": null,
+        "sku": "PLT-1KG",
+        "title": "Plantain — 1 kg",
+        "variantTitle": null,
+        "optionsSnapshot": null,
+        "productType": "physical",
+        "quantity": 3,
+        "price": 2500,
+        "currency": "XAF",
+        "delivery": {
+          "agencyId": "665c0011223344556677889a",
+          "shipmentId": "6671aabbccddeeff00112233",
+          "status": "assigned",
+          "freeDelivery": false,
+          "hold": null,
+          "pickup": { "source": "vendor_address", "vendorAddressId": "6650…", "agencyAddressId": null }
+        }
+      }
+    ]
+  }
+}
+```
+
+#### Field notes
+
+| Field | Notes |
+|---|---|
+| `dispute` | **`null` when the order has never been disputed** — absent entirely rather than a block of nulls that reads as "unknown". Present (with `active: false`) once resolved, because a resolved dispute is exactly what an administrator opens this screen for |
+| `completion.auto` | Whether the escrow released automatically or a person confirmed |
+| **`deliveryAddress`** | **Textual only.** `coordinates` and the customer's raw input are excluded by projection *and* by the mapping — the sharpest PII in the collection |
+| `items[].delivery.hold` | Set when an agency deactivation put this item on hold |
+
+### Errors
+
+| Status | Code |
+|---|---|
+| 400 | `VALIDATION_ERROR` — "Not a valid order id" |
+| 404 | `NOT_FOUND` — "Order not found" |
+
+---
+
+## `GET /orders/:orderId/timeline`
+
+The platform's own event log for this order — what the vendor, the customer, the system and
+administrators did.
+
+| | |
+|---|---|
+| **Permission** | `orders.read` |
+| **Pagination** | `page`, `limit` |
+| **Sorting** | `occurredAt` only. Default **`-occurredAt`** |
+
+### Query parameters
+
+| Parameter | Type | Notes |
+|---|---|---|
+| `actorType` | `vendor` \| `customer` \| `system` \| `admin` | Pinned — this service writes `admin` itself |
+| `eventType` | string, 2–60 | Dotted tokens like `payment.updated`. Format-validated, not pinned |
+
+### Response (200)
+
+```jsonc
+{
+  "success": true,
+  "data": [
+    {
+      "id": "6672aabbccddeeff00112233",
+      "eventType": "payment.updated",
+      "description": "Payment marked paid via MTN MoMo",
+      "actorType": "system",
+      "actorId": null,
+      "metadata": { "gateway": "mtn_momo", "reference": "MP260812.1402.A44127" },
+      "occurredAt": "2026-08-12T14:02:31.000Z"
+    }
+  ],
+  "meta": { "total": 18, "page": 1, "limit": 20, "pages": 1 }
+}
+```
+
+`metadata` is an opaque object written by every transition path — treat it as free-form.
+
+---
+
+## `GET /orders/:orderId/activity`
+
+What **administrators** did to this order. The sibling of `/timeline`, which is what everyone
+did.
+
+| | |
+|---|---|
+| **Permission** | `orders.read` **+** `audit.read` |
+| **Sorting** | `occurredAt` only. Default `-occurredAt` |
+| **Filters** | `action` (only `orders.*`, derived from the catalog), `status`, `from`/`to` (max 366 days) |
+| **Response** | Audit entries — see [audit.md](audit.md#get-audit) |
+
+---
+
+## `GET /orders/:orderId/refund-eligibility`
+
+How much may be refunded, and whose policy that would break.
+
+| | |
+|---|---|
+| **Permission** | **`orders.refund`** — the answer is a ceiling on money, not a record |
+| **Transport** | **Delegated.** A copy of this arithmetic here would be a second definition of what a customer is owed |
+| **Parameters** | None |
+
+### Response (200)
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "eligible": true,
+    "maxRefundable": 27500,
+    "remaining": 27500,
+    "currency": "XAF",
+    "gateway": "mtn_momo",
+    "gatewayRefundSupported": true,
+    "isCod": false,
+    "vendorPolicy": {
+      "eligible": false,
+      "maxRefundable": 13750,
+      "remaining": 13750,
+      "currency": "XAF",
+      "reasonCode": "RETURN_WINDOW_EXPIRED",
+      "refundProcessingDays": 7,
+      "returnShippingPayer": "customer"
+    },
+    "overrides": ["RETURN_WINDOW_EXPIRED", "PARTIAL_REFUND_PERCENTAGE"]
+  }
+}
+```
+
+| Field | Notes |
+|---|---|
+| `maxRefundable` / `remaining` | **The platform's money invariant.** Never waivable |
+| `vendorPolicy` | **The vendor's commercial terms**, which are waivable with `overridePolicy` |
+| `overrides` | Exactly which vendor gates a full refund would cross. **Show these before asking an operator to confirm** — a specific override beats a general one |
+| `isCod` | A cash order refunds differently |
+
+Read the two blocks as two different ceilings: the outer one is what the platform will permit,
+the inner one is what the vendor agreed to.
+
+---
+
+## `POST /orders/:orderId/dispute/resolve`
+
+Decide a payment dispute.
+
+| | |
+|---|---|
+| **Permission** | `orders.disputes.resolve` — `financial` |
+| **Transport** | Delegated |
+| **Body** | **Strict** |
+
+### Request body
+
+| Field | Type | Rules |
+|---|---|---|
+| `outcome` | `won` \| `lost` | Required |
+
+`won` and `lost` are from the platform's point of view.
+
+```json
+{ "outcome": "won" }
+```
+
+### Response (200)
+
+The updated order, message `"Dispute resolved as won"`.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Not `won`/`lost`, or an unknown field |
+| 404 | `NOT_FOUND` | |
+| 409 / 422 | `PLATFORM_OPERATION_REJECTED` | No active dispute, or already resolved |
+| 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | |
+
+### Audit
+
+`orders.disputes.resolve`
+
+---
+
+## `POST /orders/:orderId/cancel`
+
+Cancel an order. **This runs six guards spanning three collections and notifies two
+audiences** — it is not a status column.
+
+| | |
+|---|---|
+| **Permission** | `orders.intervene` |
+| **Transport** | Delegated |
+| **Body** | **Strict** |
+
+### Request body
+
+| Field | Type | Rules |
+|---|---|---|
+| `reason` | string | **Required.** 3–500 characters |
+
+```json
+{ "reason": "Customer requested cancellation before dispatch — ticket TCK-2026-1192" }
+```
+
+### Response (200)
+
+The updated order, message `"Order cancelled"`.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | |
+| 404 | `NOT_FOUND` | |
+| 409 / 422 | `PLATFORM_OPERATION_REJECTED` | A guard refused — already shipped, already cancelled, funds released. `details.platformCode` names which |
+| 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | |
+
+### Audit
+
+`orders.cancel`
+
+---
+
+## `POST /orders/:orderId/dispatch`
+
+Mint shipments and start the auto-assignment broadcast.
+
+| | |
+|---|---|
+| **Permission** | `orders.intervene` |
+| **Transport** | Delegated |
+| **Body** | **Strict** |
+
+### Request body
+
+| Field | Type | Rules |
+|---|---|---|
+| `reason` | string | **Optional**, ≤ 500 characters |
+
+### Response (200)
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "order": { "_id": "6670…", "order_number": "ORD-2026-008841",
+               "fulfillment_status": "processing", "…": "…" },
+    "shipmentsAssigned": 2
+  },
+  "message": "Dispatched 2 shipment(s) to the delivery agency"
+}
+```
+
+When nothing was pending, `shipmentsAssigned` is `0` and the message is
+`"Nothing to dispatch — no shipment on this order was pending"`. **That is a `200`, not an
+error** — branch on the count.
+
+### Audit
+
+`orders.dispatch`
+
+---
+
+## `POST /orders/:orderId/refund`
+
+Refund an order, in full or in part. **Calls a payment gateway, writes its ledger row before
+the call, and reverses escrow across every actor on the order.**
+
+| | |
+|---|---|
+| **Permission** | `orders.refund` — `financial` |
+| **Transport** | Delegated |
+| **Body** | **Strict** |
+
+### Request body
+
+| Field | Type | Rules |
+|---|---|---|
+| `amount` | number | Optional, positive, ≤ 1 000 000 000. **Absent means the full remaining refundable balance — not the vendor's policy cap.** An administrator asking to "refund this order" means the order |
+| `reason` | string | **Required.** 3–500 characters |
+| `overridePolicy` | boolean flag | Acknowledges going beyond the **vendor's** commercial terms — the return window, the refund percentage. **It never waives a money invariant**: an amount above the remaining balance is refused whatever this says |
+
+```json
+{ "amount": 27500, "reason": "Parcel never arrived; agent confirmed loss", "overridePolicy": true }
+```
+
+### Recommended flow
+
+1. `GET /orders/:orderId/refund-eligibility`
+2. If `overrides` is non-empty, show the operator **exactly which vendor gates** would be
+   crossed and ask them to confirm.
+3. `POST /orders/:orderId/refund` with `overridePolicy: true`.
+
+Without the flag, a refund beyond the vendor's terms is a **`422`** carrying exactly which gates
+it would cross — so an operator confirms a specific override rather than a general one.
+
+### Response (200)
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "refundId": "rf_66739911",
+    "status": "completed",
+    "amount": 27500,
+    "currency": "XAF",
+    "totalRefunded": 27500,
+    "fullyRefunded": true,
+    "withinVendorPolicy": false,
+    "overrides": ["RETURN_WINDOW_EXPIRED"]
+  },
+  "message": "Refund completed — the vendor’s return policy was overridden"
+}
+```
+
+When nothing was overridden the message is simply `"Refund completed"`.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Missing reason, non-positive amount, unknown field |
+| 404 | `NOT_FOUND` | |
+| **422** | `PLATFORM_OPERATION_REJECTED` | **The refund would cross the vendor's policy and `overridePolicy` was not set.** `details` names the gates |
+| 409 / 422 | `PLATFORM_OPERATION_REJECTED` | Amount above the remaining balance, gateway refuses, order not refundable |
+| 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | |
+
+### Audit
+
+`orders.refund`

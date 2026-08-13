@@ -1,0 +1,578 @@
+import { Request, Response } from 'express';
+import { actorContextOf } from '../../audit/domain/audit-context';
+import { asyncHandler } from '../../../core/http/async-handler';
+import { createAppError } from '../../../core/errors/app-error';
+import { ERROR_CODES } from '../../../core/errors/error-codes';
+import { toPageMeta } from '../../../core/http/list-query';
+import { sendPaginated, sendSuccess } from '../../../core/http/responses';
+import { requireAdminIdentity } from '../../admin-identity/domain/admin-identity.types';
+import { toAuditEntryDto } from '../../audit/domain/audit.dto';
+import { AuditRepository } from '../../audit/repositories/audit.repository';
+import { ListAuditQuery } from '../../audit/validators/audit.validator';
+import { ContractEventReadRepository } from '../../agencies/repositories/contract-event.read.repository';
+import { ContractReadRepository } from '../../agencies/repositories/contract.read.repository';
+import { toAgentContractDto, toContractEventDto } from '../../agencies/read-models/contract.dto';
+import { ListContractEventsQuery } from '../../agencies/validators/agency.validator';
+import * as gateway from '../gateways/agent.gateway';
+import { AgentReadModel, AgentReadRepository } from '../repositories/agent.read.repository';
+import {
+    BanAgentBody,
+    EligibilityQuery,
+    ListAgentActivityQuery,
+    ListContractsQuery,
+    ReviewAgentKycBody,
+    SearchAgentsQuery,
+    SetAgentStatusBody,
+    SetThresholdBody,
+    SetTrackingBody,
+    TransferAgentBody,
+} from '../validators/agent.validator';
+
+/**
+ * `/api/v1/agents` — delivery-agent administration.
+ *
+ * PHASE-0 called the legacy agent surface "the strongest in the codebase" — eleven
+ * endpoints, reason-required on every negative action — with one hole: there was no LIST.
+ * `GET /api/admin/agents/:agentId` existed and `GET /api/admin/agents` did not, so an
+ * administrator could not find an agent they did not already have the id of.
+ *
+ * ── The four state axes stay four ─────────────────────────────────────────────
+ * `status` (may this account work at all), `availability` (does the agent want work now),
+ * `working_state` (how loaded are they), `tracking.allowed` (may they be tracked) — plus
+ * `kyc.status` and `platform_ban`. The agent model keeps them apart because collapsing any
+ * two makes "is he offline, or just full?" unanswerable, and this surface preserves that:
+ * six independent filters, six independent fields on the DTO, six separate writes.
+ *
+ * A dashboard showing "suspended" must therefore render FOUR independent flags —
+ * `users.status` (the account, which blocks authentication outright and does not cascade),
+ * `status` here, `platform_ban.banned`, and each contract's own status. They mean different
+ * things and reinstating one restores nothing about the others.
+ *
+ * ── What this surface deliberately does NOT offer ─────────────────────────────
+ *  - **A live position.** See the tracking block on the DTO below.
+ *  - **Editing contract terms.** A live contract's terms change by proposal between the
+ *    two parties, never by edit — jovi-mall answers 409 to an edit — and an administrator
+ *    imposing a fee split neither party proposed would bind an agent to a number nobody
+ *    agreed. `transfer` is the one contract-shaped verb here, and it moves a relationship
+ *    rather than rewriting one.
+ *  - **Creating an agent.** They sign up; an agent is a platform identity, not an
+ *    agency-owned record.
+ */
+
+const agents = new AgentReadRepository();
+const contracts = new ContractReadRepository();
+const contractEvents = new ContractEventReadRepository();
+const audit = new AuditRepository();
+
+interface AgentDto {
+    id: string;
+    userId: string;
+    name: string | null;
+    email: string | null;
+    phone: string | null;
+    /** An opaque id — this service resolves no file URLs (ADR-009 D-6). */
+    avatarFileId: string | null;
+    status: string;
+    statusReason: string | null;
+    kycStatus: string | null;
+    banned: boolean;
+    onboardingComplete: boolean;
+    /** The operational block — the answer to "can this agent take another job?" */
+    operational: {
+        availability: string | null;
+        availabilityChangedAt: string | null;
+        workingState: string | null;
+        /**
+         * `capacity.active_shipment_count`, NEVER `working_state.active_shipment_count`.
+         * The first is authoritative — it is what the accept path compare-and-sets on —
+         * while the second is a recomputed input to the label beside it and can lag.
+         */
+        activeShipments: number;
+        maxActiveShipments: number;
+    };
+    trackingAllowed: boolean;
+    trustScore: number | null;
+    createdAt: string;
+    updatedAt: string;
+}
+
+function toIso(value: Date | null | undefined): string | null {
+    if (!value) return null;
+    return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+/** Named-field mapping, not a spread — the second lock after the projection. */
+function toAgentDto(agent: AgentReadModel): AgentDto {
+    return {
+        id: agent._id.toString(),
+        userId: agent.user_id?.toString() ?? '',
+        name: agent.name ?? null,
+        email: agent.email ?? null,
+        phone: agent.phone ?? null,
+        avatarFileId: agent.avatar_file_id?.toString() ?? null,
+        status: agent.status,
+        statusReason: agent.status_reason ?? null,
+        kycStatus: agent.kyc?.status ?? null,
+        banned: agent.platform_ban?.banned === true,
+        // `0` is the COMPLETED sentinel, not "nothing done".
+        onboardingComplete: agent.onboarding_step === 0,
+        operational: {
+            availability: agent.availability?.state ?? null,
+            availabilityChangedAt: toIso(agent.availability?.changed_at),
+            workingState: agent.working_state?.state ?? null,
+            activeShipments: agent.capacity?.active_shipment_count ?? 0,
+            maxActiveShipments: agent.capacity?.max_active_shipments ?? 0,
+        },
+        trackingAllowed: agent.tracking?.allowed === true,
+        trustScore: agent.cod?.trust_score ?? null,
+        createdAt: toIso(agent.created_at) ?? String(agent.created_at),
+        updatedAt: toIso(agent.updated_at) ?? String(agent.updated_at),
+    };
+}
+
+/**
+ * How long a reported tracking state may be before it stops meaning anything.
+ *
+ * A local constant rather than a read of jovi-mall's `AGENT_CONFIG`: this is a *display*
+ * threshold for a mirror this service already treats as untrustworthy, not the dispatch
+ * rule. The dispatch rule stays where it is, and is reachable through the delegated
+ * `tracking-policy` read for anyone who needs the real answer.
+ */
+const TRACKING_STATE_STALE_AFTER_MS = 2 * 60 * 1000;
+
+function toAgentDetailDto(agent: AgentReadModel) {
+    const kyc = agent.kyc ?? {};
+    const ban = agent.platform_ban ?? {};
+    const tracking = agent.tracking ?? {};
+    const lastKnown = agent.last_known_tracking_state ?? {};
+    const reportedAt = lastKnown.last_reported_at ? new Date(lastKnown.last_reported_at) : null;
+
+    return {
+        ...toAgentDto(agent),
+        emailVerified: agent.email_verified === true,
+        phoneVerified: agent.phone_verified === true,
+        vehicle: agent.vehicle_info ?? null,
+        homeBase: {
+            label: agent.home_base?.label ?? null,
+            serviceRadiusKm: agent.home_base?.service_radius_km ?? null,
+            // `home_base.location` is NOT here and is not projected. It is a 2dsphere point
+            // on a person's residence; the label answers the operational question.
+        },
+        kyc: {
+            status: kyc.status ?? null,
+            reference: kyc.reference ?? null,
+            rejectionReason: kyc.rejection_reason ?? null,
+            verifiedAt: toIso(kyc.verified_at),
+            // Present only while verified — a rejected agent carrying a stale approver
+            // would read as approved on any screen rendering the block without checking.
+            verifiedBy:
+                kyc.status === 'verified'
+                    ? {
+                          id: kyc.verified_by_user_id?.toString() ?? null,
+                          source: kyc.verified_by_source ?? 'platform',
+                          name: kyc.verified_by_name ?? null,
+                      }
+                    : null,
+        },
+        ban: {
+            banned: ban.banned === true,
+            reason: ban.reason ?? null,
+            bannedAt: toIso(ban.banned_at),
+            by:
+                ban.banned === true
+                    ? {
+                          id: ban.banned_by_user_id?.toString() ?? null,
+                          source: ban.banned_by_source ?? 'platform',
+                          name: ban.banned_by_name ?? null,
+                      }
+                    : null,
+        },
+        /**
+         * ── The tracking block, and the one field in it to be careful with ────
+         *
+         * `lastKnown.position` is a **business mirror, stale by construction**. jovi-mall
+         * says so in two files: it is written by geo-tracker's best-effort notifier, no
+         * assignment rule reads it, and serving it as a live position is a bug.
+         *
+         * It is here for parity — jovi-mall's own admin detail already returns it, so
+         * dropping it would be a silent break somebody re-adds as a missing-field report —
+         * and it ships with `isStale` computed on read so the wire says what it is. A
+         * dashboard must render it as "last seen", never as a live marker on a map: the
+         * marker would stop moving and nobody would be told.
+         *
+         * The live position lives in geo-tracker, behind Tracking Allow, and this service
+         * has **no door to it**. Every geo-tracker read requires a real jovi-mall user JWT
+         * and resolves per-agent visibility by looking that user up in `users` — and a
+         * wi-admin administrator has no `users` row, deliberately (ADR-004 D-1). Building
+         * that door means either minting platform users for administrators or adding a
+         * service-caller identity geo-tracker does not have. Both are out of scope and
+         * neither is a small decision.
+         */
+        tracking: {
+            allowed: tracking.allowed === true,
+            reason: tracking.reason ?? null,
+            changedAt: toIso(tracking.changed_at),
+            changedBy: {
+                id: tracking.changed_by_user_id?.toString() ?? null,
+                role: tracking.changed_by_role ?? null,
+                source: tracking.changed_by_source ?? 'platform',
+                name: tracking.changed_by_name ?? null,
+            },
+            lastKnown: {
+                status: lastKnown.status ?? 'unknown',
+                position: lastKnown.last_position ?? null,
+                reportedAt: toIso(lastKnown.last_reported_at),
+                source: lastKnown.source ?? null,
+                isStale:
+                    reportedAt === null
+                    || Date.now() - reportedAt.getTime() > TRACKING_STATE_STALE_AFTER_MS,
+            },
+        },
+        device: agent.device ?? null,
+        capacity: {
+            max: agent.capacity?.max_active_shipments ?? 0,
+            active: agent.capacity?.active_shipment_count ?? 0,
+            reconciledAt: toIso(agent.capacity?.reconciled_at),
+        },
+        cod: {
+            trustScore: agent.cod?.trust_score ?? null,
+            maxThreshold: agent.cod?.max_threshold ?? null,
+        },
+        trustSignals: agent.trust_signals ?? null,
+        settings: {
+            autoAcceptAssignments: agent.settings?.auto_accept_assignments === true,
+            navigationApp: agent.preferences?.navigation_app ?? null,
+        },
+        timezone: agent.timezone ?? null,
+        preferredLanguage: agent.preferred_language ?? null,
+    };
+}
+
+/** The fields a write can change, as the audit row's `before`. */
+function toAuditState(agent: AgentReadModel): Record<string, unknown> {
+    return {
+        name: agent.name ?? null,
+        status: agent.status,
+        statusReason: agent.status_reason ?? null,
+        kycStatus: agent.kyc?.status ?? null,
+        banned: agent.platform_ban?.banned === true,
+        trackingAllowed: agent.tracking?.allowed === true,
+        codMaxThreshold: agent.cod?.max_threshold ?? null,
+    };
+}
+
+async function loadOr404(agentId: string): Promise<AgentReadModel> {
+    const agent = await agents.findById(agentId);
+    if (!agent) throw createAppError(ERROR_CODES.NOT_FOUND, 404, 'Delivery agent not found');
+    return agent;
+}
+
+export class AgentController {
+    /**
+     * GET /api/v1/agents — the directory that did not exist.
+     *
+     * Six independent filters, one per state axis, because the questions an administrator
+     * asks are conjunctions across them: "who is active but unverified", "who is banned and
+     * still marked available", "who has tracking off". A single collapsed `state` filter
+     * could express none of those.
+     */
+    static search = asyncHandler(async (req: Request, res: Response) => {
+        const query = req.query as unknown as SearchAgentsQuery;
+
+        const page = await agents.search({
+            search: query.search,
+            status: query.status,
+            kycStatus: query.kycStatus,
+            availability: query.availability,
+            workingState: query.workingState,
+            banned: query.banned,
+            trackingAllowed: query.trackingAllowed,
+            from: query.from,
+            to: query.to,
+            page: query.page,
+            limit: query.limit,
+            sort: query.sort,
+        });
+
+        sendPaginated(res, page.items.map(toAgentDto), toPageMeta(page.total, page.page, page.limit));
+    });
+
+    /** GET /api/v1/agents/:agentId */
+    static get = asyncHandler(async (req: Request, res: Response) => {
+        sendSuccess(res, toAgentDetailDto(await loadOr404(req.params.agentId)));
+    });
+
+    /**
+     * GET /api/v1/agents/:agentId/contracts — every agency this agent works with.
+     *
+     * Every status by default, terminal rows included. jovi-mall's own admin view keeps
+     * this unpaginated for the same reason it matters here: an investigation must not lose
+     * rows to a page boundary. This one paginates because ADR-005 D-10 admits no unpaged
+     * list, and the default page of 20 exceeds any real agent's agency count.
+     */
+    static contracts = asyncHandler(async (req: Request, res: Response) => {
+        const query = req.query as unknown as ListContractsQuery;
+        await loadOr404(req.params.agentId);
+
+        const page = await contracts.listForAgent(req.params.agentId, {
+            status: query.status,
+            primaryOnly: query.primaryOnly,
+            page: query.page,
+            limit: query.limit,
+            sort: query.sort,
+        });
+
+        sendPaginated(res, page.items.map(toAgentContractDto), toPageMeta(page.total, page.page, page.limit));
+    });
+
+    /**
+     * GET /api/v1/agents/:agentId/contract-history — what everyone did to this agent's
+     * relationships. The sibling `/activity` is what administrators did. Two feeds, two
+     * databases, two permissions — see the repository header.
+     */
+    static contractHistory = asyncHandler(async (req: Request, res: Response) => {
+        const query = req.query as unknown as ListContractEventsQuery;
+        await loadOr404(req.params.agentId);
+
+        const page = await contractEvents.list(
+            { agentId: req.params.agentId },
+            {
+                type: query.type,
+                actorRole: query.actorRole,
+                from: query.from,
+                to: query.to,
+                page: query.page,
+                limit: query.limit,
+                sort: query.sort,
+            },
+        );
+
+        sendPaginated(res, page.items.map(toContractEventDto), toPageMeta(page.total, page.page, page.limit));
+    });
+
+    /**
+     * GET /api/v1/agents/:agentId/activity — the audit trail, filtered to this agent.
+     *
+     * Not their platform activity — their shipments, their COD collections, their
+     * earnings. Those live in other domains behind other permissions, and assembling them
+     * here would let `agents.read` alone reach data those permissions exist to gate.
+     */
+    static activity = asyncHandler(async (req: Request, res: Response) => {
+        const identity = requireAdminIdentity(req);
+        const query = req.query as unknown as ListAgentActivityQuery;
+
+        await loadOr404(req.params.agentId);
+
+        const page = await audit.search(
+            {
+                page: query.page,
+                limit: query.limit,
+                sort: query.sort,
+                action: query.action,
+                status: query.status,
+                from: query.from,
+                to: query.to,
+                targetType: 'agent',
+                targetId: req.params.agentId,
+            } as ListAuditQuery,
+            identity,
+        );
+
+        sendPaginated(res, page.items.map(toAuditEntryDto), page.meta);
+    });
+
+    /**
+     * GET /api/v1/agents/:agentId/tracking-policy — jovi-mall's own verdict.
+     *
+     * Delegated, not recomputed: geo-tracker consumes this exact function, and a second
+     * implementation here would be a second tracking policy. It answers `trackingAllowed`
+     * plus a `denyReason` — `tracking_disabled`, `agent_not_active`, or
+     * `no_approved_agency`, the last because tracking exists to serve a delivery
+     * relationship and nobody is entitled to watch an unaffiliated person move around.
+     */
+    static trackingPolicy = asyncHandler(async (req: Request, res: Response) => {
+        await loadOr404(req.params.agentId);
+        sendSuccess(res, await gateway.trackingPolicy(req.params.agentId, actorContextOf(req)));
+    });
+
+    /** GET /api/v1/agents/:agentId/cod-allocation — pool, per-contract slices, headroom. */
+    static codAllocation = asyncHandler(async (req: Request, res: Response) => {
+        await loadOr404(req.params.agentId);
+        sendSuccess(res, await gateway.codAllocation(req.params.agentId, actorContextOf(req)));
+    });
+
+    /**
+     * GET /api/v1/agents/:agentId/eligibility?agencyId=… — could this agency dispatch to
+     * this agent right now?
+     *
+     * `agencyId` is required, not optional. Eligibility is pairwise: the rule set includes
+     * holding an approved contract with the dispatching agency, so there is no
+     * agency-free answer to give. It reports EVERY failed rule at once — the property a
+     * local reimplementation loses first, and the reason this read is delegated.
+     */
+    static eligibility = asyncHandler(async (req: Request, res: Response) => {
+        const query = req.query as unknown as EligibilityQuery;
+        await loadOr404(req.params.agentId);
+        sendSuccess(
+            res,
+            await gateway.eligibility(req.params.agentId, query.agencyId, actorContextOf(req)),
+        );
+    });
+
+    /**
+     * PUT /api/v1/agents/:agentId/status
+     *
+     * A `PUT` on one single-valued sub-resource, matching `/administrators/:id/tier`.
+     * Splitting it into four imperatives would be worse than one body with a conditional
+     * reason: `pending_verification` and `inactive` are not verbs anybody says.
+     *
+     * Memberships are left intact, deliberately — reinstatement restores them.
+     */
+    static setStatus = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as SetAgentStatusBody;
+        const before = await loadOr404(req.params.agentId);
+
+        const updated = await gateway.setStatus(
+            req.params.agentId,
+            { status: body.status, reason: body.reason },
+            toAuditState(before),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, updated, { message: `Agent status set to ${body.status}` });
+    });
+
+    /**
+     * PUT /api/v1/agents/:agentId/kyc — the write that lets an agent work.
+     *
+     * Eligibility passes only on `verified`, so this is the gate, not a label. Moving an
+     * agent OFF `verified` makes them undispatchable immediately; it does not touch their
+     * contracts, and in-flight shipments they already hold are unaffected.
+     */
+    static reviewKyc = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as ReviewAgentKycBody;
+        const before = await loadOr404(req.params.agentId);
+
+        const updated = await gateway.reviewKyc(
+            req.params.agentId,
+            { status: body.status, reference: body.reference, rejectionReason: body.rejectionReason },
+            toAuditState(before),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, updated, { message: `Identity documents marked ${body.status}` });
+    });
+
+    /**
+     * PUT /api/v1/agents/:agentId/tracking
+     *
+     * The message says exactly what happens, because this endpoint used to promise more
+     * than it delivered. Since Phase 9 the decision IS pushed to geo-tracker — the live
+     * position is suppressed and every open session moves to `tracking_disabled` — but a
+     * watcher is still not revoked: `visible-agents` derives visibility from shipments and
+     * never consults this flag, so an agency watching stays subscribed and receives
+     * nothing. Both halves are stated rather than the flattering one.
+     */
+    static setTracking = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as SetTrackingBody;
+        const before = await loadOr404(req.params.agentId);
+
+        const updated = await gateway.setTracking(
+            req.params.agentId,
+            { allowed: body.allowed, reason: body.reason },
+            toAuditState(before),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, updated, {
+            message: body.allowed
+                ? 'Tracking enabled — this agent can be dispatched and located again'
+                : 'Tracking disabled — this agent will not be dispatched, and their live '
+                  + 'position stops being recorded. Anyone already watching keeps their '
+                  + 'subscription and simply receives nothing.',
+        });
+    });
+
+    /** PUT /api/v1/agents/:agentId/cod-threshold — the whole pool every contract slices. */
+    static setCodThreshold = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as SetThresholdBody;
+        const before = await loadOr404(req.params.agentId);
+
+        const updated = await gateway.setCodThreshold(
+            req.params.agentId,
+            body.maxThreshold,
+            toAuditState(before),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, updated, { message: 'COD threshold updated' });
+    });
+
+    /**
+     * POST /api/v1/agents/:agentId/ban
+     *
+     * An override consulted by every gate, deliberately NOT a cascade over contracts:
+     * flipping each to paused would be lossy, since un-banning could not tell which were
+     * already paused. One flag suppresses every contract at once and lifting it restores
+     * exactly the prior state.
+     *
+     * The consequence worth knowing: a contract-level `reactivate` while the ban stands
+     * WRITES `active`, and the agent stays unusable because every gate still refuses.
+     */
+    static ban = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as BanAgentBody;
+        const before = await loadOr404(req.params.agentId);
+
+        const updated = await gateway.ban(
+            req.params.agentId,
+            body.reason,
+            toAuditState(before),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, updated, { message: 'Agent banned from the platform' });
+    });
+
+    /**
+     * POST /api/v1/agents/:agentId/unban
+     *
+     * Its own route and its own audit action although it shares the permission. Lifting a
+     * ban CLEARS the reason, the timestamp and the actor stamp off the agent row, so the
+     * audit row is the only surviving record that the ban ever happened.
+     */
+    static unban = asyncHandler(async (req: Request, res: Response) => {
+        const before = await loadOr404(req.params.agentId);
+
+        const updated = await gateway.unban(
+            req.params.agentId,
+            toAuditState(before),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, updated, { message: 'Platform ban lifted' });
+    });
+
+    /**
+     * POST /api/v1/agents/transfer — move an agent between agencies.
+     *
+     * Admin-only, and the reason is worth restating on the surface that exposes it: an
+     * agency must not be able to pull an agent off a rival's roster.
+     */
+    static transfer = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as TransferAgentBody;
+        const before = await loadOr404(body.agentId);
+
+        const result = await gateway.transfer(
+            {
+                agentId: body.agentId,
+                fromAgencyId: body.fromAgencyId,
+                toAgencyId: body.toAgencyId,
+                reason: body.reason,
+            },
+            toAuditState(before),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, result, { message: 'Agent transferred' });
+    });
+}
