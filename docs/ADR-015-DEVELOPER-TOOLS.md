@@ -401,7 +401,8 @@ its tick site. `GET /dev-tools/workers` is frozen in *field set*, not length.
   now has a **new participant** — the log sink's in-flight writes — which strengthens the case for
   doing it properly rather than piecemeal. The one piece taken here is the sink's own 1-second
   best-effort flush on `SIGTERM`, explicitly labelled as *not* the graceful shutdown.
-- **The cron overlap guard.** ADR-014's decision stands.
+- ~~**The cron overlap guard.** ADR-014's decision stands.~~ Superseded: it became audit finding
+  F-19 and was fixed in `core/jobs/worker-lock.ts`. See ADR-014 D-8-A.
 - **A single-key cache value read.** See D-6.
 
 ## Named debts

@@ -327,10 +327,72 @@ phase — safe precisely because of that deploy order, and it is the endpoint an
 reads. `DevToolsController.listWorkers` still calls the old path, so it keeps a consumer;
 deprecating it is a separate decision and is not made here.
 
-> ⚠ **Newly visible, deliberately not fixed:** the seven cron workers have **no overlap guard at
-> all** — `cron.schedule` fires `void this.runSweep()` and a slow sweep can overlap its own next
-> tick. `executing` makes the condition observable. Making it impossible changes scheduling on seven
-> live sweeps and is its own decision with its own blast radius.
+> ⚠ **Newly visible, deliberately not fixed *at the time*:** the seven cron workers have **no
+> overlap guard at all** — `cron.schedule` fires `void this.runSweep()` and a slow sweep can overlap
+> its own next tick. `executing` makes the condition observable. Making it impossible changes
+> scheduling on seven live sweeps and is its own decision with its own blast radius.
+>
+> **RESOLVED — this became audit finding F-19 and is now fixed** (`src/core/jobs/worker-lock.ts`).
+> Two corrections to the paragraph above, worth keeping because they are what the delay cost:
+> it was **nine** workers, not seven — `analytics-aggregation` and both `inbound-calendar-sync`
+> loops had the identical shape and were simply not cron, and the count above was written before
+> the first of those became an `ObservableWorker` at all. And "changes scheduling behaviour" turned
+> out to overstate it: the guard refuses a pass rather than queuing one, so a sweep that never
+> overlaps sees no change whatsoever. See D-8-A.
+
+---
+
+## D-8-A · The overlap guard, paid (audit finding F-19)
+
+Added after D-8, which deliberately deferred it. `src/core/jobs/worker-lock.ts`, one mechanism,
+every worker's entry point through it. Five things about it are decisions rather than mechanics.
+
+**It is two layers, and only one of them can fail.** An in-process `Set` is unconditional, needs
+nothing, and is what actually closes the defect on a single-instance deploy — which is every
+deploy today. A Redis key on `WORKER_LOCK_DB` (`SET NX PX`) is what makes running more than one
+instance safe. Building only the second would have made a Redis outage a total worker outage;
+building only the first would have left horizontal scaling blocked, which was half of what F-19
+cost.
+
+**The Redis layer fails OPEN, and that is not negotiable.** Failing closed would silently stop
+every sweep on the platform — including `EarningsReleaseWorker` and `CodDepositDeadlineWorker`,
+the two that move money — with no symptom other than work quietly not happening. Failing open
+degrades to layer 1. Same argument as `FailOpenStore` in the rate limiter: a cache that is down
+must not become a single point of failure for the thing it was added to protect.
+
+**"Fails open" required a timeout, and that was found by testing rather than by reasoning.** A
+dead Redis host does not reject promptly — node-redis retries the initial connect on a backoff, so
+`getRedisClient` sits unresolved for minutes. The first implementation's `catch` therefore never
+ran: pointing `REDIS_URL` at a closed port parked the sweep on connect forever. Every Redis call
+in that file is now bounded at 2s, and a timeout is treated as *don't know* (fail open), never as
+*held* (fail closed). Without that bound the fix was worse than the defect.
+
+**The guard is INSIDE the sweep; the maintenance guard stays at the tick site.** D-4 lets an
+operator run a worker during a maintenance window on purpose. Overlap is not the same kind of
+rule: maintenance is a policy an operator is entitled to override, overlap is a correctness
+constraint, and an operator's intent does not make two concurrent writes to the same earnings row
+safe. So `POST /dev-tools/workers/:key/run` can beat the maintenance pause and cannot beat this
+one — it returns `200 { ran: false }` instead.
+
+**A refused pass is reported, never swallowed.** It counts as
+`worker_runs_total{outcome="skipped"}` and deliberately does not advance
+`worker_last_success_timestamp_seconds`, so a worker wedged behind an orphaned lock still trips
+D-6's staleness alert. A guard that made its own failure invisible would trade one silent problem
+for another. `executing` keeps its old meaning exactly — "a pass is in flight *here*" — and is not
+re-derived from the lock, because "idle here but refused because another instance holds it" is a
+state an operator needs to be able to see.
+
+Two consequences to know before touching it. `WORKER_LOCK_DB` is the only **destructive** cache
+database that permits a whole-database flush: an operator facing an orphaned lock does not know
+which worker owns it — that is the symptom — so a prefix-only rule would put the remedy out of
+reach. And `WORKER_LOCK_REDIS=false` disables the cross-instance layer alone, leaving the
+in-process floor intact, which is both a real operational lever and what lets `test:system` drive
+the guard with no Redis to talk to.
+
+`test:system` covers it two ways: behaviourally (concurrency, release-on-throw, per-key isolation,
+value pass-through) and by **source scan** — every `*.worker.ts` plus the scheduler must contain a
+`withWorkerLock(` call. The scan is the part that lasts. F-19's own miscount came from a docstring
+written before two more workers existed; a list maintained by hand would make that mistake again.
 
 ---
 
@@ -373,12 +435,16 @@ product decision outside this phase; whether to *say so* was not.
 ## Named debts
 
 - **`ADR-013-NOTIFICATIONS.md` is owed** by Phase 13 and referenced from four source files.
-- The seven cron workers' missing overlap guard (D-8).
+- ~~The seven cron workers' missing overlap guard (D-8).~~ **Paid.** It was nine workers, not
+  seven; `core/jobs/worker-lock.ts` now guards all thirteen. See D-8-A.
 - **`sent` tracking-outbox rows are never pruned**, so every scan over that collection gets slower
   with age.
 - **`closeRedisClients()` has zero call sites** — there is no graceful-shutdown path in jovi-mall.
-- The manual worker-trigger claim is **process-local**; a real cross-instance lock needs Redis
-  (`SET NX` with a TTL and a fencing token).
+- ~~The manual worker-trigger claim is **process-local**; a real cross-instance lock needs Redis
+  (`SET NX` with a TTL and a fencing token).~~ **Paid**, minus the fencing token — nothing
+  downstream validates one, so it would have been ceremony. The claim stays process-local on
+  purpose (it answers "who pressed the button here"); the *permission* moved to the Redis lock,
+  and a trigger it refuses returns `ran: false`.
 
 ## Deployment order
 

@@ -105,6 +105,17 @@ export async function listWorkers(context: ActorContext): Promise<WorkerListResu
 export interface WorkerRunResult {
     worker: string;
     durationMs: number;
+    /**
+     * Did the sweep actually run, or did jovi-mall's overlap lock refuse it (F-19)?
+     *
+     * A refused trigger is a `200` — nothing failed, the work simply belongs to a pass already in
+     * flight here or on another instance — so without this an operator reads the success `note`
+     * and believes a sweep ran that did not.
+     *
+     * **Optional, and absence means `true`.** A jovi-mall predating the lock always ran, so
+     * `result.ran !== false` is the correct reading and this is safe in either deploy order.
+     */
+    ran?: boolean;
     processed?: number;
     note?: string;
 }
