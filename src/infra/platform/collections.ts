@@ -124,7 +124,11 @@ export const COLLECTIONS = Object.freeze({
 
   // Integrations
   CONNECTED_CALENDAR_ACCOUNT: 'connected_calendar_accounts',
-  TELEGRAM_LINK: 'telegram_links',
+  // `telegram_links` was declared here and queried by nothing. jovi-mall dropped
+  // the collection when messaging connections were unified onto
+  // `channel_connections`; wi-admin still has no reason to read either, so the
+  // name is simply gone rather than updated.
+  CHANNEL_CONNECTION: 'channel_connections',
 
   // Billing (pricing plans & credit wallet)
   PRICING_PLAN: 'pricing_plans',
