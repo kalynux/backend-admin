@@ -280,6 +280,39 @@ export async function rejectKyc(
  * `audit.catalog.ts`. A `product` target type would split the vendor's activity feed and
  * hide exactly the row somebody opening that vendor is looking for.
  */
+/**
+ * One product, in full — the ONE delegated read on this gateway.
+ *
+ * ── Why it is not a direct query like every other vendor read ────────────────
+ * Two things in the payload can only be built where they live. `media` needs
+ * `storage.getPublicUrl(key)`, and which provider that is comes from `STORAGE_PROVIDER` —
+ * this service has no storage layer and must not grow one (ADR-009 D-6), because a second
+ * copy of that configuration in a second deployment is the drift the split exists to
+ * prevent. `storage` needs `quoteStorageFee`, and a copy of that arithmetic here would be
+ * a second opinion about what a vendor owes their agency.
+ *
+ * NOT audited. It is a read, and ADR-006 D-5 audits exactly one of those on this service —
+ * the payout destination, where the disclosure IS the action. A product listing is not.
+ *
+ * The payload is passed through untyped on purpose: it is jovi-mall's own admin DTO, it is
+ * documented in `vendors.md` against that source, and re-declaring twenty fields here would
+ * be a second definition that drifts silently. What must NOT happen is a mapper appearing
+ * in this file — the shape belongs to the service that computes it.
+ */
+export async function product(
+    vendorId: string,
+    productId: string,
+    context: ActorContext,
+): Promise<unknown> {
+    const result = await platformRequest<unknown>({
+        method: 'GET',
+        path: `/vendors/${vendorId}/products/${productId}`,
+        actor: context.actor,
+        requestId: context.requestId,
+    });
+    return result.data;
+}
+
 export async function suspendProduct(
     vendorId: string,
     productId: string,

@@ -42,6 +42,15 @@ export const SubscriptionOwnerParamSchema = z.object({
     ownerId: objectId,
 });
 
+/**
+ * One subscription by its own id.
+ *
+ * No collision with the pair above: `/subscriptions/:subscriptionId` is one segment and
+ * `/subscriptions/:ownerType/:ownerId` is two, so Express separates them structurally
+ * rather than by declaration order.
+ */
+export const SubscriptionIdParamSchema = idParam('subscriptionId', 'subscription');
+
 // ─────────────────────────────────────────────────────────────────────────────
 // The plan catalog
 // ─────────────────────────────────────────────────────────────────────────────

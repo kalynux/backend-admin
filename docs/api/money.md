@@ -136,6 +136,70 @@ Every owner's balances, ranked by what is withdrawable.
 | `ownerType` | string, 1–40 |
 | `page`, `limit` | integer |
 
+**No `search` either, and that is a recorded decision rather than an omission.** The
+platform pages this by `available_balance` over rows this service never sees; a search term
+would have to be pushed through the delegated call and matched against a name that lives in
+a third collection (`stores`, `agency_magazins`, `delivery_agents`), which is the join the
+`ownerName` below performs *after* paging. Searching before paging would mean joining
+before paging, which is what makes the agency directory the one list on this service that
+cannot use an index for its sort. An operator with a specific owner in mind should go
+through that owner's directory and follow the link to
+`/accounts/:ownerType/:ownerId`, which is the complete, server-side answer for one party.
+
+### Response `200`
+
+```jsonc
+{
+  "success": true,
+  "data": [
+    {
+      "owner": { "type": "vendor", "id": "665a…", "name": "Douala Fresh Market" },
+      "pending": 120000,
+      "available": 480000,
+      "reserve": 25000,
+      "requested": 0,
+      "currency": "XAF",
+      "updatedAt": "2026-08-16T09:12:04.000Z"
+    }
+  ],
+  "meta": {
+    "total": 431, "page": 1, "limit": 20, "pages": 22,
+    "totals": [
+      { "currency": "XAF", "pending": 4120000, "available": 38900000, "reserve": 250000, "requested": 1200000 }
+    ]
+  }
+}
+```
+
+| Field | Notes |
+|---|---|
+| `owner.name` | The **business** name where there is one — a Store, a Magazin — the contact name where there is not. **`null`, never `""`.** The same rule `billing.md` documents for `owner.name` on a subscription |
+| `owner.id` | `null` only for the platform singleton, which this list excludes — so in practice always present here |
+| `pending` · `available` · `reserve` · `requested` | Plain numbers in `currency` |
+| `updatedAt` | ISO instant, `null` if the platform reports none |
+
+> ### ⚠️ Never sum the four balances together
+>
+> They are stages of one pipeline, not four pots: `requested` is a claim already staked
+> against `available`, so a per-owner total double-counts. `accounts.md` states the rule
+> ("no grand total exists, at any level") and it still holds.
+
+### `meta.totals` — the other axis, and the one only the platform can answer
+
+One field, summed **across owners**, per currency. Same unit, same direction
+(`owed_to_owner`), no cross-field addition.
+
+- **An array**, one entry per currency present in the result set. A single object would
+  force a currency choice the data does not support, and a client seeing one would
+  reasonably assume every row shared it.
+- **It respects `?ownerType=`**, so it can never disagree with the table above it — the
+  totals and the page are computed over the same filter, in the same service, by
+  construction.
+- `[]` when the filtered set is empty.
+
+It is computed by jovi-mall rather than by this service or the client for one reason: it is
+the only party that can see past page 1.
+
 ---
 
 ## `GET /money/earnings/allocations`

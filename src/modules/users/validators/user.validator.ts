@@ -103,6 +103,32 @@ export const SuspendUserSchema = z.object({
 });
 
 /**
+ * Sending somebody a way back into their own account.
+ *
+ * ── `channel` is a pinned enum ───────────────────────────────────────────────
+ * An unrecognised value is a 400, never a silent fallback to email. A fallback would send
+ * a credential to an address the operator did not choose, on a request they believed had
+ * failed — which is the one outcome worse than a refusal here.
+ *
+ * ── There is deliberately no destination field ───────────────────────────────
+ * The address is read from the party's own record. An operator who could type one could
+ * mail a working credential for somebody else's account to themselves, and no permission
+ * short of withholding the endpoint entirely would stop it. `.strict()` makes an attempt
+ * to send one a 400 rather than a silently ignored key.
+ *
+ * ── `reason` is required ─────────────────────────────────────────────────────
+ * This is an administrator acting on somebody else's ability to sign in, without their
+ * knowledge and without their asking. The audit row needs a why, and the person on the
+ * other end may later need to be told one.
+ */
+export const SendCredentialSchema = z
+    .object({
+        channel: z.enum(['email', 'whatsapp', 'telegram']),
+        reason: reasonText('A reason is required to send someone a credential'),
+    })
+    .strict();
+
+/**
  * The activity feed's query — the audit list, narrowed to one user.
  *
  * A deliberate subset of `ListAuditQuerySchema`: no `targetType`/`targetId` (the path
@@ -135,4 +161,5 @@ export const ListUserActivityQuerySchema = listQuery(USER_ACTIVITY_SORT, '-occur
 export type SearchUsersQuery = z.infer<typeof SearchUsersQuerySchema>;
 export type UpdateUserBody = z.infer<typeof UpdateUserSchema>;
 export type SuspendUserBody = z.infer<typeof SuspendUserSchema>;
+export type SendCredentialBody = z.infer<typeof SendCredentialSchema>;
 export type ListUserActivityQuery = z.infer<typeof ListUserActivityQuerySchema>;

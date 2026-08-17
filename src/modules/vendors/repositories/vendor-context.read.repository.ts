@@ -126,6 +126,28 @@ export class VendorConnectionReadRepository extends PlatformReadRepository<Conne
             return counts;
         }, { ...empty });
     }
+
+    /**
+     * How many of an AGENCY's connections are awaiting re-approval.
+     *
+     * The mirror of `countByStatus` above, from the other side. It exists because
+     * `policyVersion` on the agency detail is the field with the largest blast radius on
+     * that screen — bumping it pauses every vendor connection — and there was no way to
+     * see how many were sitting in that state as a result. The vendor side has had
+     * `counts.agencyConnections.pausedReapproval` all along.
+     *
+     * One count rather than the full breakdown, because one question is being asked. A
+     * `$countDocuments` on `{agency_id, status}` rather than a `$group`: the agency detail
+     * is a single-document read and does not need the other six numbers.
+     */
+    async countPausedReapprovalForAgency(agencyId: string): Promise<number> {
+        if (!Types.ObjectId.isValid(agencyId)) return 0;
+
+        return this.countBy({
+            agency_id: new ObjectId(agencyId),
+            status: 'paused_reapproval',
+        });
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -203,14 +203,67 @@ export async function platformEarnings(context: ActorContext): Promise<unknown> 
 export async function earningsAccounts(
     query: { ownerType?: string; page: number; limit: number },
     context: ActorContext,
-): Promise<PlatformPage<unknown>> {
-    return toPage(await platformRequest<unknown[]>({
+): Promise<EarningsAccountPage> {
+    const result = await platformRequest<PlatformEarningsAccount[]>({
         method: 'GET',
         path: '/earnings/accounts',
         query: { ownerType: query.ownerType, page: query.page, limit: query.limit },
         actor: context.actor,
         requestId: context.requestId,
-    }));
+    });
+
+    const page = toPage<PlatformEarningsAccount>(result);
+    const meta = result.meta as { totals?: EarningsAccountTotals[] } | undefined;
+
+    return {
+        ...page,
+        // `?? []` rather than `?? null`: a result set with no rows honestly has no
+        // currencies in it, and an empty array is the same shape a client renders in
+        // either case. It also keeps an older jovi-mall — one that has not shipped the
+        // totals yet — reading as "no currencies" rather than crashing a mapper.
+        totals: meta?.totals ?? [],
+    };
+}
+
+/**
+ * One row of `GET /earnings/accounts`, as jovi-mall actually serves it.
+ *
+ * Typed here rather than left as `unknown`, which is what it was: the endpoint had no
+ * response block in `money.md` and no type on this side, so the dashboard traced the shape
+ * out of `earnings-account.service.ts` and guarded every row at runtime because nothing
+ * promised it. A delegated payload nobody has typed is a payload that can change silently.
+ */
+export interface PlatformEarningsAccount {
+    ownerType: string;
+    ownerId: string | null;
+    pending: number;
+    available: number;
+    reserve: number;
+    requested: number;
+    currency: string;
+    updatedAt: string;
+}
+
+/**
+ * The four balances summed down each column, for one currency, over the WHOLE filtered
+ * result set — not the page.
+ *
+ * ⚠ There is deliberately no fifth field summing across the four. They are stages of one
+ * pipeline rather than four pots: `requested` is a claim already staked against
+ * `available`, so adding them double-counts. `accounts.md` states that rule ("no grand
+ * total exists, at any level") and it still holds — what this adds is the OTHER axis, one
+ * field across owners, which only jovi-mall can compute because only it can see past page 1.
+ */
+export interface EarningsAccountTotals {
+    currency: string;
+    pending: number;
+    available: number;
+    reserve: number;
+    requested: number;
+}
+
+export interface EarningsAccountPage extends PlatformPage<PlatformEarningsAccount> {
+    totals: EarningsAccountTotals[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

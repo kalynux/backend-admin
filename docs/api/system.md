@@ -427,6 +427,72 @@ Search the platform's logs.
 | `limit` | integer | 1–500 |
 | `before` | 24-char id | A cursor, not an offset |
 
+### Response (200)
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "sourceUsed": "ring",
+    "sourceReason": null,
+    "entries": [ /* log lines — see below */ ],
+    "nextBefore": "66a1…",
+    "meta": {
+      "persistence": { "…": "…" },
+      "ring": { "…": "…" },
+      "warning": "Log lines may contain personal data …"
+    }
+  }
+}
+```
+
+`nextBefore` is the cursor for the next page, `null` at the end. **Cursor, not offset, and
+correctly so** — the persisted collection is capped and evicts from the front, so an offset
+would yield duplicates and gaps.
+
+### The shape of a log entry
+
+A **partial** declaration. Closing the shape would defeat the point of a log; what a reader
+needs is to know which keys are guaranteed and that the rest are the writer's own context.
+
+```jsonc
+{
+  "at": "2026-08-17T09:12:04.000Z",     // always
+  "level": "error",                      // always
+  "msg": "…",                            // always
+  "requestId": "…" | null,
+  "err": { "type": "…", "message": "…", "stack": "…" },   // when the line carries an error
+  "res": { "statusCode": 500 },                            // when the line closes a request
+  "…": "any further keys the writer attached"
+}
+```
+
+| Key | Guaranteed | Notes |
+|---|---|---|
+| `at` | ✅ | ISO-8601 instant |
+| `level` | ✅ | ⚠️ **The `level` filter is at-or-above**, so `?level=warn` returns `warn`, `error` and `fatal` |
+| `msg` | ✅ | |
+| `requestId` | — | Present on request-scoped lines; correlates with the `X-Request-Id` a client sent |
+| `err` | — | `type`, `message`, `stack` |
+| `res` | — | `statusCode` |
+| anything else | — | **The writer's context.** Render it raw as text; do not assume a shape |
+
+The same posture the contract takes on unknown enum members: an unrecognised key is data, not
+an error.
+
+**Nothing is truncated server-side.** There is no `stateTruncated` equivalent here and none is
+needed — a line is stored as the writer emitted it, so a long `err.stack` arrives whole. (Audit
+rows *are* truncated, and say so with `stateTruncated`; log lines are not.)
+
+> ### ⚠️ `meta.warning` is load-bearing — render it from `meta`, not from prose
+>
+> Log lines carry personal data: an email address in an SMTP failure, a phone number in a send
+> error. The scrubber removes **credential shapes only** — tokens, keys, passwords — and makes
+> no attempt at PII.
+>
+> It stays on the **response** deliberately, so a client renders the current wording rather than
+> a copy of it that drifts. Expanding a row shows strictly more of what the warning is about.
+
 ---
 
 ## `GET /system/platform/cache/keys`

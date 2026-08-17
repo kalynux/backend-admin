@@ -230,3 +230,105 @@ function labelOf(before: UserSnapshot): string | null {
     const phone = typeof before.phone === 'string' ? before.phone : null;
     return email ?? phone;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Credential recovery
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What comes back from a send. Deliberately thin, and the omissions are the design.
+ *
+ * ⚠ **No token, no link, no unmasked destination.** An operator who could read the link
+ * could use it, which would make "help this vendor back into their shop" and "sign in as
+ * this vendor" the same button. The masked destination is enough to confirm it went to the
+ * right person; `expiresAt` is enough to tell them how long they have.
+ */
+export interface CredentialDeliveryResult {
+    kind: 'password_reset' | 'login';
+    channel: 'email' | 'whatsapp' | 'telegram';
+    /** `+2376••••4417` · `j••••t@example.com` · `@handle`. */
+    destinationMasked: string;
+    expiresAt: string;
+    sentAt: string;
+}
+
+/**
+ * Send a password-reset link over one channel.
+ *
+ * ── Why the destination is not a parameter ───────────────────────────────────
+ * It is read from the party's own record inside jovi-mall. Accepting one here would let an
+ * operator mail a working credential for somebody else's account to an address they chose,
+ * and no permission short of "may not use this endpoint" would prevent it.
+ *
+ * Delegated because the credential lives there: the token is minted by
+ * `PasswordResetService.issueResetLinkFor`, which is the same 30-minute single-use token
+ * the self-service flow uses, redeemed at the same endpoint, carrying the same
+ * `password_changed_at` stamp that evicts every live session on redemption.
+ *
+ * Refusals arrive as `PLATFORM_OPERATION_REJECTED` with `USER_CHANNEL_UNAVAILABLE` or
+ * `USER_CREDENTIAL_LINK_THROTTLED` in `details.platformCode`.
+ */
+export async function sendPasswordResetLink(
+    userId: string,
+    channel: string,
+    reason: string,
+    before: UserSnapshot,
+    context: ActorContext,
+): Promise<CredentialDeliveryResult> {
+    return auditedDelegation(
+        'users.password_reset_link.send',
+        context,
+        { id: userId, label: labelOf(before) },
+        // The reason and the channel, never the destination — the audit row records what
+        // was ASKED for, and the masked destination arrives in the outcome.
+        { channel, reason },
+        before,
+        async () => {
+            const result = await platformRequest<CredentialDeliveryResult>({
+                method: 'POST',
+                path: `/users/${userId}/password-reset-link`,
+                body: { channel },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return result.data;
+        },
+    );
+}
+
+/**
+ * Send a customer a passwordless sign-in link.
+ *
+ * ⚠ **Its own permission and its own audit action, not a variant of the reset above.** A
+ * reset link grants nothing until the person chooses a password; this one IS a session.
+ * Collapsing the two would mean a tier granted "help people back in" silently also got
+ * "sign in as a customer", with nothing in the trail to tell the two acts apart.
+ *
+ * Customers only, refused by jovi-mall with `USER_LOGIN_LINK_ROLE_UNSUPPORTED` otherwise —
+ * `MessagingLoginService` scopes every session it mints to `customer` as a literal.
+ */
+export async function sendLoginLink(
+    userId: string,
+    channel: string,
+    reason: string,
+    before: UserSnapshot,
+    context: ActorContext,
+): Promise<CredentialDeliveryResult> {
+    return auditedDelegation(
+        'users.login_link.send',
+        context,
+        { id: userId, label: labelOf(before) },
+        { channel, reason },
+        before,
+        async () => {
+            const result = await platformRequest<CredentialDeliveryResult>({
+                method: 'POST',
+                path: `/users/${userId}/login-link`,
+                body: { channel },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return result.data;
+        },
+    );
+}

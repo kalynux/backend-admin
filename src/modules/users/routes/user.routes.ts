@@ -4,6 +4,7 @@ import { UserController } from '../controllers/user.controller';
 import {
     ListUserActivityQuerySchema,
     SearchUsersQuerySchema,
+    SendCredentialSchema,
     SuspendUserSchema,
     UpdateUserSchema,
     UserIdParamSchema,
@@ -106,6 +107,52 @@ defineRoute(router, {
     validate: { params: UserIdParamSchema },
     audit: records('users.reinstate'),
     handler: UserController.restore,
+});
+
+/**
+ * Credential recovery — sending somebody a way back into their own account.
+ *
+ * ── `users.password.reset` has left the `†` list ─────────────────────────────
+ * It was catalogued-and-unbuilt because "jovi-mall has no administrator-initiated password
+ * flow" and issuing a credential needed a delivery channel and an expiry policy neither
+ * service had decided on. Both now exist, and the route was built ON them rather than
+ * beside them: the token is `PasswordResetService`'s, with its 30 minutes, its single use
+ * and its `password_changed_at` revocation. A third entrance, not a second mechanism.
+ *
+ * ⚠ **Neither is granted to tier 3.** Support answers delivery tickets; a support agent who
+ * can mail a working link to any vendor can take over any shop, and the audit row would
+ * look like routine help. `assertGrantTableValid()` does not catch this by itself — the
+ * permissions carry no `financial` or `destructive` flag — so the protection is that
+ * SUPPORT names its grants by hand and neither of these is among them.
+ *
+ * ── Two permissions, not one, and two audit actions ──────────────────────────
+ * A reset link grants nothing until the person chooses a password, and evicts every
+ * session when they do; its worst case is a locked-out user. A sign-in link IS a session —
+ * whoever opens the message is signed in as that customer. Folding them together would
+ * mean granting the first silently granted the second, with nothing in the trail to tell
+ * the two acts apart.
+ *
+ * POST sub-resources rather than a `PATCH { credential }` for ADR-005 D-4's reason: the
+ * permission and the audit row attach to the ACTION.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/:userId/password-reset-link',
+    access: permission('users.password.reset'),
+    validate: { params: UserIdParamSchema, body: SendCredentialSchema },
+    audit: records('users.password_reset_link.send'),
+    handler: UserController.sendPasswordResetLink,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/:userId/login-link',
+    access: permission('users.login_link.send'),
+    validate: { params: UserIdParamSchema, body: SendCredentialSchema },
+    audit: records('users.login_link.send'),
+    handler: UserController.sendLoginLink,
 });
 
 export const userRoutes = router;

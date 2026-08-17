@@ -16,7 +16,7 @@ the dashboard's behalf and returns the result in its own envelope.
 |---|---|
 | **This file** | Base URL, envelope, authentication, CSRF, pagination, sorting, filtering, rate limits |
 | [errors.md](errors.md) | The complete error-code registry, the nine categories, and the exposure rule |
-| [permissions.md](permissions.md) | All 110 permissions, the three administrator levels, and the grant matrix |
+| [permissions.md](permissions.md) | All 113 permissions, the three administrator levels, and the grant matrix |
 | [health.md](health.md) | `/health/live`, `/health/ready` — unversioned probes |
 | [auth.md](auth.md) | `/auth` — login, MFA, refresh, sessions, own password |
 | [administrators.md](administrators.md) | `/administrators` — administrator management, levels, suspension, sessions |
@@ -26,6 +26,7 @@ the dashboard's behalf and returns the result in its own envelope.
 | [vendors.md](vendors.md) | `/vendors` — vendor directory, KYC, catalogue, suspension, settings |
 | [agencies.md](agencies.md) | `/agencies` — delivery agencies, verification, rosters, contracts |
 | [agents.md](agents.md) | `/agents` — delivery agents, KYC, tracking, COD threshold, bans, transfer |
+| [contracts.md](contracts.md) | `/contracts` — one agent↔agency contract: the full terms, and the three administrative interventions |
 | [orders.md](orders.md) | `/orders` — order directory, timeline, disputes, cancel, dispatch, refund |
 | [shipments.md](shipments.md) | `/shipments` — shipment directory, offer trail, reassign, cancel |
 | [cod.md](cod.md) | `/cod` — cash-on-delivery overview, holders, remittances, deposits, discrepancies, trust |
@@ -35,8 +36,9 @@ the dashboard's behalf and returns the result in its own envelope.
 | [system.md](system.md) | `/system` — health, dependencies, workers, queues, metrics, config, error journal |
 | [dev-tools.md](dev-tools.md) | `/dev-tools` — feature flags, worker triggers, outbox replay, maintenance mode |
 | [notifications.md](notifications.md) | `/notifications` — the administrator inbox and preferences |
+| [files.md](files.md) | `/files` — turning a `*FileId` this service returns into a name, a type and a URL |
 
-**179 versioned endpoints** across 18 route groups, plus 2 unversioned health probes.
+**190 versioned endpoints** across 20 route groups, plus 2 unversioned health probes.
 
 ---
 

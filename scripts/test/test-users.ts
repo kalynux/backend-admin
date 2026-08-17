@@ -308,7 +308,8 @@ t.section('6. Routes, permissions and the audit catalog');
 
 const USER_ROUTES = routeManifest().filter((route) => route.fullPath.startsWith('/api/v1/users'));
 
-t.assert('six routes are declared', () => USER_ROUTES.length === 6);
+// Six at the user-management phase; eight since credential recovery landed.
+t.assert('eight routes are declared', () => USER_ROUTES.length === 8);
 
 t.assert('every one declares a permission — none is public or self-service', () =>
     USER_ROUTES.every((route) => route.access.kind === 'permission'));
@@ -334,10 +335,47 @@ t.assert('the contact edit is behind its own permission, not the read', () => {
 });
 
 t.assert('suspend and restore share one permission and are POST sub-resources', () => {
-    const actions = USER_ROUTES.filter((route) => route.method === 'post');
+    const actions = USER_ROUTES.filter(
+        (route) => route.method === 'post' && /\/(suspend|restore)$/.test(route.fullPath),
+    );
     return actions.length === 2
         && actions.every((route) => route.access.kind === 'permission'
             && route.access.permissions[0] === 'users.suspend');
+});
+
+/**
+ * The two credential routes do NOT share a permission, and that is the point of the
+ * assertion rather than an incidental fact.
+ *
+ * A reset link grants nothing until the person chooses a password; a sign-in link IS a
+ * session. Folding them under one permission would mean a tier granted "help people back
+ * into their account" silently also got "sign in as a customer".
+ */
+t.assert('the two credential sends hold DIFFERENT permissions', () => {
+    const reset = USER_ROUTES.find((route) => route.fullPath.endsWith('/password-reset-link'));
+    const login = USER_ROUTES.find((route) => route.fullPath.endsWith('/login-link'));
+    return reset?.access.kind === 'permission'
+        && login?.access.kind === 'permission'
+        && reset.access.permissions[0] === 'users.password.reset'
+        && login.access.permissions[0] === 'users.login_link.send';
+});
+
+/**
+ * ⚠ The single most dangerous grant this module could make.
+ *
+ * Support answers delivery tickets. A support agent who can mail a working reset link to
+ * any vendor can take over any shop, and the audit row would look like routine help.
+ * `assertGrantTableValid()` does NOT catch this — neither permission carries a `financial`
+ * or `destructive` flag — so this assertion is the guard.
+ */
+t.assert('Support holds NEITHER credential permission', () => {
+    const support = new Set(TIER_GRANTS[3]);
+    return !support.has('users.password.reset') && !support.has('users.login_link.send');
+});
+
+t.assert('...and Admin holds both, since account recovery is their job', () => {
+    const admin = new Set(TIER_GRANTS[2]);
+    return admin.has('users.password.reset') && admin.has('users.login_link.send');
 });
 
 t.assert('no route uses `users.roles.manage` — role editing is deliberately unbuilt', () =>
@@ -365,9 +403,23 @@ t.assert('`users.update` is not flagged sensitive — it is routine support work
 t.assert('...unlike role management, which is', () =>
     isSensitive(permissionSpec('users.roles.manage')));
 
-t.assert('three user actions are catalogued, and no read among them', () =>
-    USER_AUDIT_ACTIONS.length === 3
+// Three at the user-management phase; five since the two credential sends were catalogued.
+t.assert('five user actions are catalogued, and no read among them', () =>
+    USER_AUDIT_ACTIONS.length === 5
     && USER_AUDIT_ACTIONS.every((action) => isAuditAction(action)));
+
+/**
+ * The audit row for a credential send records the channel and the reason. It must never
+ * record the token, the link or the unmasked destination — the trail is read by more
+ * people than performed the action, and a link in it is a live credential in a feed.
+ */
+t.assert('the credential gateway sends no destination and stores no token', () => {
+    const gateway = readCode(SRC, 'modules', 'users', 'gateways', 'user.gateway.ts');
+    const body = gateway.slice(gateway.indexOf('sendPasswordResetLink'));
+    return body.includes('body: { channel }')
+        && !body.includes('destination:')
+        && !body.includes('token');
+});
 
 t.assert('every one targets a `user` and is delegated', () =>
     USER_AUDIT_ACTIONS.every((action) => {

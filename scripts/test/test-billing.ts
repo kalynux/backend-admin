@@ -560,19 +560,55 @@ t.section('6. Routes, permissions and the audit catalog');
 
 const billingRoutes = routeManifest().filter((r) => r.fullPath.startsWith('/api/v1/billing'));
 
-t.assert('eight billing routes are registered', () => billingRoutes.length === 8);
+// Eight at Phase 11; ten since the two subscription reads landed.
+t.assert('ten billing routes are registered', () => billingRoutes.length === 10);
 
 t.assert('every one declares a permission', () =>
     billingRoutes.every((r) => r.access.kind === 'permission'));
 
-t.assert('the four reads all sit behind billing.plans.read alone', () => {
+t.assert('the six reads all sit behind billing.plans.read alone', () => {
     const reads = billingRoutes.filter((r) => r.method === 'get');
-    return reads.length === 4
+    return reads.length === 6
         && reads.every(
             (r) => r.access.kind === 'permission'
                 && r.access.permissions.length === 1
                 && r.access.permissions[0] === 'billing.plans.read',
         );
+});
+
+/**
+ * The owner-scoped read and the assign share a path shape and NOT a permission.
+ *
+ * Symmetry of shape is the point — assign and read address an owner the same way — but
+ * reading who is on a plan is not the same act as changing what they are billed, and
+ * `billing.subscriptions.assign` is flagged `financial` precisely so it cannot be swept
+ * into a family grant.
+ */
+t.assert('the owner-scoped read and the assign differ in method and permission', () => {
+    const path = '/api/v1/billing/subscriptions/:ownerType/:ownerId';
+    const read = billingRoutes.find((r) => r.fullPath === path && r.method === 'get');
+    const assign = billingRoutes.find((r) => r.fullPath === path && r.method === 'post');
+    return read?.access.kind === 'permission'
+        && assign?.access.kind === 'permission'
+        && read.access.permissions[0] === 'billing.plans.read'
+        && assign.access.permissions[0] === 'billing.subscriptions.assign';
+});
+
+/**
+ * `current` is read off the row that SAYS `active`, never inferred from dates.
+ *
+ * `status` is jovi-mall's vocabulary and this service never writes it, so ranking an open
+ * list of values is a guess that changes silently when a fifth value appears upstream. And
+ * `expiresAt: null` is the never-expiring free tier rather than "unknown", so ordering by
+ * it puts the free tier at whichever end the comparison happens to choose.
+ */
+t.assert('the owner-scoped read determines `current` from the status, not from a date', () => {
+    const controller = readCode(SRC, 'modules', 'billing', 'controllers', 'billing.controller.ts');
+    const handler = controller.slice(controller.indexOf('static listSubscriptionsForOwner'));
+    const body = handler.slice(0, handler.indexOf('static getSubscription'));
+    return body.includes("row.status === 'active'")
+        && body.includes("row.status === 'pending_activation'")
+        && !body.includes('expiresAt');
 });
 
 /**
@@ -597,7 +633,9 @@ t.assert('create and edit hold billing.plans.manage; archive holds its own permi
 });
 
 t.assert('the three legacy assign routes are ONE route, keyed on :ownerType', () => {
-    const assign = billingRoutes.filter((r) => r.fullPath.includes('/subscriptions/'));
+    const assign = billingRoutes.filter(
+        (r) => r.method === 'post' && r.fullPath.includes('/subscriptions/'),
+    );
     return assign.length === 1
         && assign[0].fullPath === '/api/v1/billing/subscriptions/:ownerType/:ownerId'
         && assign[0].access.kind === 'permission'

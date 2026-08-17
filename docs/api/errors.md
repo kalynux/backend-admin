@@ -299,6 +299,51 @@ logs.
 | `PAYOUT_NOT_PENDING` | 409 | `conflict` | The payout is no longer `pending`. Raised on the `mark-paid` pre-flight (so a doomed action is never queued for approval) and again when an approval is committed. |
 | `ACCOUNT_OWNER_NOT_FOUND` | 404 | `not_found` | `:ownerType/:ownerId` names no vendor, agency or agent. **An owner with no balances is not this** — that reports zeroes. |
 
+### Delivery network
+
+| Code | Status | Category | Meaning |
+|---|---|---|---|
+| `CONTRACT_NOT_FOUND` | 404 | `not_found` | No agent↔agency contract with this id. Its own code rather than a bare `NOT_FOUND` because `/contracts/:contractId` is addressable and the id is what a support ticket carries — a client showing "not found" needs to say *what* was not found, and the neighbouring 404s on that screen are about agents and agencies. |
+| `CONTRACT_INVALID_TRANSITION` | 409 | `conflict` | The contract is not in a status this verb can move it from — reinstating one that is already `active`, suspending one that is `deactivated`. `details` names the transition, the current `from`, and the `allowedFrom` set. **Arrives as `details.platformCode` on a `PLATFORM_OPERATION_REJECTED`.** |
+| `CONTRACT_TRANSITION_NOT_PERMITTED` | 403 | `authorization` | The transition exists but not for the party attempting it. Reachable from the admin surface only as a platform-side guard; the three administrative writes are chosen to be ones the agency holds unilaterally. **Arrives as `details.platformCode`.** |
+
+### Billing
+
+| Code | Status | Category | Meaning |
+|---|---|---|---|
+| `BILLING_PENDING_PLAN_EXISTS` | 409 | `conflict` | The owner **already has a plan queued** behind their current one. **Reachable on a completely ordinary path**: assigning to an owner whose paid term has not lapsed produces a *queued* row rather than replacing the live one, so a second assignment hits this. Pre-empt it by reading `queued` on `GET /billing/subscriptions/:ownerType/:ownerId`. **Arrives as `details.platformCode`.** |
+| `BILLING_PLAN_INACTIVE` | 409 | `conflict` | The plan is defined but not purchasable. **Arrives as `details.platformCode`.** |
+| `BILLING_PLAN_ROLE_MISMATCH` | 409 | `conflict` | The plan's role does not match the owner's — a vendor plan assigned to an agency. **Arrives as `details.platformCode`.** |
+
+> Neither of the last two is pre-checked by this service: they are the platform's verdicts to
+> make, and a copy would be a second opinion about what a plan may be assigned to.
+
+### Files
+
+| Code | Status | Category | Meaning |
+|---|---|---|---|
+| `FILE_NOT_FOUND` | 404 | `not_found` | `GET /files/:fileId` resolved nothing. **Reachable on an ordinary path and not a client bug** — files are soft-deleted and swept by file-cleanup, so a record legitimately outlives the picture it references. Render the absence rather than an error banner. The batch form (`GET /files?ids=`) never raises this: unresolvable ids are simply **absent** from its result. |
+
+### Credential recovery
+
+Every one of these arrives as `details.platformCode` on a `PLATFORM_OPERATION_REJECTED`,
+since the send is delegated to jovi-mall. Branch on `platformCode`, not on `error.code`.
+
+| Code | Status | Category | Meaning |
+|---|---|---|---|
+| `USER_CHANNEL_UNAVAILABLE` | 409 | `conflict` | The party has no address on the requested channel — no `email`, no `phone`, or (for `telegram`) no connected chat. Telegram exists only once the person has run `/connect` with the bot; the platform stores no `chatId` on any party, so there is nothing to fall back to. |
+| `USER_CREDENTIAL_LINK_THROTTLED` | 429 | `rate_limit` | Too many links recently. **`details.scope` is `party` or `administrator`** and the two have different remedies — wait, versus ask a colleague. `details.retryAfterSeconds` carries the wait. |
+| `USER_LOGIN_LINK_ROLE_UNSUPPORTED` | 409 | `conflict` | A sign-in link was asked for on an account that is not a customer. Structural rather than configurable: jovi-mall scopes every session that flow mints to `customer` as a literal, because a vendor, agency or agent reaches money and other people's data. Send a **password-reset link** instead. |
+| `MESSAGING_DELIVERY_FAILED` | 502 | `external_service` | The channel accepted the request and did not deliver. **Raised rather than swallowed**, unlike the self-service reset path — that one must answer identically whether or not the account exists, while here an administrator is watching a dialog and "sent" when nothing was sent closes the ticket with the party still locked out. Offer another channel. |
+| `AUTH_ACCOUNT_SUSPENDED` | 409 | `conflict` | The party's account is suspended, so there is nothing to send them back into. Reinstate first. **Arrives as `details.platformCode`**, and note the status differs from the 403 the same code carries on jovi-mall's own login path. |
+
+> **There is no `USER_CHANNEL_UNVERIFIED`, and that is a decision.** jovi-mall's `users` row
+> carries no `email_verified` — verification flags live on the ROLE entities, a user may hold
+> several roles, and `login_email` is the login identifier itself: the address
+> `POST /auth/forgot-password` already mails a live reset token to, anonymously, with no
+> check at all. Gating the administrator path more tightly than the path an attacker can
+> drive would protect nothing.
+
 ### Notifications
 
 | Code | Status | Category | Meaning |

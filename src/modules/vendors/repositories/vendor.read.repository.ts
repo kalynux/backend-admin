@@ -61,11 +61,13 @@ export interface VendorReadModel extends Document {
     timezone?: string;
     preferred_language?: string;
     wa?: { verified?: boolean };
-    policies?: {
-        return_policy?: { return_eligible?: boolean };
-        cancellation_policy?: { cancellable?: boolean };
-        support_policy?: { availability?: string };
-    } | null;
+    /**
+     * The vendor's own commercial terms — returns, cancellation, support, and up to two
+     * off-platform document links. Roughly thirty fields, mapped by name in
+     * `read-models/vendor-policies.dto.ts`; untyped here because the mapper is the
+     * definition and a second declaration would drift from it.
+     */
+    policies?: Record<string, unknown> | null;
     business_addresses?: {
         _id?: ObjectId;
         label?: string;
@@ -120,9 +122,21 @@ const VENDOR_LIST_PROJECTION = {
  * review needs the textual address; the precise coordinates of somebody's premises are a
  * different thing, and a dotted projection is what keeps them out rather than a promise.
  *
- * The `policies` tree is reduced to three presence booleans in the DTO. It carries roughly
- * thirty fields of the vendor's own commercial terms, none of which this surface acts on —
- * the question a detail screen asks is "have they set this up", not "what does it say".
+ * ── `policies` is taken WHOLE, and that changed deliberately ─────────────────
+ * It used to be three dotted leaf paths reduced to presence booleans, on the reasoning
+ * that a detail screen asks "have they set this up" rather than "what does it say". That
+ * turned out to be exactly backwards for the screen that matters: a dispute lands on what
+ * the return policy SAYS, and an administrator could not see it.
+ *
+ * Taken whole for the same reason the agency's is, and the argument is stronger here: an
+ * agency's terms are visible to every vendor connected to it, and a vendor's return and
+ * cancellation policy is published to every CUSTOMER on the storefront. There is no field
+ * that could be added to them which this surface should not see.
+ *
+ * The wide projection is safe because `read-models/vendor-policies.dto.ts` names every
+ * field — a field added upstream reaches this read model and stops at the mapper.
+ * Nothing sensitive lives in this sub-document: `payout_details` and
+ * `kyc_details.national_id_number` are elsewhere and remain unprojected.
  */
 const VENDOR_DETAIL_PROJECTION = {
     ...VENDOR_LIST_PROJECTION,
@@ -136,9 +150,7 @@ const VENDOR_DETAIL_PROJECTION = {
     timezone: 1,
     preferred_language: 1,
     'wa.verified': 1,
-    'policies.return_policy.return_eligible': 1,
-    'policies.cancellation_policy.cancellable': 1,
-    'policies.support_policy.availability': 1,
+    policies: 1,
     'business_addresses._id': 1,
     'business_addresses.label': 1,
     'business_addresses.address_line1': 1,

@@ -31,6 +31,7 @@ import {
     ownerKey,
     toAllocationDetailDto,
     toAllocationDto,
+    toEarningsAccountDto,
     toLedgerEntryDto,
     toPaymentDetailDto,
     toPaymentDto,
@@ -171,13 +172,26 @@ function allocationOwners(rows: EarningsAllocationReadModel[]): OwnerRow[] {
 /**
  * jovi-mall's page shape and this service's are the same fields in a different envelope, so
  * a DELEGATED list is re-wrapped rather than re-counted.
+ *
+ * `extra` carries list-level summary fields that are not scalars — `PaginationMeta`'s index
+ * signature is scalar-only, and `totals` is an array of objects. Hence `sendSuccess` with an
+ * explicit meta rather than `sendPaginated`: widening `PaginationMeta` for one caller would
+ * loosen the type every list on the service is checked against.
  */
-function sendPlatformPage(res: Response, page: gateway.PlatformPage<unknown>): void {
-    sendPaginated(res, page.data, {
-        total: page.meta.total,
-        page: page.meta.page,
-        limit: page.meta.limit,
-        pages: page.meta.pages,
+function sendPlatformPage(
+    res: Response,
+    page: gateway.PlatformPage<unknown>,
+    data?: unknown[],
+    extra?: Record<string, unknown>,
+): void {
+    sendSuccess(res, data ?? page.data, {
+        meta: {
+            total: page.meta.total,
+            page: page.meta.page,
+            limit: page.meta.limit,
+            pages: page.meta.pages,
+            ...(extra ?? {}),
+        },
     });
 }
 
@@ -238,7 +252,31 @@ export class MoneyController {
      */
     static earningsAccounts = asyncHandler(async (req: Request, res: Response) => {
         const query = req.query as unknown as ListEarningsAccountsQuery;
-        sendPlatformPage(res, await gateway.earningsAccounts(query, actorContextOf(req)));
+        const page = await gateway.earningsAccounts(query, actorContextOf(req));
+
+        /**
+         * Hydrated HERE rather than by jovi-mall, because that is what this controller
+         * already does four lines away for payouts and allocations — one batched read per
+         * owner type present, never one per row. The directory has been showing ObjectIds
+         * for want of this single call.
+         *
+         * It has to be server-side: twenty rows spanning three directories is twenty
+         * client requests, each behind a permission a `money.earnings.read` holder need
+         * not hold, which would turn this list into a side door onto `/vendors`,
+         * `/agencies` and `/agents` — exactly what the accounts mount's composed
+         * authorization exists to prevent.
+         */
+        const names = await hydrateOwnerNames(page.data);
+
+        sendPlatformPage(
+            res,
+            page,
+            page.data.map((row) => toEarningsAccountDto(row, names)),
+            // Across the whole FILTERED result set, one entry per currency — the one
+            // number on this screen a client cannot compute, because it cannot see past
+            // the page it was handed.
+            { totals: page.totals },
+        );
     });
 
     /**

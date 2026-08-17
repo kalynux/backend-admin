@@ -555,15 +555,47 @@ t.section('8. Routes, audit catalog and the access table');
 const vendorRouteDecls = routeManifest().filter((route) =>
     route.fullPath === '/api/v1/vendors' || route.fullPath.startsWith('/api/v1/vendors/'));
 
-t.assert('eleven routes are declared', () => vendorRouteDecls.length === 11);
+// Eleven at Phase 6; twelve since the product detail landed.
+t.assert('twelve routes are declared', () => vendorRouteDecls.length === 12);
 
 t.assert('every one carries a permission — none is public or self-service', () =>
     vendorRouteDecls.every((route) => route.access.kind === 'permission'));
 
-t.assert('the four reads need vendors.read', () => {
+t.assert('the five reads need vendors.read', () => {
     const reads = vendorRouteDecls.filter((route) => route.method === 'get');
-    return reads.length === 4 && reads.every((route) =>
+    return reads.length === 5 && reads.every((route) =>
         route.access.kind === 'permission' && route.access.permissions.includes('vendors.read'));
+});
+
+/**
+ * The product detail is scoped by BOTH ids, and that is the authorisation.
+ *
+ * jovi-mall answers 404 when the product does not belong to the vendor in the path, so a
+ * product id guessed from elsewhere cannot be read by naming a vendor the caller can see.
+ * The same rule the two product writes already follow.
+ */
+t.assert('the product detail is scoped by vendor AND product', () => {
+    const detail = vendorRouteDecls.find(
+        (route) => route.method === 'get' && route.fullPath.endsWith('/products/:productId'),
+    );
+    return !!detail
+        && detail.access.kind === 'permission'
+        && detail.access.permissions.length === 1
+        && detail.access.permissions[0] === 'vendors.read';
+});
+
+/**
+ * ⚠ The one read on this module that is DELEGATED rather than a direct query.
+ *
+ * Not a drift from ADR-004 D-2 but a consequence of ADR-009 D-6: the payload needs
+ * `storage.getPublicUrl` for its images and jovi-mall's storage-fee calculator for its
+ * rent, and this service may own neither. If somebody "fixes" this into a direct read, the
+ * images stop resolving and the storage figure becomes a second opinion.
+ */
+t.assert('...and it is served through the gateway, not a repository', () => {
+    const controller = readCode(SRC, 'modules', 'vendors', 'controllers', 'vendor.controller.ts');
+    const handler = controller.slice(controller.indexOf('static product ='));
+    return handler.startsWith('static product =') && handler.includes('gateway.product(');
 });
 
 t.assert('⭐ the activity feed needs audit.read as well, in `all` mode', () => {

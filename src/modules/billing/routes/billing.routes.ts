@@ -8,6 +8,7 @@ import {
     ListPlansQuerySchema,
     ListSubscriptionsQuerySchema,
     PlanIdParamSchema,
+    SubscriptionIdParamSchema,
     SubscriptionOwnerParamSchema,
     UpdatePlanSchema,
 } from '../validators/billing.validator';
@@ -146,6 +147,37 @@ defineRoute(router, {
  * does not consult `related_target_*`, so a single action targeting the plan would be
  * invisible on `GET /vendors/:id/activity`.
  */
+/**
+ * One subscription by its own id — declared BEFORE the two-segment owner read below.
+ *
+ * Express matches on segment count, so the two cannot shadow each other; the order is for
+ * a reader rather than the router.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/subscriptions/:subscriptionId',
+    access: permission('billing.plans.read'),
+    validate: { params: SubscriptionIdParamSchema },
+    handler: BillingController.getSubscription,
+});
+
+/**
+ * Every term one owner holds, partitioned by the platform's own status.
+ *
+ * The same path shape as the POST below, so assign and read are symmetric. The value over
+ * `GET /subscriptions?ownerId=` is that `current` is the PLATFORM's determination rather
+ * than a client's ranking of an open status vocabulary over one page — see the controller.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/subscriptions/:ownerType/:ownerId',
+    access: permission('billing.plans.read'),
+    validate: { params: SubscriptionOwnerParamSchema },
+    handler: BillingController.listSubscriptionsForOwner,
+});
+
 defineRoute(router, {
     mountedAt,
     method: 'post',

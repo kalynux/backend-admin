@@ -19,6 +19,7 @@ import { UserReadModel, UserReadRepository } from '../repositories/user.read.rep
 import {
     ListUserActivityQuery,
     SearchUsersQuery,
+    SendCredentialBody,
     SuspendUserBody,
     UpdateUserBody,
 } from '../validators/user.validator';
@@ -230,6 +231,61 @@ export class UserController {
         const updated = await gateway.restore(req.params.userId, toAuditState(before), actorContextOf(req));
 
         sendSuccess(res, updated, { message: 'Account restored' });
+    });
+
+    /**
+     * POST /api/v1/users/:userId/password-reset-link — body `{ channel, reason }`.
+     *
+     * Sends the party a link to set a new password themselves. Every role: a password
+     * belongs to the `users` row, and vendors and agencies are exactly the people who have
+     * one to forget.
+     *
+     * ⚠ **This does not reset anything.** The administrator never learns or chooses the
+     * credential — which is the whole difference from `POST /administrators/:adminId/password-reset`
+     * one mount over, where the password is generated and shown once because an
+     * administrator has no other channel to be reached on. A platform party has three.
+     *
+     * The response carries a masked destination and nothing else usable.
+     */
+    static sendPasswordResetLink = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as SendCredentialBody;
+        const before = await loadOr404(req.params.userId);
+
+        const result = await gateway.sendPasswordResetLink(
+            req.params.userId,
+            body.channel,
+            body.reason,
+            toAuditState(before),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, result, { message: `Password-reset link sent by ${body.channel}` });
+    });
+
+    /**
+     * POST /api/v1/users/:userId/login-link — body `{ channel, reason }`.
+     *
+     * Sends a customer a passwordless sign-in link. **Customers only**, refused with
+     * `USER_LOGIN_LINK_ROLE_UNSUPPORTED` otherwise, and that refusal is structural rather
+     * than configurable: jovi-mall scopes every session this mints to `customer` as a
+     * literal, because a vendor, agency or agent reaches money and other people's data.
+     *
+     * Its own permission, because whoever opens the message IS signed in as that customer.
+     * A reset link grants nothing until a password is chosen; this is not that.
+     */
+    static sendLoginLink = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as SendCredentialBody;
+        const before = await loadOr404(req.params.userId);
+
+        const result = await gateway.sendLoginLink(
+            req.params.userId,
+            body.channel,
+            body.reason,
+            toAuditState(before),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, result, { message: `Sign-in link sent by ${body.channel}` });
     });
 
     /**

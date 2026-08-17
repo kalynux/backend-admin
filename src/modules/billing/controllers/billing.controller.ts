@@ -322,6 +322,96 @@ export class BillingController {
     });
 
     /**
+     * GET /api/v1/billing/subscriptions/:ownerType/:ownerId — every term one owner holds.
+     *
+     * ── Why this is not the cross-owner list filtered by owner ─────────────────
+     * An owner holds SEVERAL rows at once: one `active`, optionally one
+     * `pending_activation` queued behind it, plus the history. The list can be filtered to
+     * them, but it is server-paginated, so an owner's rows can straddle a page boundary —
+     * a client grouping them groups *some* of their terms and has no way to know it did.
+     *
+     * And "which one is live" is a judgement the client should not be making. `status` is
+     * the platform's vocabulary and this service never writes it, so a client ranking an
+     * open list of values guesses, and its guess changes silently when a fifth value
+     * appears upstream. Here `current` is the row that actually says `active`, which a
+     * partial unique index upstream guarantees is at most one.
+     *
+     * ⚠ `current: null` means the owner has no active plan — NOT "we could not determine
+     * it". The same fact `GET /accounts/:ownerType/:ownerId` reports by setting the whole
+     * subscription block's fields to `null` together.
+     *
+     * Unpaginated, and `meta.total` is the count rather than a page size: an owner
+     * accumulates one term per renewal, which is single digits over a platform's lifetime.
+     */
+    static listSubscriptionsForOwner = asyncHandler(async (req: Request, res: Response) => {
+        const { ownerType, ownerId } = req.params as { ownerType: BillingOwnerType; ownerId: string };
+
+        // 404s on an owner that does not exist, so "no such vendor" and "this vendor has
+        // never had a plan" are distinguishable — the second is an ordinary state and the
+        // first is a broken link.
+        const ownerName = await loadOwnerLabelOr404(ownerType, ownerId);
+
+        const rows = await subscriptions.listAllForOwner(ownerType, ownerId);
+
+        const planIds = [...new Set(rows.map((row) => row.plan_id.toString()))].map(
+            (id) => new ObjectId(id),
+        );
+        const planRefs = await plans.findRefsByIds(planIds);
+        const owners: OwnerNames = new Map([[ownerKey(ownerType, ownerId), ownerName]]);
+
+        const dtos = rows.map((row) => toSubscriptionDto(row, planRefs, owners));
+
+        /**
+         * Partitioned by the platform's own status, never by recency.
+         *
+         * `expiresAt` is deliberately not consulted: `null` there is the never-expiring
+         * free tier rather than "unknown", so ordering by it puts the free tier either
+         * first or last depending on the comparison and neither is meaningful.
+         *
+         * An unrecognised status falls into `history` rather than being dropped — a row
+         * this service cannot classify is still a row the owner has.
+         */
+        const current = dtos.find((row) => row.status === 'active') ?? null;
+        const queued = dtos.find((row) => row.status === 'pending_activation') ?? null;
+        const history = dtos.filter((row) => row !== current && row !== queued);
+
+        sendSuccess(
+            res,
+            {
+                owner: { type: ownerType, id: ownerId, name: ownerName },
+                current,
+                queued,
+                history,
+            },
+            { meta: { total: dtos.length } },
+        );
+    });
+
+    /**
+     * GET /api/v1/billing/subscriptions/:subscriptionId — one term, by its own id.
+     *
+     * Makes a subscription ADDRESSABLE, which it was not: an operator could not link a
+     * colleague to one, and a `paymentReference` quoted in a support ticket had nowhere to
+     * point.
+     *
+     * No path collision with the owner-scoped read above: that one takes two segments and
+     * this takes one.
+     */
+    static getSubscription = asyncHandler(async (req: Request, res: Response) => {
+        const row = await subscriptions.findById(req.params.subscriptionId);
+        if (!row) {
+            throw createAppError(ERROR_CODES.NOT_FOUND, 404, 'Subscription not found');
+        }
+
+        const [planRefs, owners] = await Promise.all([
+            plans.findRefsByIds([row.plan_id]),
+            hydrateOwnerNames([row]),
+        ]);
+
+        sendSuccess(res, toSubscriptionDto(row, planRefs, owners));
+    });
+
+    /**
      * POST /api/v1/billing/plans — create a tier.
      *
      * 201, because this one genuinely creates a resource — the only route on this mount

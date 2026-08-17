@@ -15,6 +15,8 @@ Design record: [`../ADR-011-ACCOUNTS-AND-FINANCE.md`](../ADR-011-ACCOUNTS-AND-FI
 | `PATCH` | `/billing/plans/:planId` | `billing.plans.manage` | **delegated** | ✅ |
 | `DELETE` | `/billing/plans/:planId` | `billing.plans.delete` | **delegated** | ✅ |
 | `GET` | `/billing/subscriptions` | `billing.plans.read` | direct read | — |
+| `GET` | `/billing/subscriptions/:subscriptionId` | `billing.plans.read` | direct read | — |
+| `GET` | `/billing/subscriptions/:ownerType/:ownerId` | `billing.plans.read` | direct read | — |
 | `POST` | `/billing/subscriptions/:ownerType/:ownerId` | `billing.subscriptions.assign` | **delegated** | ✅ |
 
 **Nothing here is Support's.** The writes split three ways: `billing.plans.manage` for create and
@@ -380,9 +382,10 @@ The created subscription, message `"Plan vendor_growth assigned to the vendor"`.
 | 404 | `NOT_FOUND` | No such plan or owner |
 | 409 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: "BILLING_PLAN_INACTIVE"` — the plan is not purchasable |
 | 409 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: "BILLING_PLAN_ROLE_MISMATCH"` — **the plan's role does not match the owner** |
+| 409 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: "BILLING_PENDING_PLAN_EXISTS"` — **the owner already has a plan queued behind their current one.** Reachable on a completely ordinary path: assigning to an owner whose paid term has not lapsed produces a *queued* row rather than replacing the live one, so a second attempt hits this. Pre-empt it by checking `queued` on the owner-scoped read below |
 | 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | |
 
-Neither of those two rules is pre-checked here: they are the platform's verdicts to make, and a
+None of those rules is pre-checked here: they are the platform's verdicts to make, and a
 copy would be a second opinion about what a plan may be assigned to.
 
 ### Audit
@@ -390,3 +393,108 @@ copy would be a second opinion about what a plan may be assigned to.
 One of `billing.subscriptions.assign_vendor`, `billing.subscriptions.assign_agency`,
 `billing.subscriptions.assign_agent` — chosen by `:ownerType`, so the row is visible on that
 owner's activity feed.
+
+---
+
+## The subscription status vocabulary
+
+`status` is the platform's to write and this service never writes one, so it stays an **open**
+list on the wire — an unrecognised value must be rendered, never dropped.
+
+The four members jovi-mall's model carries today, written down so every client stops guessing
+differently:
+
+| Status | Meaning |
+|---|---|
+| `active` | The live term. **At most one per owner** — a partial unique index upstream enforces it |
+| `pending_activation` | Queued behind the live one. **At most one per owner**, same mechanism. This is the state that silently becomes active without anybody acting |
+| `expired` | The term lapsed |
+| `cancelled` | It was ended before it lapsed |
+
+**Known members, open for a fifth.** Rank an unrecognised value as history and keep it on
+screen.
+
+---
+
+## `GET /billing/subscriptions/:ownerType/:ownerId`
+
+Every term one owner holds, partitioned by the platform's own determination of which is live.
+
+| | |
+|---|---|
+| **Permission** | `billing.plans.read` |
+| **Transport** | Direct read |
+| **Pagination** | **None** |
+
+### Why this exists beside `GET /billing/subscriptions?ownerId=`
+
+An owner holds several rows at once: one `active`, optionally one `pending_activation`, plus
+the history. The cross-owner list can be filtered to them, but it is **server-paginated** — so
+an owner's rows can straddle a page boundary, and a client grouping them groups *some* of their
+terms with no way to know that it did.
+
+And deciding which row is live is not a judgement a client should be making. `status` is an open
+vocabulary this service never writes, so a client ranking it guesses, and its guess changes
+silently when a fifth value appears upstream. Here the answer comes from the row that says
+`active`.
+
+Unpaginated on purpose: an owner accumulates one term per renewal — single digits over a
+platform's lifetime — so paging would add a cursor to answer a question that fits in one
+response, and would reintroduce the straddling problem it exists to remove.
+
+### Response `200`
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "owner":   { "type": "vendor", "id": "665a…", "name": "Douala Fresh Market" },
+    "current": { /* subscription */ },
+    "queued":  { /* subscription */ },
+    "history": [ /* subscriptions, newest first */ ]
+  },
+  "meta": { "total": 7 }
+}
+```
+
+| Field | Notes |
+|---|---|
+| `current` | The row whose `status` is `active`. **`null` means the owner has no active plan** — not "we could not determine it". The same fact `GET /accounts/:ownerType/:ownerId` reports by setting the subscription block's fields to `null` together |
+| `queued` | The `pending_activation` row, or `null`. **Check this before assigning** — a non-null value means the assign route will answer `BILLING_PENDING_PLAN_EXISTS` |
+| `history` | Everything else, newest first by `createdAt`. A row with an **unrecognised** status lands here rather than being dropped |
+| `meta.total` | The count of all rows, not a page size |
+
+Ordered by `createdAt` rather than `startedAt`, because `startedAt` is `null` on a queued row —
+sorting on it would put the thing that has not started yet among the oldest. `expiresAt` is not
+consulted at all: `null` there is the never-expiring free tier rather than "unknown".
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Bad `ownerType` or malformed id |
+| 404 | `ACCOUNT_OWNER_NOT_FOUND` | No such vendor, agency or agent. **An owner who has never had a plan is not this** — that answers `current: null` with an empty `history` |
+
+---
+
+## `GET /billing/subscriptions/:subscriptionId`
+
+One term, by its own id — so an operator can link a colleague to one, and a `paymentReference`
+quoted in a support ticket has somewhere to point.
+
+| | |
+|---|---|
+| **Permission** | `billing.plans.read` |
+| **Transport** | Direct read |
+
+Returns the same subscription shape the lists return.
+
+No collision with the owner-scoped read above: that one takes two path segments and this takes
+one, so Express separates them structurally rather than by declaration order.
+
+### Errors
+
+| Status | Code |
+|---|---|
+| 400 | `VALIDATION_ERROR` |
+| 404 | `NOT_FOUND` |

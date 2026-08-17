@@ -465,3 +465,26 @@ prerequisite. **Writing an endpoint for it would be worse than the gap.**
 
 For outbound events that failed, use
 [`POST /dev-tools/outbox/replay`](#post-dev-toolsoutboxreplay).
+
+---
+
+## Where the platform logs live
+
+**Not on this mount.** `GET /system/platform/logs` is under `/system`, and the split is the one
+this document opens with: read-only diagnostics and dangerous operations are different mounts
+with different permissions, so a route cannot drift from one category into the other by being
+added to the wrong file. A log search reads and re-runs nothing.
+
+It is documented in full — the query, the cursor, **the shape of a log entry**, whether
+anything is truncated, and the load-bearing `meta.warning` — under
+[`GET /system/platform/logs`](system.md).
+
+The short version, for a reader who arrived here looking for it:
+
+| | |
+|---|---|
+| **Permission** | `developer_tools.logs.read` — **Developer only** |
+| **Guaranteed keys** | `at`, `level`, `msg`. Everything else is the writer's context and is rendered raw |
+| **`level`** | Filters **at or above** the named level |
+| **Truncation** | None. A line is stored as the writer emitted it |
+| **`meta.warning`** | Stays on the response. Log lines carry personal data; the scrubber removes credential *shapes* only |

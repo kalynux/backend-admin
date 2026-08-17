@@ -15,6 +15,8 @@ Design record: [`../ADR-007-USER-MANAGEMENT.md`](../ADR-007-USER-MANAGEMENT.md).
 | `PATCH` | `/users/:userId` | `users.update` | **delegated** | ✅ |
 | `POST` | `/users/:userId/suspend` | `users.suspend` | **delegated** | ✅ |
 | `POST` | `/users/:userId/restore` | `users.suspend` | **delegated** | ✅ |
+| `POST` | `/users/:userId/password-reset-link` | `users.password.reset` | **delegated** | ✅ |
+| `POST` | `/users/:userId/login-link` | `users.login_link.send` | **delegated** | ✅ |
 
 Reads go straight to the platform database; every write is executed by jovi-mall. A suspension
 is only meaningful because jovi-mall's auth path refuses a non-active account, and a login
@@ -28,7 +30,12 @@ identifier is only safe because that service owns its uniqueness index and its f
 |---|---|
 | **Role changes** (`users.roles.manage` exists with no route) | Adding a role provisions a role entity (a Store, a Magazin); removing one strands every record that entity owns. There is no code path in jovi-mall that removes a role, and inventing the semantics from the admin side is how a vendor's products end up belonging to nobody |
 | **Forced sign-out** (`users.sessions.revoke`) | jovi-mall issues stateless JWTs with no session store — there is nothing to revoke. Suspension covers the need: it blocks the next request on every device |
-| **Password reset** (`users.password.reset`) | jovi-mall has no administrator-initiated password flow |
+| **Setting a password directly** | An administrator never learns or chooses a platform party's credential. The two routes below send the person a link and let them choose it themselves. Contrast `POST /administrators/:adminId/password-reset`, which *does* generate a password and shows it once — because an administrator has no email, phone or chat on file to be reached on, and a platform party has three |
+
+> **`users.password.reset` has left the `†` list.** It was catalogued-and-unbuilt because
+> jovi-mall had no administrator-initiated flow. It has one now, built **on** the existing
+> `PasswordResetService` rather than beside it — see the two routes at the end of this
+> document.
 
 ---
 
@@ -349,3 +356,142 @@ The permission and the audit row attach to the **action**. `users.suspend` gover
 directions, but they are separate audit actions — `users.suspend` and `users.reinstate` — and a
 status field on a PATCH body could not carry the required reason on one direction and forbid it
 on the other. The same pattern holds across vendors, agencies and agents.
+
+---
+
+# Credential recovery
+
+Two routes that send a platform party a way back into their own account. Added in the
+dashboard-request round (BR-001), and the one item there that needed work in **both**
+services.
+
+## What they are, and what they are not
+
+**They send. They do not disclose.** The response carries no token, no link and no
+unmasked destination, and the destination is never accepted from the caller — it is read
+from the party's own record. An operator who could type an address could mail a working
+credential for somebody else's account to themselves, and no permission short of
+withholding the endpoint would prevent it.
+
+**They are a third entrance, not a second mechanism.** Both credentials come out of the
+machinery that already existed in jovi-mall:
+
+| Route | Mints through | Lifetime | Single-use |
+|---|---|---|---|
+| `password-reset-link` | `PasswordResetService.issueResetLinkFor` — the same 32-byte token the self-service and bot flows use, redeemed at the same `POST /auth/reset-password`, carrying the same `password_changed_at` stamp that **evicts every live session** on redemption | 30 min | ✅ |
+| `login-link` | `MessagingLoginService` — the same session record the bot `/login` flow mints, with a magic link **and** an 8-character code for one session; using either kills the other | 10 min | ✅ |
+
+Issuing a new credential of the same kind for the same party **revokes the previous one**,
+so an operator who clicks twice leaves one live credential rather than two.
+
+---
+
+## `POST /users/:userId/password-reset-link`
+
+| | |
+|---|---|
+| **Permission** | `users.password.reset` — **tier 1 and 2 only** |
+| **Transport** | **Delegated** |
+| **Roles** | **Every role.** A password belongs to the `users` row, and vendors and agencies are exactly the people who have one to forget |
+
+## `POST /users/:userId/login-link`
+
+| | |
+|---|---|
+| **Permission** | `users.login_link.send` — **tier 1 and 2 only** |
+| **Transport** | **Delegated** |
+| **Roles** | **Customers only.** `USER_LOGIN_LINK_ROLE_UNSUPPORTED` otherwise |
+
+> **Why two permissions rather than one.** A reset link grants nothing until the person
+> chooses a password, and evicts every session when they do — its worst case is a
+> locked-out user. A sign-in link **is** a session: whoever opens the message is signed in
+> as that customer. Folding them together would mean a tier granted "help people back into
+> their account" silently also got "sign in as a customer", with nothing in the trail to
+> tell the two acts apart.
+>
+> **Neither is granted to tier 3.** Support answers delivery tickets; a support agent who
+> can mail a working link to any vendor can take over any shop, and the audit row would
+> read as routine help.
+
+### Request body (both routes, strict)
+
+| Field | Type | Rules |
+|---|---|---|
+| `channel` | string | **Required.** `email` · `whatsapp` · `telegram`. A pinned enum — an unrecognised value is a `400`, never a silent fallback to email |
+| `reason` | string | **Required**, trimmed, 3–500. This is an administrator acting on somebody else's ability to sign in, without their asking. The audit row needs a why, and the person may later need to be told one |
+
+**There is no destination field.** Sending one is a `400`, not a silently ignored key.
+
+### Where each channel goes
+
+| `channel` | Resolves to | Absent when |
+|---|---|---|
+| `email` | the party's `login_email` | they have none on file |
+| `whatsapp` | the party's `login_phone` | they have none on file |
+| `telegram` | the `chat_id` from their **connected** Telegram account | they have never run `/connect` with the bot. The platform stores no `chatId` on any party, so there is nothing to fall back to |
+
+### Response `200`
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "kind": "password_reset",
+    "channel": "whatsapp",
+    "destinationMasked": "+2376••••4417",
+    "expiresAt": "2026-08-17T11:42:00.000Z",
+    "sentAt": "2026-08-17T11:12:00.000Z"
+  },
+  "message": "Password-reset link sent by whatsapp"
+}
+```
+
+`destinationMasked` is `+2376••••4417` · `j••••t@example.com` · `@handle` — enough to
+confirm it went to the right person, not enough to retype.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Unknown `channel`, missing `reason`, or an extra key |
+| 404 | `NOT_FOUND` | No such user |
+| 403 | `AUTHZ_PERMISSION_DENIED` | |
+| 409 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode` is `USER_CHANNEL_UNAVAILABLE`, `USER_LOGIN_LINK_ROLE_UNSUPPORTED`, or `AUTH_ACCOUNT_SUSPENDED` (reinstate the account first) |
+| 429 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: USER_CREDENTIAL_LINK_THROTTLED`. **`details.scope` is `party` or `administrator`** — the two have different remedies |
+| 502 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: MESSAGING_DELIVERY_FAILED` — the channel accepted the request and did not deliver. Try another channel |
+
+**Delivery failure is raised, not swallowed.** The self-service flow logs and continues,
+because it must answer identically whether or not the account exists. Here the caller is an
+administrator watching a dialog: telling them "sent" when nothing was sent makes them close
+the ticket while the party stays locked out.
+
+### Rate limits
+
+Per party **and** per administrator, and neither substitutes for the other: the first is a
+harassment and SMS-bill bound (the party did not ask for any of these), the second bounds a
+compromised or careless operator account. Counted on the **attempt**, so a caller cannot
+probe which channels a party has by burning failures for free.
+
+### Audit
+
+| Action | Sensitive | Records |
+|---|---|---|
+| `users.password_reset_link.send` | ✅ | The channel and the reason. **Never the token, the link, or the full address** |
+| `users.login_link.send` | ✅ | as above |
+
+The trail is read by more people than performed the action; a link in it would be a live
+credential sitting in a feed.
+
+### Two decisions worth having in writing
+
+**No dual control.** Considered and declined. Four-eyes currently guards three actions, all
+of which are irreversible or privilege-granting. A reset link is neither, and making routine
+account recovery a two-person job would push operators toward reading passwords over the
+phone — which is the workflow this endpoint exists to replace.
+
+**No verified-destination gate**, and this one is a finding rather than a choice: jovi-mall's
+`users` row carries no `email_verified`. Verification flags live on the **role** entities, a
+user may hold several roles, and `login_email` is the login identifier itself — the address
+`POST /auth/forgot-password` already mails a live reset token to, anonymously, with no check.
+Gating the administrator path more tightly than the path an attacker can drive would protect
+nothing.

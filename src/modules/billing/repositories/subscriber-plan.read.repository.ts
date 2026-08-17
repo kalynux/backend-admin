@@ -121,6 +121,50 @@ export class SubscriberPlanReadRepository extends PlatformReadRepository<Subscri
             status: 'active',
         } as Filter<SubscriberPlanReadModel>);
     }
+
+    /**
+     * EVERY term one owner has ever held, newest first — the owner-scoped read.
+     *
+     * ── Why this exists beside the cross-owner list ────────────────────────────
+     * An owner holds several rows at once: one `active`, optionally one
+     * `pending_activation` queued behind it, plus the history. The cross-owner list can be
+     * filtered to one owner, but it is SERVER-PAGINATED — so an owner's rows can straddle a
+     * page boundary and a client grouping them groups *some* of their terms without being
+     * able to tell that it did.
+     *
+     * Worse, deciding which row is the live one from a page is a heuristic over an open
+     * vocabulary: `status` is the platform's to write and this service never does, so a
+     * value added upstream next quarter silently changes every client's answer. Here the
+     * determination is made once, from the row that actually says `active`, and the
+     * partial unique index upstream guarantees there is at most one.
+     *
+     * Unpaginated on purpose. An owner accumulates one term per renewal — single digits
+     * over a platform's lifetime — so paging it would add a cursor to answer a question
+     * that fits in one response, and would reintroduce the straddling problem it exists to
+     * remove. `sort` is `created_at` descending because `started_at` is `null` on a queued
+     * row, and sorting on it would put the thing that has not started yet among the
+     * oldest.
+     */
+    async listAllForOwner(
+        ownerType: string,
+        ownerId: string,
+    ): Promise<SubscriberPlanReadModel[]> {
+        if (!Types.ObjectId.isValid(ownerId)) return [];
+
+        return this.findBy(
+            {
+                owner_type: ownerType,
+                owner_id: new ObjectId(ownerId),
+            } as Filter<SubscriberPlanReadModel>,
+            { sort: { created_at: -1 } },
+        );
+    }
+
+    /** One subscription by its own id, so a `paymentReference` in a ticket has somewhere to point. */
+    async findById(subscriptionId: string): Promise<SubscriberPlanReadModel | null> {
+        if (!Types.ObjectId.isValid(subscriptionId)) return null;
+        return this.findOneBy({ _id: new ObjectId(subscriptionId) } as Filter<SubscriberPlanReadModel>);
+    }
 }
 
 /**

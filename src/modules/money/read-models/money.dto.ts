@@ -7,6 +7,7 @@ import {
     RefundTransactionReadModel,
 } from '../repositories/payment-transaction.read.repository';
 import { PayoutRequestReadModel } from '../repositories/payout-request.read.repository';
+import { PlatformEarningsAccount } from '../gateways/money.gateway';
 import { PayoutDestinationDto, toMaskedDestinationDto } from './payout-destination.dto';
 
 /**
@@ -430,5 +431,48 @@ export function toRefundDto(row: RefundTransactionReadModel): RefundDto {
         initiatedBy: { id: toId(row.initiatedBy), role: row.initiatedByRole },
         createdAt: toIso(row.createdAt),
         completedAt: toIso(row.completedAt),
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The earnings-account directory
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One owner's four balances, as the Accounts screen reads them.
+ *
+ * ── Two changes worth knowing about ─────────────────────────────────────────
+ * This endpoint used to be a verbatim pass-through of jovi-mall's payload, typed
+ * `unknown` on the gateway and undocumented in `money.md`. It is mapped now, which is
+ * what lets `owner` carry a NAME — the directory previously showed ObjectIds, while
+ * `listPayouts` four lines away in the same controller has always hydrated them.
+ *
+ * ⚠ **The four balances must never be summed together.** They are stages of one pipeline:
+ * `requested` is a claim already staked against `available`, so a total double-counts.
+ * `meta.totals` sums each of them ACROSS owners, per currency, which is a different and
+ * legitimate question — see `EarningsAccountTotals`.
+ */
+export interface EarningsAccountDto {
+    owner: MoneyOwnerRef;
+    pending: number;
+    available: number;
+    reserve: number;
+    requested: number;
+    currency: string;
+    updatedAt: string | null;
+}
+
+export function toEarningsAccountDto(
+    row: PlatformEarningsAccount,
+    names: MoneyOwnerNames,
+): EarningsAccountDto {
+    return {
+        owner: toOwnerRef(row.ownerType, row.ownerId, names),
+        pending: row.pending,
+        available: row.available,
+        reserve: row.reserve,
+        requested: row.requested,
+        currency: row.currency,
+        updatedAt: row.updatedAt ?? null,
     };
 }

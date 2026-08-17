@@ -17,6 +17,7 @@ Design record: [`../ADR-008-VENDOR-MANAGEMENT.md`](../ADR-008-VENDOR-MANAGEMENT.
 | `POST` | `/vendors/:vendorId/restore` | `vendors.suspend` | **delegated** | ✅ |
 | `POST` | `/vendors/:vendorId/kyc/approve` | `vendors.kyc.review` | **delegated** | ✅ |
 | `POST` | `/vendors/:vendorId/kyc/reject` | `vendors.kyc.review` | **delegated** | ✅ |
+| `GET` | `/vendors/:vendorId/products/:productId` | `vendors.read` | **delegated** | — |
 | `POST` | `/vendors/:vendorId/products/:productId/suspend` | `vendors.products.manage` | **delegated** | ✅ |
 | `POST` | `/vendors/:vendorId/products/:productId/restore` | `vendors.products.manage` | **delegated** | ✅ |
 | `PATCH` | `/vendors/:vendorId/settings` | `vendors.settings.manage` | **delegated** | ✅ |
@@ -205,7 +206,36 @@ operational tally.
       "policyVersion": 3,
       "hasReturnPolicy": true,
       "hasCancellationPolicy": true,
-      "hasSupportPolicy": false
+      "hasSupportPolicy": false,
+
+      "returns": {
+        "returnEligible": true,
+        "returnWindowDays": 14,
+        "refundType": "partial",
+        "refundPercentage": 80,
+        "returnShippingPayer": "customer_reimbursed_if_defect",
+        "refundProcessingDays": 5,
+        "returnConditionNotes": "Unopened packaging only",
+        "inspector": "platform"
+      },
+      "cancellation": {
+        "cancellable": true,
+        "cancellationDeadline": "before_dispatch",
+        "cancellationDeadlineDays": null,
+        "cancellationFeeType": "percentage",
+        "cancellationFeeValue": 10,
+        "lateCancellationRefundType": "partial",
+        "lateCancellationRefundValue": 50
+      },
+      "support": {
+        "channels": [{ "type": "whatsapp", "contact": "+237670112233" }],
+        "eligibilityNotes": null,
+        "requiredInfo": ["order_number", "product_photo_video"],
+        "availability": "business_hours",
+        "availabilityDescription": "08:00–18:00 Mon–Sat",
+        "languages": ["fr", "en"]
+      },
+      "documents": []
     },
 
     "settings": {
@@ -236,7 +266,8 @@ operational tally.
 | `suspension` | **Present only when `status === "inactive"`.** Carries `at`, `reason`, `fromStatus` and `by` |
 | `verification.reviewedBy` | `null` while the verdict is still `pending` |
 | `addresses` | Business addresses. **Never payout details** — those are excluded by projection |
-| `policies` | **Presence, not content.** ~30 fields of the vendor's own commercial terms exist; the question a detail screen asks is "have they set this up" |
+| `policies` | **Content as well as presence, since the dashboard-request round.** The three booleans remain and are now *derived* from the content; `returns`, `cancellation` and `support` carry the terms themselves, each `null` when the vendor has stored none. See the field tables below |
+| `policies.returns.inspector` | **Administrator-controlled upstream, never vendor input** — it names who adjudicates a claim, not a term the vendor set. The same field, with the same caveat, exists on an agency's `damage` block |
 | `settings` | jovi-mall's schema defaults where no document exists — `vendor_settings` is created lazily, so an untouched vendor shows defaults rather than nulls |
 | `counts.products` | Keyed by status; only non-zero statuses appear |
 
@@ -304,7 +335,7 @@ did their agency"* is unanswerable without it, and the two have very different r
         "byAgencyId": null,
         "note": "Mislabelled weight — three customer complaints"
       },
-      "deliveryAgencyId": "665c0011223344556677889a",
+      "deliveryAgency": { "id": "665c0011223344556677889a", "businessName": "Littoral Express Delivery" },
       "lastOrderedAt": "2026-08-09T18:22:00.000Z",
       "createdAt": "2026-01-20T07:00:00.000Z",
       "updatedAt": "2026-08-10T13:02:41.008Z"
@@ -318,11 +349,154 @@ did their agency"* is unanswerable without it, and the two have very different r
 |---|---|
 | `mode` | `"advanced"` for documents predating the field |
 | `suspension` | `null` unless suspended. `byAgencyId` is set when an agency caused it |
+| **`deliveryAgency`** | ⚠️ **Replaces `deliveryAgencyId`** — a breaking rename from the dashboard-request round. An object rather than an id for two reasons: it removes an N+1 (a client resolving the name itself makes one request per distinct agency, in every client ever built), and it removes a permission question — the catalogue tab requires `vendors.read` alone, so a caller without `agencies.read` could not resolve the name at all. Resolved as the product's own override, else the vendor's default |
+| `deliveryAgency.businessName` | The Magazin's name. **`null` where it has none** — never `""`, and never the agency's `display_name`, which is a contact *person* |
+| `deliveryAgency: null` | Neither the product nor the vendor names an agency. A real and diagnostic state: a physical product in that condition cannot be activated |
 
 ### Errors
 
 `404 NOT_FOUND` when the vendor does not exist — checked first, so an empty catalogue reads as
 "they sell nothing" only when that is true.
+
+---
+
+## `GET /vendors/:vendorId/products/:productId`
+
+One listing, in full.
+
+| | |
+|---|---|
+| **Permission** | `vendors.read` — the same as the list |
+| **Transport** | **Delegated** |
+| **Audited** | — |
+
+Scoped by **both** ids: the ownership is the authorisation, so a `404` covers "no such
+vendor" and "the product does not belong to this vendor" alike.
+
+### ⚠️ Why this one read is delegated when every other vendor read is direct
+
+Not a drift from ADR-004 D-2 but a consequence of **ADR-009 D-6**. Two things in this payload
+can only be built where they live:
+
+- **`media`** needs `storage.getPublicUrl(key)`, and which provider that is comes from
+  `STORAGE_PROVIDER`. This service has no storage layer and must not grow one — a second copy
+  of that configuration in a second deployment is exactly the drift the split exists to prevent.
+- **`storage`** needs jovi-mall's storage-fee calculator. A copy of that arithmetic here would
+  be a second opinion about what a vendor owes their agency.
+
+So: a **record** whose projection needs machinery this service may not own is delegated.
+
+### Response `200`
+
+Every list field, plus:
+
+```jsonc
+{
+  "media": {
+    "images": [
+      { "id": "6612…", "key": "vendors/665a…/tomatoes-1.jpg",
+        "url": "https://cdn.example.com/vendors/665a…/tomatoes-1.jpg",
+        "mimeType": "image/jpeg", "size": 148213, "originalName": "tomatoes.jpg" }
+    ],
+    "primaryImage": { /* images[0], or null */ }
+  },
+
+  "pricing": {
+    "amount": 4500,
+    "compareAtAmount": 5200,
+    "currency": "XAF",
+    "range": null
+  },
+
+  "inventory": {
+    "tracked": true,
+    "available": 42,
+    "reserved": 6,
+    "sellable": 36,
+    "lowStockThreshold": null,
+    "allowOversell": false
+  },
+
+  "deliveryAgency": { "id": "665c…", "businessName": "Littoral Express Delivery", "status": "active" },
+
+  "storage": {
+    "basis": "per_sku_monthly",
+    "storageBasedEnabled": true,
+    "monthlyRatePerSku": 500,
+    "quantity": 42,
+    "monthlyEstimate": 21000,
+    "currency": "XAF",
+    "size": null
+  },
+
+  "variants": [
+    {
+      "id": "6613…", "name": "1 kg", "sku": "TOM-1KG", "status": "active",
+      "amount": 4500, "compareAtAmount": 5200,
+      "inventory": { "tracked": true, "available": 42, "reserved": 6, "sellable": 36,
+                     "lowStockThreshold": 10, "allowOversell": false },
+      "storage": { "basis": "per_sku_monthly", "storageBasedEnabled": true,
+                   "monthlyRatePerSku": 500, "quantity": 42, "monthlyEstimate": 21000,
+                   "currency": "XAF",
+                   "size": { "lengthCm": 30, "widthCm": 20, "heightCm": 12,
+                             "volumeCm3": 7200, "weightG": 1000, "source": "variant" } }
+    }
+  ]
+}
+```
+
+### The fields that need saying out loud
+
+| Field | Notes |
+|---|---|
+| `media.images` | Resolved `FileDetail` objects **with URLs**, thumbnail first, `image/*` only — a product's media may also hold a video or a spec sheet, and filtering is what makes the field's name true. Empty array when the listing carries none. Resolved from the **default variant**, falling back to the product's own media, which is the normal case |
+| `pricing` | **`null` on a product with no variants at all** — a broken listing, and saying so is the point. `amount` is the default variant's; `range` is `{min,max}` only when active variants disagree, `null` when they agree |
+| **`inventory.tracked`** | **`false` means stock is not counted, not that it is zero.** `available: 0` on a tracked listing is "sold out"; on an untracked one it is meaningless, and the two have opposite remedies. Every count below is `null` when this is `false` |
+| `inventory.reserved` | Units held mid-checkout. The same filter checkout itself enforces — active, unexpired holds |
+| `inventory.sellable` | `available − reserved`, floored at 0 |
+| Product-level `inventory` | Summed across **active** variants. `tracked` is `false` if **any** of them is infinite-stock: a product one of whose units is uncounted has no honest total. `lowStockThreshold` is `null` at product level because the alert is per SKU — read it off the variant rows |
+| `deliveryAgency.status` | The agency's own status, so a listing pointing at a deactivated agency is visible as such |
+
+### `storage` — a published rate, not an invoice
+
+| Field | Notes |
+|---|---|
+| `storageBasedEnabled` | **`false` means the agency does not offer warehousing at all**, so the estimate is 0 by definition rather than by accident. Say so on screen rather than printing a rate nobody agreed to |
+| `monthlyRatePerSku` | The agency's published tariff, from `policies.pricing.storage_based` |
+| `quantity` | The **catalogue** quantity the fee is quoted against — a figure both parties signed off on, since neither moves it unilaterally on a warehoused SKU. An infinite-stock SKU yields `0`; inventing a quantity for it would be a fabricated charge |
+| `monthlyEstimate` | `monthlyRatePerSku × quantity` |
+| `size` | Information for **sanity-checking** the rate — **never a multiplier**. The rate is flat per SKU. `source` says whether the dimensions came from the variant or the product's shipping defaults, because "we do not know how big this is" and "30×20×12" must be distinguishable on a screen justifying a charge. `null` at product level: a gallery of different-sized variants has no single size |
+
+> ### There is no `accruedThisPeriod`, and there should not be
+>
+> **The platform does not track, invoice or act on storage payment.** The rate has been
+> collected at agency onboarding since day one and has never been charged —
+> `EarningsQuoteService` deliberately excludes it from the per-order split, because it is rent
+> rather than a delivery fee. The only platform lever attached to it is the agency's own manual
+> suspension.
+>
+> So `monthlyEstimate` is what the agency *should be charging* to shelve this listing, which it
+> collects out of band. A field claiming what the vendor *owes this period* would be an invoice
+> this platform never issued.
+
+`storage: null` when the listing is not warehoused by an agency — a digital product, or a
+physical one collected from the vendor's own address. **`null` and "zero rent" are different
+facts** and must not both render as 0.
+
+### `variants`
+
+Every variant, **including archived ones**: a listing that went wrong is exactly what an
+administrator opens this screen to understand, and hiding the archived unit makes a product with
+one archived variant look like a product with none. Check `status`.
+
+`[]` on a product with no variants — never `null`.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Malformed id |
+| 404 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode` `VENDOR_NOT_FOUND` or `CATALOG_PRODUCT_NOT_FOUND` — no such vendor, or the product is not theirs |
 
 ---
 
@@ -564,6 +738,25 @@ Put the listing back on sale.
 | **Permission** | `vendors.products.manage` |
 | **Request body** | None |
 | **Response** | The product, message `"Product put back on sale"` |
+
+> ### ⚠️ This is the **only** call that lifts a `platform_oversight` suspension
+>
+> The other half of the interaction stated on `POST /vendors/:vendorId/restore`, repeated here
+> because it is the route an operator reaches for and it is easy to miss from one side.
+>
+> Reinstating the **vendor** republishes only the listings that cascade took down; a product an
+> administrator removed on its own merits stays down until this call. The reverse is equally
+> true and equally deliberate: this call refuses a product suspended for **any other** reason —
+> one an agency took down over unpaid storage is that agency's to release, and one the vendor
+> cascade suspended comes back when the vendor does.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 404 | `NOT_FOUND` | No such vendor, **or the product does not belong to this vendor** |
+| 422 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: "VENDOR_PRODUCT_NOT_OVERSIGHT_SUSPENDED"` — it was taken down for a different reason. `details.reason` names which |
+| 422 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: "VENDOR_PRODUCT_UNSUSPEND_BLOCKED"` — the activation gate refuses it. **`details.blockers` is the full checklist**, not the first failure: an operator fixing a listing needs every unmet requirement at once |
 
 ### Audit
 

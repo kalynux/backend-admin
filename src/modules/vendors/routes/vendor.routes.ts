@@ -80,6 +80,31 @@ defineRoute(router, {
 });
 
 /**
+ * One listing, in full — image, price, stock, the responsible agency by name, and what its
+ * storage rate comes to for this product.
+ *
+ * The same `vendors.read` as the list, and scoped by both ids for the same reason the two
+ * writes below are: the ownership is the authorisation, so a product belonging to another
+ * vendor is a 404 rather than a 403.
+ *
+ * Declared AFTER `/:vendorId/products` and before nothing that could shadow it — the two
+ * paths differ in segment count, so Express separates them without ambiguity. The POST
+ * sub-resources at the same path are different methods.
+ *
+ * Unlike every other vendor read this one is DELEGATED. See the controller for the
+ * argument; the short form is that a file id becomes a URL only where the storage provider
+ * is configured, and that is not here.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/:vendorId/products/:productId',
+    access: permission('vendors.read'),
+    validate: { params: VendorProductParamsSchema },
+    handler: VendorController.product,
+});
+
+/**
  * The activity feed needs BOTH permissions, in `all` mode.
  *
  * `vendors.read` because the subject is a vendor, and `audit.read` because the rows are

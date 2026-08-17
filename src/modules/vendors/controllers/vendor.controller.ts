@@ -9,6 +9,7 @@ import { sendPaginated, sendSuccess } from '../../../core/http/responses';
 import { requireAdminIdentity } from '../../admin-identity/domain/admin-identity.types';
 import { toAuditEntryDto } from '../../audit/domain/audit.dto';
 import { AuditRepository } from '../../audit/repositories/audit.repository';
+import { AgencyReadRepository } from '../../agencies/repositories/agency.read.repository';
 import { ListAuditQuery } from '../../audit/validators/audit.validator';
 import { UserReadRepository } from '../../users/repositories/user.read.repository';
 import * as gateway from '../gateways/vendor.gateway';
@@ -26,6 +27,7 @@ import {
     VendorProductReadRepository,
 } from '../repositories/vendor-product.read.repository';
 import { VendorReadModel, VendorReadRepository } from '../repositories/vendor.read.repository';
+import { toVendorPoliciesDto } from '../read-models/vendor-policies.dto';
 import {
     ListVendorActivityQuery,
     ListVendorProductsQuery,
@@ -67,6 +69,15 @@ const connections = new VendorConnectionReadRepository();
 const orders = new VendorOrderReadRepository();
 const users = new UserReadRepository();
 const audit = new AuditRepository();
+/**
+ * Reached for one thing only: the responsible agency's BUSINESS name on a catalogue row.
+ *
+ * A cross-module repository import, which this file otherwise avoids — justified because
+ * the alternative is either a duplicate Magazin join (two answers to "what is this agency
+ * called") or leaving the client to resolve it, which is the N+1 and the permission
+ * problem the field exists to remove.
+ */
+const agencies = new AgencyReadRepository();
 
 interface VendorListItemDto {
     id: string;
@@ -133,7 +144,28 @@ function toActor(
     return { id: id?.toString() ?? null, source: source ?? 'platform', name: name ?? null };
 }
 
-function toProductDto(product: VendorProductReadModel) {
+/**
+ * Which agency actually answers for a listing: its own override, else the vendor's default.
+ *
+ * That precedence is jovi-mall's `resolveEffectiveAgencyId`, restated here because this
+ * service reads the documents directly and holds no domain entity. Getting it wrong means
+ * naming one agency for another's warehouse — and the common case is the fallback, since
+ * most products carry no override at all.
+ */
+function effectiveAgencyId(
+    product: VendorProductReadModel,
+    vendorDefaultAgencyId: string | null,
+): string | null {
+    return product.delivery?.agency_id?.toString() ?? vendorDefaultAgencyId;
+}
+
+function toProductDto(
+    product: VendorProductReadModel,
+    vendorDefaultAgencyId: string | null,
+    agencyNames: Map<string, string | null>,
+) {
+    const agencyId = effectiveAgencyId(product, vendorDefaultAgencyId);
+
     return {
         id: product._id.toString(),
         title: product.title ?? null,
@@ -154,7 +186,25 @@ function toProductDto(product: VendorProductReadModel) {
                   note: product.suspension.note ?? null,
               }
             : null,
-        deliveryAgencyId: product.delivery?.agency_id?.toString() ?? null,
+        /**
+         * ⚠ **Replaces `deliveryAgencyId`, and it is a breaking rename.**
+         *
+         * An object rather than an id, for two reasons. It removes an N+1 — a client
+         * resolving the name itself makes one request per distinct agency, in every client
+         * ever built against this endpoint. And it removes a PERMISSION question: the
+         * catalogue tab requires `vendors.read` alone, so a caller without `agencies.read`
+         * could not resolve the name at all and saw a bare id with no way forward.
+         *
+         * `businessName` is the Magazin's, `null` when it has none — never `''`, and never
+         * the agency's `display_name`, which is a contact PERSON.
+         *
+         * `null` for the whole block when neither the product nor the vendor names an
+         * agency, which is a real and diagnostic state: a physical product in that
+         * condition cannot be activated.
+         */
+        deliveryAgency: agencyId
+            ? { id: agencyId, businessName: agencyNames.get(agencyId) ?? null }
+            : null,
         lastOrderedAt: toIso(product.lastOrderedAt),
         createdAt: toIso(product.createdAt) ?? String(product.createdAt),
         updatedAt: toIso(product.updatedAt) ?? String(product.updatedAt),
@@ -286,6 +336,11 @@ export class VendorController {
                 connections.countByStatus(vendorId),
             ]);
 
+        // Mapped once here rather than three times inside the response literal: the
+        // presence booleans below are DERIVED from the content, and deriving them from a
+        // second call would let the two disagree.
+        const content = toVendorPoliciesDto(vendor.policies);
+
         sendSuccess(res, {
             ...toVendorListItemDto(vendor, store ?? undefined),
 
@@ -384,15 +439,28 @@ export class VendorController {
             })),
 
             /**
-             * Presence, not content. `policies` carries ~30 fields of the vendor's own
-             * commercial terms, and the question a detail screen asks is "have they set
-             * this up" — the terms themselves are the vendor's to read and write.
+             * ⚠ **Content as of the dashboard-request round, not just presence.**
+             *
+             * This carried three booleans and the reasoning was "the question a detail
+             * screen asks is 'have they set this up'". That is wrong for the screen that
+             * matters: a dispute lands on what the return policy SAYS, and an
+             * administrator could not see it. See `read-models/vendor-policies.dto.ts` for
+             * why the agency's whole-block argument carries here a fortiori — a vendor's
+             * terms are published to every customer on the storefront.
+             *
+             * The booleans stay, derived from the content rather than replaced by it: a
+             * client may want to know whether to render a block before rendering one, and
+             * removing them would be a second breaking change for no gain.
              */
             policies: {
                 policyVersion: vendor.policy_version ?? 0,
-                hasReturnPolicy: vendor.policies?.return_policy?.return_eligible !== undefined,
-                hasCancellationPolicy: vendor.policies?.cancellation_policy?.cancellable !== undefined,
-                hasSupportPolicy: vendor.policies?.support_policy?.availability !== undefined,
+                hasReturnPolicy: content?.returns !== null && content?.returns !== undefined,
+                hasCancellationPolicy: content?.cancellation !== null && content?.cancellation !== undefined,
+                hasSupportPolicy: content?.support !== null && content?.support !== undefined,
+                returns: content?.returns ?? null,
+                cancellation: content?.cancellation ?? null,
+                support: content?.support ?? null,
+                documents: content?.documents ?? [],
             },
 
             /**
@@ -431,7 +499,7 @@ export class VendorController {
 
         // 404 first: an empty catalogue for a vendor that does not exist reads as "they
         // sell nothing" rather than "no such vendor".
-        await loadOr404(req.params.vendorId);
+        const { vendor } = await loadOr404(req.params.vendorId);
 
         const page = await products.search(req.params.vendorId, {
             search: query.search,
@@ -444,10 +512,58 @@ export class VendorController {
             sort: query.sort,
         });
 
+        /**
+         * One batched name lookup for the whole page, not one per row.
+         *
+         * The set is tiny in practice — a vendor's catalogue points at its default agency
+         * and occasionally at one override — but it is bounded by the page rather than by
+         * the domain, so it is batched on principle: the moment somebody adds per-product
+         * agencies at scale, an unbatched version becomes twenty queries silently.
+         */
+        const vendorDefaultAgencyId = vendor.default_delivery_agency_id?.toString() ?? null;
+        const agencyIds = [
+            ...new Set(
+                page.items
+                    .map((product) => effectiveAgencyId(product, vendorDefaultAgencyId))
+                    .filter((id): id is string => id !== null),
+            ),
+        ].map((id) => new ObjectId(id));
+        const agencyNames = await agencies.findBusinessNamesByIds(agencyIds);
+
         sendPaginated(
             res,
-            page.items.map(toProductDto),
+            page.items.map((product) => toProductDto(product, vendorDefaultAgencyId, agencyNames)),
             toPageMeta(page.total, page.page, page.limit),
+        );
+    });
+
+    /**
+     * GET /api/v1/vendors/:vendorId/products/:productId — one listing, in full.
+     *
+     * ── DELEGATED, and it is the only read on this mount that is ────────────────
+     * Every other vendor read is a direct query, per ADR-004 D-2. This one cannot be, and
+     * the reason is ADR-009 D-6 rather than an exception to D-2: projecting a product
+     * needs `storage.getPublicUrl(key)` to turn a `fileId` into an image, and this service
+     * has no storage layer and must not grow one — a second copy of `STORAGE_PROVIDER` in
+     * a second deployment is exactly the drift the split exists to prevent. The storage-fee
+     * quote is the second reason: the arithmetic lives in jovi-mall's
+     * `storage-fee.calculator.ts`, and a copy here would be a second opinion about what a
+     * vendor owes.
+     *
+     * So: a RECORD whose projection needs machinery this service may not own is delegated.
+     * That is a corollary of D-6, not a hole in D-1.
+     *
+     * `vendors.read`, scoped by both ids — the ownership is the authorisation, so a 404
+     * covers "no such vendor" and "not this vendor's product" alike.
+     */
+    static product = asyncHandler(async (req: Request, res: Response) => {
+        sendSuccess(
+            res,
+            await gateway.product(
+                req.params.vendorId,
+                req.params.productId,
+                actorContextOf(req),
+            ),
         );
     });
 
