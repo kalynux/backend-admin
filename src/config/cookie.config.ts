@@ -37,9 +37,33 @@ function base(): CookieOptions {
     };
 }
 
-/** Short-lived access cookie. Its lifetime matches the access token's own `exp`. */
+/**
+ * Access cookie.
+ *
+ * ⚠ **Its lifetime is deliberately NOT the access token's `exp`.**
+ *
+ * It used to be, and that broke refresh entirely. Giving the cookie the token's
+ * own 15-minute `maxAge` means the browser evicts it at the very moment the JWT
+ * becomes invalid — so the expired token is never presented, `extractToken`
+ * finds nothing, and `authenticate` answers `ADMIN_AUTH_MISSING_TOKEN` instead
+ * of `ADMIN_AUTH_TOKEN_EXPIRED`. Those two codes have different remedies: the
+ * first means *never signed in* and sends a client to the login screen, the
+ * second means *call `/auth/refresh`*. A dashboard therefore signed its operator
+ * out at exactly 15 minutes with a perfectly valid 7-day refresh cookie in the
+ * jar, having never once called refresh.
+ *
+ * The `TOKEN_EXPIRED` branch was reachable only during the few milliseconds of
+ * network latency between the JWT expiring and the cookie being evicted, which
+ * is why no test caught it — nothing exercises a 15-minute-old session.
+ *
+ * This is the **same argument `refreshCookieOptions` already makes below**: a
+ * cookie that dies before the thing it carries is what logs out a live session.
+ * Security is unchanged — the JWT is still cryptographically expired and still
+ * rejected by `verifyAccessToken`. The cookie is only the carrier, and a carrier
+ * that survives is what lets the server say *why* it refused.
+ */
 export function accessCookieOptions(): CookieOptions {
-    return { ...base(), maxAge: env().ADMIN_ACCESS_TOKEN_TTL * 1000 };
+    return { ...base(), maxAge: env().ADMIN_SESSION_ABSOLUTE_TTL * 1000 };
 }
 
 /**

@@ -24,22 +24,43 @@ import { env } from '../../config/env';
 
 const AUTH_WINDOW_MS = 60_000;
 
-function build(useRedis: RedisClientType | null): RequestHandler {
+/**
+ * The two buckets, and they are deliberately separate.
+ *
+ * `credential` covers login / mfa-verify / change-password — endpoints where the
+ * caller is *guessing*, and where a low ceiling is the entire point.
+ *
+ * `refresh` covers `/auth/refresh` alone. A refresh presents a rotating token the
+ * caller already holds, so it is not a guess and does not belong in a
+ * brute-force budget. Sharing one meant a handful of tab reloads exhausted the
+ * allowance, refresh answered `429`, and a client — which cannot tell a
+ * rate-limited refresh from a dead one — signed the operator out of a live
+ * session. Still bounded: reuse detection is a real signal and an unbounded
+ * endpoint is a free oracle.
+ */
+type Bucket = 'credential' | 'refresh';
+
+function build(bucket: Bucket, useRedis: RedisClientType | null): RequestHandler {
     return rateLimit({
         windowMs: AUTH_WINDOW_MS,
-        limit: env().ADMIN_AUTH_RATE_LIMIT_MAX,
+        limit:
+            bucket === 'refresh'
+                ? env().ADMIN_REFRESH_RATE_LIMIT_MAX
+                : env().ADMIN_AUTH_RATE_LIMIT_MAX,
         standardHeaders: 'draft-7',
         legacyHeaders: false,
         ...(useRedis
             ? {
                 store: new RedisStore({
-                    prefix: 'auth-rl:',
+                    // Distinct prefixes, or the two share one counter in Redis and
+                    // the split exists only in this file.
+                    prefix: bucket === 'refresh' ? 'refresh-rl:' : 'auth-rl:',
                     sendCommand: (...args: string[]) => useRedis.sendCommand(args),
                 }),
             }
             : {}),
         handler: (req, _res, next) => {
-            logger().warn({ ip: req.ip, path: req.path }, 'auth rate limit exceeded');
+            logger().warn({ ip: req.ip, path: req.path, bucket }, 'auth rate limit exceeded');
             next(createAppError(ERROR_CODES.RATE_LIMIT_EXCEEDED, 429, 'Too many authentication attempts'));
         },
     });
@@ -55,15 +76,18 @@ function build(useRedis: RedisClientType | null): RequestHandler {
  * with per-request state instead of shared state, silently defeating the limit.
  */
 let limiter: RequestHandler | null = null;
+let refreshLimiter: RequestHandler | null = null;
 
-/** Install the memory-backed limiter. Called by `createApp()`, after config is valid. */
+/** Install the memory-backed limiters. Called by `createApp()`, after config is valid. */
 export function ensureAuthRateLimiter(): void {
-    if (!limiter) limiter = build(null);
+    if (!limiter) limiter = build('credential', null);
+    if (!refreshLimiter) refreshLimiter = build('refresh', null);
 }
 
-/** Test-only: drop the limiter so a new ceiling or a fresh counter takes effect. */
+/** Test-only: drop the limiters so a new ceiling or a fresh counter takes effect. */
 export function resetAuthRateLimiter(): void {
     limiter = null;
+    refreshLimiter = null;
 }
 
 /**
@@ -74,8 +98,9 @@ export function resetAuthRateLimiter(): void {
 export async function initAuthRateLimiter(): Promise<void> {
     try {
         const client = (await getRedisClient(ADMIN_RATE_LIMIT_DB)) as RedisClientType;
-        limiter = build(client);
-        logger().info('auth rate limiter using the shared Redis store');
+        limiter = build('credential', client);
+        refreshLimiter = build('refresh', client);
+        logger().info('auth rate limiters using the shared Redis store');
     } catch (error) {
         logger().error(
             { err: error instanceof Error ? error.message : String(error) },
@@ -93,4 +118,13 @@ export const authRateLimiter: RequestHandler = (req, res, next) => {
     // caller that mounted the router without building the app.
     ensureAuthRateLimiter();
     return limiter!(req, res, next);
+};
+
+/**
+ * `/auth/refresh` only. See the `Bucket` note above for why it is not the same
+ * counter as the credential endpoints.
+ */
+export const refreshRateLimiter: RequestHandler = (req, res, next) => {
+    ensureAuthRateLimiter();
+    return refreshLimiter!(req, res, next);
 };

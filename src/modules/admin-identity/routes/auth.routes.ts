@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import { AuthController } from '../controllers/auth.controller';
 import { defineRoute, mayRecord, mfaEnrolment, publicRoute, records, selfService } from '../../../api/route-manifest';
-import { authRateLimiter } from '../../../api/middlewares/auth-rate-limit.middleware';
+import {
+    authRateLimiter,
+    refreshRateLimiter,
+} from '../../../api/middlewares/auth-rate-limit.middleware';
 import {
     ChangePasswordSchema,
     LoginSchema,
@@ -90,8 +93,12 @@ defineRoute(router, {
     // Not behind `requireAdmin`: the entire purpose is to be callable once the access
     // token has expired. Its own credential is the refresh token, which `auth.refresh()`
     // verifies and rotates.
-    access: publicRoute('Carries its own credential — the refresh token — and is rate limited like one'),
-    before: [authRateLimiter],
+    access: publicRoute('Carries its own credential — the refresh token — and is rate limited in its own bucket'),
+    // Its OWN bucket, not the credential one. A refresh presents a token the
+    // caller already holds, so it is not a guess; sharing the login ceiling meant
+    // a few tab reloads produced a 429, which a client cannot distinguish from a
+    // dead session and acts on by signing a live operator out.
+    before: [refreshRateLimiter],
     /**
      * The clearest `mayRecord` on the service: a successful rotation records NOTHING.
      *

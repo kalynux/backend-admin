@@ -99,13 +99,29 @@ const EnvSchema = z
         ADMIN_LOCKOUT_DURATION_S: positiveInt.default(900),        // 15 min
 
         /**
-         * Per-IP ceiling on the CREDENTIAL endpoints (login, mfa/verify, refresh) per
-         * minute. Bounds one source spraying a password across many accounts, which
-         * per-account lockout cannot see. Configurable because a deployment behind a
-         * shared corporate NAT legitimately needs a higher value — every admin appears
-         * as one IP there.
+         * Per-IP ceiling on the CREDENTIAL endpoints (login, mfa/verify,
+         * change-password) per minute. Bounds one source spraying a password across
+         * many accounts, which per-account lockout cannot see. Configurable because a
+         * deployment behind a shared corporate NAT legitimately needs a higher value —
+         * every admin appears as one IP there.
          */
         ADMIN_AUTH_RATE_LIMIT_MAX: positiveInt.default(10),
+
+        /**
+         * Per-IP ceiling on `/auth/refresh` per minute — its OWN bucket.
+         *
+         * A refresh is not a credential guess. It presents a rotating token the caller
+         * already holds, so it belongs in no brute-force budget: sharing one with
+         * `/auth/login` meant a handful of tab reloads exhausted the allowance and the
+         * refresh answered `429`, which a client reads as a dead session and acts on by
+         * signing the operator out of a live one.
+         *
+         * Still bounded, because refresh-token reuse detection is a real signal and an
+         * unbounded endpoint is a free oracle. Higher than the credential ceiling
+         * because the legitimate rate is genuinely higher: every open tab refreshes on
+         * its own schedule, and one browser can hold many.
+         */
+        ADMIN_REFRESH_RATE_LIMIT_MAX: positiveInt.default(60),
 
         /** Tiers at or above this level MUST have TOTP active. 1 = developers only. */
         ADMIN_MFA_REQUIRED_TIER: z.coerce.number().int().min(1).max(3).default(1),
