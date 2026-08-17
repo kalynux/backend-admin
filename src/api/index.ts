@@ -120,6 +120,14 @@ apiV1.use('/vendors', vendorRoutes);
 import { agencyRoutes } from '../modules/agencies/routes/agency.routes';
 apiV1.use('/agencies', agencyRoutes);
 
+/**
+ * Support tickets (Phase 17) — the eleven `support.tickets.*` permissions catalogued at
+ * Phase 3 finally have a surface. jovi-mall's `/api/admin/tickets` mount is deleted, so this
+ * is the only administrative door onto tickets.
+ */
+import { supportTicketRoutes } from '../modules/support/routes/ticket.routes';
+apiV1.use('/support/tickets', supportTicketRoutes);
+
 import { agentRoutes } from '../modules/agents/routes/agent.routes';
 apiV1.use('/agents', agentRoutes);
 
@@ -281,5 +289,34 @@ apiV1.use('/dev-tools', devToolsRoutes);
  */
 import notificationRoutes from '../modules/notifications/routes/notification.routes';
 apiV1.use('/notifications', notificationRoutes);
+
+/**
+ * Files — one operation, and it exists because an id cannot become a picture on this side.
+ *
+ * Every DTO here ships `logoFileId` / `avatarFileId` / `bannerFileId` /
+ * `deliveryProofFileId` as opaque ids, and the contract explains why (ADR-009 D-6: no
+ * storage layer here, ever). What it did not provide was anywhere for the dashboard to
+ * take one, since the dashboard talks to this service alone. Delegated, so
+ * `STORAGE_PROVIDER` stays configured in one place.
+ *
+ * ⚠ It resolves; it does not enumerate. `files.orphans.read` is the listing and is not
+ * mounted here.
+ */
+import { fileRoutes } from '../modules/files/routes/file.routes';
+apiV1.use('/files', fileRoutes);
+
+/**
+ * Contracts — one agent↔agency relationship, by its own id.
+ *
+ * Its own prefix rather than a path under `/agents` or `/agencies`, because it belongs to
+ * both and to neither: hanging it off either directory would make the url claim a primary
+ * party that does not exist, and would force a caller holding only a contract id — which
+ * is what a support ticket carries — to look up an agent first.
+ *
+ * The read needs both directories' permissions. The three writes freeze or end a
+ * relationship and touch no terms; see the router.
+ */
+import { contractRoutes } from '../modules/agencies/routes/contract.routes';
+apiV1.use('/contracts', contractRoutes);
 
 export { apiV1 };

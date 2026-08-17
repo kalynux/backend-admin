@@ -472,7 +472,23 @@ t.assert('a different target produces a different key', () =>
 t.section('6. Resource scope');
 
 t.assert('a Developer sees every ticket', () => resolveScope(identity('d', 1), 'tickets').kind === 'all');
-t.assert('an Admin sees every ticket', () => resolveScope(identity('a', 2), 'tickets').kind === 'all');
+
+/**
+ * An Admin used to be `{ kind: 'all' }` here, beside the Developer. Phase 17 narrowed it,
+ * and the narrowing is the policy rather than a tightening for its own sake: escalating a
+ * ticket to a Developer has to mean something, and it means nothing if the person who
+ * escalated it can still act on it afterwards.
+ */
+t.assert('an Admin no longer sees every ticket', () =>
+    resolveScope(identity('a', 2), 'tickets').kind !== 'all');
+
+t.assert('an Admin is scoped to their own, the pool, and Support’s', () => {
+    const scope = resolveScope(identity('a1', 2), 'tickets');
+    return scope.kind === 'assigned'
+        && scope.adminIds.length === 1 && scope.adminIds[0] === 'a1'
+        && scope.includeUnassigned
+        && scope.alsoTiers.length === 1 && scope.alsoTiers[0] === 3;
+});
 
 t.assert('Support is scoped to its own tickets', () => {
     const scope = resolveScope(identity('s1', 3), 'tickets');
@@ -484,23 +500,46 @@ t.assert('Support also sees the unassigned queue — otherwise nothing can be cl
     return scope.kind === 'assigned' && scope.includeUnassigned;
 });
 
+// The other half of the same rule: Support reaches no peer's work, only its own.
+t.assert('Support reaches no other tier, not even a peer', () => {
+    const scope = resolveScope(identity('s1', 3), 'tickets');
+    return scope.kind === 'assigned' && scope.alsoTiers.length === 0;
+});
+
+const held = (adminId: string, tier: AdminTier) => ({ adminId, tier });
+const SUPPORT_SCOPE = { kind: 'assigned', adminIds: ['me'], includeUnassigned: true, alsoTiers: [] } as const;
+const ADMIN_SCOPE = { kind: 'assigned', adminIds: ['me'], includeUnassigned: true, alsoTiers: [3] } as const;
+
 t.assert('isTicketInScope(all) admits anything', () =>
-    isTicketInScope({ kind: 'all' }, 'someone-else') && isTicketInScope({ kind: 'all' }, null));
+    isTicketInScope({ kind: 'all' }, held('someone-else', 1)) && isTicketInScope({ kind: 'all' }, null));
 
 t.assert('isTicketInScope(none) admits nothing', () =>
-    !isTicketInScope({ kind: 'none' }, 'me') && !isTicketInScope({ kind: 'none' }, null));
+    !isTicketInScope({ kind: 'none' }, held('me', 3)) && !isTicketInScope({ kind: 'none' }, null));
 
 t.assert('isTicketInScope(assigned) admits your own', () =>
-    isTicketInScope({ kind: 'assigned', adminIds: ['me'], includeUnassigned: true }, 'me'));
+    isTicketInScope(SUPPORT_SCOPE, held('me', 3)));
 
 t.assert('isTicketInScope(assigned) refuses someone else’s', () =>
-    !isTicketInScope({ kind: 'assigned', adminIds: ['me'], includeUnassigned: true }, 'them'));
+    !isTicketInScope(SUPPORT_SCOPE, held('them', 3)));
 
 t.assert('isTicketInScope(assigned) admits unassigned when configured', () =>
-    isTicketInScope({ kind: 'assigned', adminIds: ['me'], includeUnassigned: true }, null));
+    isTicketInScope(SUPPORT_SCOPE, null));
 
 t.assert('...and refuses it when not', () =>
-    !isTicketInScope({ kind: 'assigned', adminIds: ['me'], includeUnassigned: false }, null));
+    !isTicketInScope({ kind: 'assigned', adminIds: ['me'], includeUnassigned: false, alsoTiers: [] }, null));
+
+// `alsoTiers` — the supervision rule, in its single-record form.
+t.assert('an Admin scope admits a ticket a Support administrator holds', () =>
+    isTicketInScope(ADMIN_SCOPE, held('someone-in-support', 3)));
+
+t.assert('an Admin scope refuses a ticket a Developer holds', () =>
+    !isTicketInScope(ADMIN_SCOPE, held('a-developer', 1)));
+
+t.assert('an Admin scope refuses another Admin’s ticket', () =>
+    !isTicketInScope(ADMIN_SCOPE, held('another-admin', 2)));
+
+t.assert('a Support scope refuses a ticket a Support PEER holds', () =>
+    !isTicketInScope(SUPPORT_SCOPE, held('a-peer', 3)));
 
 t.assert('every scoped permission names a resolvable resource', () =>
     PERMISSION_NAMES.every((name) => {
@@ -701,8 +740,17 @@ t.assert('no endpoint is listed twice', () => {
     return new Set(keys).size === keys.length;
 });
 
-t.assert('the ticket router contributes 18 rows, not 19', () =>
-    LEGACY_ENDPOINT_MAP.filter((row) => row.path.startsWith('/api/admin/tickets')).length === 18);
+/**
+ * The eighteen ticket rows are PORTED (Phase 17) and gone from the checklist.
+ *
+ * This assertion used to read "the ticket router contributes 18 rows, not 19" — a count
+ * pinned against `PHASE-0-DISCOVERY.md:48`, which said 19 while the router declared 18. That
+ * was the right check while the rows existed, and it became a check that memorised the
+ * pre-port state the moment they were ported: it failed for the success. Restated in the
+ * `gone from the checklist` form the COD rows already use, which is the form that stays true.
+ */
+t.assert('the eighteen ticket rows are gone from the checklist', () =>
+    !LEGACY_ENDPOINT_MAP.some((row) => row.path.startsWith('/api/admin/tickets')));
 
 t.assert('every mapped permission is granted to some tier', () =>
     LEGACY_ENDPOINT_MAP.every((row) =>
@@ -712,8 +760,19 @@ t.assert('the five COD rows ported in Phase 4 are gone from the checklist', () =
     !LEGACY_ENDPOINT_MAP.some((row) => row.path.startsWith('/api/admin/cod/remittances'))
     && !LEGACY_ENDPOINT_MAP.some((row) => row.path === '/api/admin/cod/deposits/:id/confirm'));
 
-t.assert('only the two self-profile routes map to no permission', () =>
-    LEGACY_ENDPOINT_MAP.filter((row) => row.permission === null).length === 2);
+/**
+ * The two self-profile rows were the only `null`-permission entries, and Phase 17 deleted
+ * them — their targets (`GET`/`PATCH /administrators/me`) have existed since Phase 2 as
+ * `selfService` routes, which is exactly what `permission: null` meant.
+ *
+ * This assertion used to read "only the two self-profile routes map to no permission" and
+ * pinned the count at 2, so it FAILED when the stale rows were removed — the check was
+ * enforcing the drift rather than catching it. Pinned at 0 now: a `null` reappearing means
+ * somebody added an unported self-service row, which is legal (the type keeps `null` for
+ * exactly that) but should be a deliberate edit here rather than a silent one there.
+ */
+t.assert('no legacy row maps to a null permission', () =>
+    LEGACY_ENDPOINT_MAP.filter((row) => row.permission === null).length === 0);
 
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('10. Error codes');

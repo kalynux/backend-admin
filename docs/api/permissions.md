@@ -15,9 +15,9 @@ Design records: [`../ADR-003-GRANULAR-PERMISSIONS.md`](../ADR-003-GRANULAR-PERMI
 
 | Level (`tier`) | Label | Holds | Shape of the job |
 |---|---|---|---|
-| **1** | Developer | 110 of 110 | Everything, including the developer tools and every escalation-flagged action |
-| **2** | Admin | 93 of 110 | The operational tier — runs the platform day to day, including the money |
-| **3** | Support | 23 of 110 | Ticket work plus the read-only lookups needed to answer a ticket. Nothing financial, nothing destructive, no sight of the administrator directory |
+| **1** | Developer | 113 of 113 | Everything, including the developer tools and every escalation-flagged action |
+| **2** | Admin | 96 of 113 | The operational tier — runs the platform day to day, including the money |
+| **3** | Support | 24 of 113 | Ticket work plus the read-only lookups needed to answer a ticket. Nothing financial, nothing destructive, no sight of the administrator directory |
 
 A level is an administrator's **entire** authorization state. `tier` appears on the profile
 returned by `GET /auth/me`.
@@ -122,7 +122,7 @@ do not reach for `financial` merely because a read concerns money.
 ## The matrix
 
 ● granted  ·  not granted  ·  **†** = catalogued policy with **no endpoint built yet**
-(28 of 110 permissions; the policy is decided ahead of the surface, deliberately)
+(27 of 113 permissions; the policy is decided ahead of the surface, deliberately)
 
 ### `agents`
 
@@ -135,6 +135,7 @@ do not reach for `financial` merely because a read concerns money.
 | `agents.tracking.set` | write | ● | ● | · | — | Override an agent’s live-location tracking permission |
 | `agents.cod_threshold.set` | write | ● | ● | · | financial | Set how much cash on delivery an agent may hold before remitting |
 | `agents.transfer` | write | ● | ● | · | — | Move an agent from one delivery agency to another |
+| `agents.contracts.manage` | write | ● | ● | · | — | Suspend, reinstate or terminate one agent↔agency contract (never its terms) |
 
 ### `agencies`
 
@@ -221,10 +222,11 @@ do not reach for `financial` merely because a read concerns money.
 | `content.authors.write` † | write | ● | ● | · | — | Create and edit article authors |
 | `content.authors.delete` † | write | ● | ● | · | destructive | Permanently delete an article author |
 
-### `files`  — *no endpoints yet*
+### `files`
 
 | Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
 |---|---|:-:|:-:|:-:|---|---|
+| `files.resolve` | read | ● | ● | ● | — | Resolve file ids returned by this service into names, types and URLs |
 | `files.orphans.read` † | read | ● | ● | · | — | List uploaded files no record refers to |
 | `files.delete` † | write | ● | · | · | destructive | Permanently delete a file from storage — unrecoverable |
 
@@ -242,7 +244,8 @@ do not reach for `financial` merely because a read concerns money.
 | `users.update` | write | ● | ● | · | — | Change a user’s login email or phone number |
 | `users.suspend` | write | ● | ● | · | — | Suspend or reinstate a user account, blocking sign-in on every device |
 | `users.sessions.revoke` † | write | ● | ● | · | — | Force a user to sign out of every device |
-| `users.password.reset` † | write | ● | ● | · | — | Reset a user’s password |
+| `users.password.reset` | write | ● | ● | · | — | Send a user a password-reset link over email, WhatsApp or Telegram |
+| `users.login_link.send` | write | ● | ● | · | — | Send a customer a passwordless sign-in link over email, WhatsApp or Telegram |
 | `users.roles.manage` † | write | ● | · | · | destructive | Add or remove a user’s platform roles |
 
 ### `vendors`

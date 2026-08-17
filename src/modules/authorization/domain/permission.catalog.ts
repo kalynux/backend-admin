@@ -150,6 +150,35 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'agents', action: 'write', phase: 5,
         summary: 'Move an agent from one delivery agency to another',
     },
+    /**
+     * Freezing or ending ONE agent↔agency contract — added in the dashboard-request round.
+     *
+     * ── The line it sits on, because the family's docs argue the opposite case ───
+     * `agents.md` refuses contract writes on the grounds that "a live contract's terms
+     * change by proposal between the two parties, never by edit". That reasoning is
+     * sound and this permission does not touch it: approving a pending contract and
+     * rewriting agreed terms stay refused, and stay refused for that exact reason — a
+     * `terms_proposed_by: null` contract exists precisely because nobody has stated
+     * terms, so approving it binds an agent to a default that pays zero.
+     *
+     * What this grants is suspend, reinstate and terminate. "Do not let an administrator
+     * impose terms" and "do not let an administrator stop an abusive relationship" are
+     * different claims, and only the first was ever argued. It is the same lever
+     * `agencies.deactivate` already provides one level up.
+     *
+     * ⚠️ Not `destructive`, deliberately, and the reason is mechanical as well as
+     * semantic: nothing is deleted (every status change is append-only history), and
+     * flagging it would drop it out of `allInFamily()` for tier 2, whose job this is.
+     * Terminate is the closest to destructive and is also the one jovi-mall may refuse
+     * outright — it needs the counterparty's agreement and the outstanding COD and agent
+     * payment cleared, and there is no administrative override.
+     *
+     * Support does not hold it: freezing somebody's livelihood is not ticket work.
+     */
+    'agents.contracts.manage': {
+        family: 'agents', action: 'write', phase: 5,
+        summary: 'Suspend, reinstate or terminate one agent↔agency contract (never its terms)',
+    },
 
     // ═══ AGENCIES ═══ 4 legacy endpoints ══════════════════════════════════════
     'agencies.read': {
@@ -427,6 +456,32 @@ export const PERMISSION_CATALOG = Object.freeze({
     },
 
     // ═══ FILES ═══ 2 legacy endpoints, currently guarded inline ═══════════════
+    /**
+     * Turning a `*FileId` this surface already handed out into something renderable.
+     *
+     * ── Why it exists, and why it is granted to everyone ────────────────────────
+     * Every DTO here ships file references as opaque ids — `logoFileId`, `avatarFileId`,
+     * `bannerFileId`, `deliveryProofFileId` — because this service resolves no URLs and
+     * must not grow a storage layer (ADR-009 D-6). The contract then told the dashboard
+     * to resolve them "against jovi-mall", which the dashboard cannot do: it talks to this
+     * service and to nothing else, by design. So every avatar and logo on the admin
+     * surface rendered as a placeholder.
+     *
+     * The read is granted to all three tiers because it discloses nothing new. The caller
+     * is already holding the id, which means they already passed the guard on the record
+     * that carries it; a file id is a 24-hex value nobody guesses; and the answer is
+     * metadata plus a storage URL. Gating it behind `agencies.read` would have meant a
+     * `vendors.read` holder could not see a vendor's own logo, and gating it behind all
+     * six would have been a permission nobody could name.
+     *
+     * ⚠️ What keeps that safe is that it RESOLVES and never ENUMERATES. It takes an
+     * explicit id set and answers about those; there is no listing form and there must
+     * not be one. `files.orphans.read` below is the listing, and it is tier-1-only.
+     */
+    'files.resolve': {
+        family: 'files', action: 'read', phase: 5,
+        summary: 'Resolve file ids returned by this service into names, types and URLs',
+    },
     'files.orphans.read': {
         family: 'files', action: 'read', phase: 5,
         summary: 'List uploaded files no record refers to',
@@ -484,15 +539,51 @@ export const PERMISSION_CATALOG = Object.freeze({
         summary: 'Force a user to sign out of every device',
     },
     /**
-     * ⚠️ **Declared, and not built.** jovi-mall has no administrator-initiated password
-     * reset: `updatePassword` exists on the repository with no admin caller, and the
-     * user-facing flow is a self-service email round trip. Issuing a one-time password
-     * to a platform user needs a delivery channel and an expiry policy neither service
-     * has decided on yet.
+     * **Routed as of the dashboard-request round.** It was catalogued-and-unbuilt for the
+     * reason recorded here: jovi-mall had no administrator-initiated reset, and issuing a
+     * credential needed a delivery channel and an expiry policy neither service had
+     * decided on. Both now exist, and the endpoint was built on top of them rather than
+     * beside them — `PasswordResetService.issueResetLinkFor` is the same 32-byte token
+     * with the same 30 minutes and the same `password_changed_at` revocation the
+     * self-service flow already used. It is a third ENTRANCE, not a second mechanism.
+     *
+     * ⚠️ **Tier 3 must never hold this.** Support answers delivery tickets. A support
+     * agent who can mail a working reset link to any vendor can take over any shop, and
+     * the audit row would record a routine-looking action. `assertGrantTableValid()` does
+     * not catch this on its own — the permission carries no `financial` or `destructive`
+     * flag, so the protection is that SUPPORT names its grants by hand and this is not
+     * among them.
+     *
+     * Note it does NOT reset a password: it sends the party a link to set their own. An
+     * administrator never learns or chooses the credential, which is the difference from
+     * `POST /administrators/:adminId/password-reset` one mount over — that one generates
+     * a password and shows it to the operator, because an administrator has no other
+     * channel to be reached on.
      */
     'users.password.reset': {
         family: 'users', action: 'write', phase: 6,
-        summary: 'Reset a user’s password',
+        summary: 'Send a user a password-reset link over email, WhatsApp or Telegram',
+    },
+    /**
+     * Sending a customer a passwordless sign-in link.
+     *
+     * ── Why this is its own permission and not `users.password.reset` ────────────
+     * The two look symmetric and are not. A reset link grants nothing until the person
+     * chooses a new password, and it evicts every existing session when they do — its
+     * worst case is a locked-out user. A sign-in link IS a session: whoever opens the
+     * message is signed in as that customer. Collapsing them would mean a tier granted
+     * "help people back into their account" silently also got "sign in as a customer",
+     * and no audit row would distinguish the two acts.
+     *
+     * Customers only, enforced in jovi-mall — `MessagingLoginService` scopes every
+     * session it mints to `customer` as a literal. A vendor, agency or agent asking for
+     * one gets `USER_LOGIN_LINK_ROLE_UNSUPPORTED`.
+     *
+     * ⚠️ Tier 3 must not hold it, for the same reason as above.
+     */
+    'users.login_link.send': {
+        family: 'users', action: 'write', phase: 6,
+        summary: 'Send a customer a passwordless sign-in link over email, WhatsApp or Telegram',
     },
     'users.roles.manage': {
         family: 'users', action: 'write', phase: 6, destructive: true,

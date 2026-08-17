@@ -452,6 +452,23 @@ different database with a different vocabulary, and **the whole module is delete
 | **Sorting** | None offered |
 | **Feature flag** | `audit.legacy_feed`, **on by default**. When off the route answers `404 AUDIT_LEGACY_FEED_DISABLED` so it can be retired ahead of deleting the module |
 
+> ### The legacy feed is **list-only, by design**
+>
+> There is no `GET /audit/legacy/:id`, and there will not be one. Recorded here because the
+> absence otherwise reads as an omission next to `GET /audit/:auditId`, which does exist.
+>
+> Three reasons, and the first is the strongest: **a legacy row already carries everything the
+> writer stored.** Unlike an `AuditEntryDto` — whose detail route adds `payload`, `before`,
+> `after` and `stateTruncated`, four fields the list deliberately omits — the shape below is
+> the whole record. A detail route would return the row you already have.
+>
+> What it would add is addressability, which is real but small, against a module that is
+> **deleted at cutover**: `meta.unportedEndpoints` counts down to zero, and when it reaches it
+> this feed and the shim behind it go. A route added now is surface whose only future is that
+> deletion list.
+>
+> Clients should expand the row they are holding.
+
 ### Query parameters
 
 Narrower than the real feed's on purpose.

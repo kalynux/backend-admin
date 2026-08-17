@@ -73,14 +73,14 @@ Every permission that exists, with its metadata.
 | Field | Type | Notes |
 |---|---|---|
 | `families[]` | array | The 21 families in declaration order, each listing its permission names |
-| `permissions[]` | array | All 110 permissions |
+| `permissions[]` | array | All 113 permissions |
 | `permissions[].action` | `"read"` \| `"write"` \| `"approve"` | |
 | `permissions[].summary` | string | Written for an administrator, not an engineer — safe to render in a UI |
 | `permissions[].financial` etc. | boolean | The four sensitivity flags. **The dual-control *predicate* is never exposed** — only whether one exists |
 | `permissions[].scoped` | boolean | Whether reads behind it are additionally narrowed row-by-row |
 | `permissions[].phase` | number | The build phase. Includes permissions whose endpoints are **not built yet**, so the dashboard can be written against the finished vocabulary rather than a moving one |
 
-28 of the 110 have no endpoint yet — see the `†` markers in [permissions.md](permissions.md).
+27 of the 113 have no endpoint yet — see the `†` markers in [permissions.md](permissions.md).
 
 ---
 

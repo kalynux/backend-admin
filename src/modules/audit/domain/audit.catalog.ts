@@ -358,6 +358,142 @@ export const AUDIT_CATALOG = Object.freeze({
         transport: 'delegated',
         summary: 'Moved an agent from one delivery agency to another',
     },
+    /**
+     * Three names, one permission, for the reason `agents.ban`/`agents.unban` are two:
+     * a single label makes the trail say "somebody did something to a contract" and
+     * forces every reader to open the row to learn which direction it went. Suspending
+     * and reinstating are opposite acts and the difference is the whole content.
+     *
+     * `target: 'agent'` although the subject is a contract: the audit target vocabulary
+     * has no `contract` member, and the agent is the party whose livelihood this affects
+     * — which is the record a reviewer will search by.
+     */
+    'agents.contracts.suspend': {
+        permission: 'agents.contracts.manage',
+        target: 'agent',
+        transport: 'delegated',
+        summary: 'Froze one agent↔agency contract — no new assignments, terms untouched',
+    },
+    'agents.contracts.reinstate': {
+        permission: 'agents.contracts.manage',
+        target: 'agent',
+        transport: 'delegated',
+        summary: 'Unfroze one agent↔agency contract',
+    },
+    /**
+     * ⚠ The one action on this surface that routinely does NOT do what its name says,
+     * and the row records that honestly. Deactivation needs the counterparty's agreement
+     * and the outstanding COD and agent payment cleared, so the outcome is often a
+     * pending request rather than a terminated contract. The `after` carries which.
+     */
+    'agents.contracts.terminate': {
+        permission: 'agents.contracts.manage',
+        target: 'agent',
+        transport: 'delegated',
+        summary: 'Asked to end one agent↔agency contract (completes only once the balances are clear)',
+    },
+
+    // ═══ SUPPORT TICKETS — delegated to jovi-mall (Phase 17) ══════════════════
+    //
+    // Every one is `delegated`: jovi-mall creates tickets in-process from the payout,
+    // dispute and booking-refund paths and publishes on its in-process event bus for each
+    // write, so this service could neither own the collection nor write it without silently
+    // dropping the customer's notification.
+    //
+    // Reads are not here, and that is ADR-006 D-5 — a ticket read moves nothing. The one
+    // audited read on this whole service remains the payout destination, where the
+    // disclosure IS the action.
+
+    'support.tickets.create': {
+        permission: 'support.tickets.create',
+        target: 'ticket',
+        transport: 'delegated',
+        summary: 'Opened a support ticket on somebody’s behalf',
+    },
+    'support.tickets.update': {
+        permission: 'support.tickets.update',
+        target: 'ticket',
+        transport: 'delegated',
+        summary: 'Edited a ticket’s subject or description',
+    },
+    'support.tickets.status.set': {
+        permission: 'support.tickets.update',
+        target: 'ticket',
+        transport: 'delegated',
+        summary: 'Moved a ticket to a new status',
+    },
+    'support.tickets.priority.set': {
+        permission: 'support.tickets.update',
+        target: 'ticket',
+        transport: 'delegated',
+        summary: 'Changed a ticket’s priority — which locks it to administrators thereafter',
+    },
+    /**
+     * Handing over and claiming are two actions on one endpoint, and they stay two.
+     *
+     * "Gave this ticket to X" and "took this ticket" read differently six months later, and
+     * only the first names another person. Same reasoning as `agencies.deactivate` and
+     * `agencies.reactivate`, which also share a shape and not a name.
+     */
+    'support.tickets.assign': {
+        permission: 'support.tickets.assign',
+        target: 'ticket',
+        transport: 'delegated',
+        summary: 'Handed a ticket to another administrator',
+    },
+    'support.tickets.claim': {
+        permission: 'support.tickets.assign',
+        target: 'ticket',
+        transport: 'delegated',
+        summary: 'Claimed an unassigned ticket from the pool',
+    },
+    'support.tickets.close': {
+        permission: 'support.tickets.lifecycle',
+        target: 'ticket',
+        transport: 'delegated',
+        summary: 'Closed a ticket',
+    },
+    'support.tickets.reopen': {
+        permission: 'support.tickets.lifecycle',
+        target: 'ticket',
+        transport: 'delegated',
+        summary: 'Reopened a closed ticket',
+    },
+    'support.tickets.followers.add': {
+        permission: 'support.tickets.followers.manage',
+        target: 'ticket',
+        transport: 'delegated',
+        summary: 'Added a follower to a ticket',
+    },
+    'support.tickets.followers.remove': {
+        permission: 'support.tickets.followers.manage',
+        target: 'ticket',
+        transport: 'delegated',
+        summary: 'Removed a follower from a ticket',
+    },
+    /**
+     * The note's TEXT is deliberately absent from the row's payload — see the gateway. It is
+     * staff commentary on somebody's support case, the note itself is the durable record, and
+     * copying it here duplicates personal data into a store with a different retention rule.
+     */
+    'support.tickets.notes.create': {
+        permission: 'support.tickets.notes.write',
+        target: 'ticket',
+        transport: 'delegated',
+        summary: 'Added a note to a ticket',
+    },
+    'support.tickets.attachments.attach': {
+        permission: 'support.tickets.attachments.write',
+        target: 'ticket',
+        transport: 'delegated',
+        summary: 'Attached an uploaded file to a ticket',
+    },
+    'support.tickets.attachments.delete': {
+        permission: 'support.tickets.attachments.write',
+        target: 'ticket',
+        transport: 'delegated',
+        summary: 'Deleted a ticket attachment',
+    },
 
     // ═══ AGENCIES — delegated to jovi-mall ════════════════════════════════════
     // Three mutations. Deactivation is the one whose delegation is least optional: it
@@ -430,6 +566,34 @@ export const AUDIT_CATALOG = Object.freeze({
         target: 'user',
         transport: 'delegated',
         summary: 'Lifted a user account suspension',
+    },
+    /**
+     * Credential recovery — an administrator acting on somebody else's ability to sign in.
+     *
+     * ── What the row keeps, and what it must never keep ─────────────────────────
+     * The channel, the MASKED destination and the operator's reason. **Never the token,
+     * never the link, never the full address.** The audit trail is read by more people
+     * than the action was performed by; a link in it is a live credential sitting in a
+     * feed, and a full address in it is a delivery target for whoever reads the feed next.
+     * The delegated response is already shaped that way — it carries no token — so the
+     * `after` cannot accidentally acquire one.
+     *
+     * Two names, one per credential, and NOT because two permissions govern them (though
+     * they do). A reset link grants nothing until the person chooses a password; a
+     * sign-in link IS a session. A reviewer scanning the trail must be able to tell those
+     * apart without opening the row.
+     */
+    'users.password_reset_link.send': {
+        permission: 'users.password.reset',
+        target: 'user',
+        transport: 'delegated',
+        summary: 'Sent a user a password-reset link',
+    },
+    'users.login_link.send': {
+        permission: 'users.login_link.send',
+        target: 'user',
+        transport: 'delegated',
+        summary: 'Sent a customer a passwordless sign-in link',
     },
 
     // ═══ VENDORS — delegated to jovi-mall ═════════════════════════════════════

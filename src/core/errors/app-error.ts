@@ -128,6 +128,13 @@ export const DEFAULT_MESSAGES: Partial<Record<ErrorCode, string>> = {
     [ERROR_CODES.PAYOUT_DESTINATION_ABSENT]: 'This payout request carries no destination on file',
     [ERROR_CODES.ACCOUNT_OWNER_NOT_FOUND]: 'No vendor, agency or agent with this id',
     [ERROR_CODES.PAYOUT_NOT_PENDING]: 'This payout request has already been resolved',
+    [ERROR_CODES.CONTRACT_NOT_FOUND]: 'No agent–agency contract with this id',
+    [ERROR_CODES.TICKET_NOT_FOUND]: 'No support ticket with this id',
+    [ERROR_CODES.TICKET_ALREADY_ASSIGNED]: 'This ticket is already held by an administrator',
+    [ERROR_CODES.FILE_NOT_FOUND]: 'This file no longer exists',
+    [ERROR_CODES.USER_CHANNEL_UNAVAILABLE]: 'This person has no address on that channel',
+    [ERROR_CODES.USER_CREDENTIAL_LINK_THROTTLED]: 'Too many links have been sent recently — try again shortly',
+    [ERROR_CODES.USER_LOGIN_LINK_ROLE_UNSUPPORTED]: 'A sign-in link is only available for customers',
 };
 
 /**

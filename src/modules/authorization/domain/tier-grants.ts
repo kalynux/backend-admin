@@ -75,6 +75,20 @@ const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
     'notifications.read',
 
     /**
+     * Turning a file id into a picture.
+     *
+     * Held at every tier, including this one, because it discloses nothing the caller did
+     * not already have: they are holding an id that arrived on a record they were allowed
+     * to read. Withholding it would mean a Support agent looking at a vendor sees the
+     * shop's name and a grey square where its logo is, which helps nobody and looks like
+     * a fault rather than a policy.
+     *
+     * It RESOLVES an explicit id set and cannot enumerate — `files.orphans.read` is the
+     * listing, and it is not here.
+     */
+    'files.resolve',
+
+    /**
      * Gateway settlements. "Did my payment go through, and was I refunded" is one of the
      * commonest things a ticket asks, and answering it from the order alone is guesswork —
      * `payment_status` says what the order believes, not what the gateway did.

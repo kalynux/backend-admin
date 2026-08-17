@@ -1,4 +1,4 @@
-import { AdminIdentity } from '../../admin-identity/domain/admin-identity.types';
+import { AdminIdentity, AdminTier } from '../../admin-identity/domain/admin-identity.types';
 import { ScopedResource } from './permission.types';
 
 /**
@@ -38,11 +38,25 @@ export type ResourceScope =
     /** No narrowing — the caller sees every record of this kind. */
     | { kind: 'all' }
     /**
-     * Only records assigned to one of these administrators, plus the unassigned queue.
-     * Unassigned is included deliberately: a Support administrator who cannot see
-     * unclaimed work has nothing to claim, and the queue stops moving.
+     * Only records assigned to one of these administrators, plus the unassigned queue, plus
+     * anything held by an administrator of a tier in `alsoTiers`.
+     *
+     * Unassigned is included deliberately: an administrator who cannot see unclaimed work has
+     * nothing to claim, and the queue stops moving. Every system ticket — payout, dispute,
+     * booking refund — starts there.
+     *
+     * `alsoTiers` is what lets an Admin supervise Support without seeing a Developer's work.
+     * It is a LIST rather than a "tier N and below" threshold because the tier numbers are
+     * inverted (1 is the most privileged), so a threshold reads backwards at every call site
+     * and is wrong the first time somebody adds a fourth tier in the middle.
      */
-    | { kind: 'assigned'; adminIds: readonly string[]; includeUnassigned: boolean }
+    | {
+        kind: 'assigned';
+        adminIds: readonly string[];
+        includeUnassigned: boolean;
+        /** Assignee tiers this administrator may also reach. Empty means own-only. */
+        alsoTiers: readonly AdminTier[];
+    }
     /**
      * Audit rows about the platform, plus anything this administrator did themselves.
      *
@@ -65,16 +79,40 @@ export type ResourceScope =
 export function resolveScope(identity: AdminIdentity, resource: ScopedResource): ResourceScope {
     switch (resource) {
         case 'tickets':
-            // Developer and Admin run the support function and need the whole board:
-            // reassigning work, auditing a handling, and seeing the payout-request tickets
-            // that back the payout queue.
-            if (identity.tier === 1 || identity.tier === 2) {
+            // A Developer runs the whole board: reassigning work, auditing a handling, and
+            // seeing the payout-request tickets that back the payout queue.
+            if (identity.tier === 1) {
                 return { kind: 'all' };
             }
-            // Support sees its own tickets and the unclaimed queue. Note this is what
-            // stops a blanket "Support owns tickets" rule from handing tier 3 indirect
-            // reach into the payout queue, which is backed by PAYOUT_REQUEST tickets.
-            return { kind: 'assigned', adminIds: [identity.adminId], includeUnassigned: true };
+
+            /**
+             * An Admin supervises Support, and stops there.
+             *
+             * This used to be `{ kind: 'all' }` alongside tier 1, and Phase 17 narrowed it:
+             * an Admin sees their own tickets, the unclaimed queue, and anything a Support
+             * administrator holds — but not a Developer's. Escalating to a Developer has to
+             * mean something, and it means nothing if the person who escalated can still act
+             * on the ticket afterwards.
+             */
+            if (identity.tier === 2) {
+                return {
+                    kind: 'assigned',
+                    adminIds: [identity.adminId],
+                    includeUnassigned: true,
+                    alsoTiers: [3],
+                };
+            }
+
+            // Support sees its own tickets and the unclaimed queue, and nothing else — not
+            // even a peer's. Note this is also what stops a blanket "Support owns tickets"
+            // rule from handing tier 3 indirect reach into the payout queue, which is backed
+            // by PAYOUT_REQUEST tickets.
+            return {
+                kind: 'assigned',
+                adminIds: [identity.adminId],
+                includeUnassigned: true,
+                alsoTiers: [],
+            };
 
         case 'audit':
             // Developer and Admin read the whole trail — investigating an incident means
@@ -97,6 +135,20 @@ export function resolveScope(identity: AdminIdentity, resource: ScopedResource):
 }
 
 /**
+ * Who holds a ticket — the id AND the tier, because the scope is decided by both.
+ *
+ * The tier is read from the SNAPSHOT stored on the ticket, not looked up: administrators
+ * live in this service's database and tickets live in jovi-mall's, so no query can join
+ * them. That is also why the tier is denormalised onto the row in the first place — without
+ * it, `alsoTiers` is not expressible as a filter, and a scope that is not a filter is one a
+ * controller can forget.
+ */
+export interface TicketAssignee {
+    adminId: string;
+    tier: AdminTier;
+}
+
+/**
  * Whether a single TICKET falls inside a scope.
  *
  * ── Renamed from `isInScope`, and the rename is the point ────────────────────
@@ -110,15 +162,16 @@ export function resolveScope(identity: AdminIdentity, resource: ScopedResource):
  * The audit scope is applied as a query filter instead (`audit-subject.ts`), which is the
  * preferred form anyway: a scope folded into the query is one nobody can forget.
  */
-export function isTicketInScope(scope: ResourceScope, assignedTo: string | null): boolean {
+export function isTicketInScope(scope: ResourceScope, assignee: TicketAssignee | null): boolean {
     switch (scope.kind) {
         case 'all':
             return true;
         case 'none':
             return false;
         case 'assigned':
-            if (assignedTo === null) return scope.includeUnassigned;
-            return scope.adminIds.includes(assignedTo);
+            if (assignee === null) return scope.includeUnassigned;
+            if (scope.adminIds.includes(assignee.adminId)) return true;
+            return scope.alsoTiers.includes(assignee.tier);
         case 'own_or_platform_subject':
             // Not answerable from an assignee. Reaching here means a caller passed an
             // audit scope to the ticket predicate, which is a programming error — fail

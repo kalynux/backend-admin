@@ -285,6 +285,75 @@ export const ERROR_CODES = Object.freeze({
      * form, where every failure shares one code.
      */
     ADMIN_ACCOUNT_ALREADY_EXISTS: 'ADMIN_ACCOUNT_ALREADY_EXISTS',
+
+    // ── CONTRACTS ─────────────────────────────────────────────────────────────
+
+    /**
+     * No such agent↔agency contract.
+     *
+     * Its own code rather than a bare `NOT_FOUND` because `GET /contracts/:contractId` is
+     * addressable by id and the id is what people paste into tickets — a client showing
+     * "not found" needs to say WHAT was not found, and the surrounding 404s on that screen
+     * are about agents and agencies.
+     */
+    CONTRACT_NOT_FOUND: 'CONTRACT_NOT_FOUND',
+
+    // ── SUPPORT ───────────────────────────────────────────────────────────────
+
+    /**
+     * No such ticket — **or one outside the caller's tier scope**, deliberately
+     * indistinguishable.
+     *
+     * That conflation is the security property, not a shortcut. The ticket scope is folded
+     * into the query (`resource-scope.ts:20-29`), so a Support administrator asking for an
+     * Admin's ticket gets the same answer as one asking for an id that never existed. A 403
+     * would confirm the record exists, which is exactly what somebody probing another tier's
+     * queue wants to learn.
+     *
+     * Contrast `AUTHZ_PERMISSION_DENIED` on the same surface: that IS raised, for a ticket
+     * the caller can already see but may not act on. Concealing at that point protects
+     * nothing they do not already know.
+     */
+    TICKET_NOT_FOUND: 'TICKET_NOT_FOUND',
+
+    /** The ticket is already held by an administrator, so there is nothing to claim. */
+    TICKET_ALREADY_ASSIGNED: 'TICKET_ALREADY_ASSIGNED',
+
+    // ── FILES ─────────────────────────────────────────────────────────────────
+
+    /**
+     * A file id resolved to nothing.
+     *
+     * ⚠ Reachable on a perfectly ordinary path and NOT a client bug: files are
+     * soft-deleted and swept by file-cleanup, so a record can outlive the picture it
+     * references. A client should render the absence, not an error banner. The batch form
+     * omits unresolvable ids rather than raising; only the single-id route answers this.
+     */
+    FILE_NOT_FOUND: 'FILE_NOT_FOUND',
+
+    // ── CREDENTIAL RECOVERY ───────────────────────────────────────────────────
+    //
+    // All three arrive from jovi-mall as `details.platformCode` on a
+    // `PLATFORM_OPERATION_REJECTED`, since the send is delegated. They are catalogued
+    // here because the dashboard branches on them to say WHY rather than showing a
+    // generic failure, and `errors.md` is the file its i18n suite diffs against.
+
+    /** The party has no address on the requested channel. */
+    USER_CHANNEL_UNAVAILABLE: 'USER_CHANNEL_UNAVAILABLE',
+    /**
+     * Too many links, recently. `details.scope` is `party` or `administrator` — the two
+     * have different remedies (wait, versus ask a colleague), so the distinction has to
+     * survive to the screen. `details.retryAfterSeconds` carries the wait.
+     */
+    USER_CREDENTIAL_LINK_THROTTLED: 'USER_CREDENTIAL_LINK_THROTTLED',
+    /**
+     * A sign-in link was asked for on an account that is not a customer.
+     *
+     * The refusal is jovi-mall's and it is structural rather than configurable: every
+     * session `MessagingLoginService` mints is scoped to `customer` as a literal, because
+     * a vendor, agency or agent reaches money and other people's data.
+     */
+    USER_LOGIN_LINK_ROLE_UNSUPPORTED: 'USER_LOGIN_LINK_ROLE_UNSUPPORTED',
 } as const);
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

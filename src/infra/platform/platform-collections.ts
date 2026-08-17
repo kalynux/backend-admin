@@ -265,10 +265,32 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
         note: 'Per-owner notice preference, created lazily by the billing paths',
     },
 
-    // ── Support ──────────────────────────────────────────────────────────────
+    // ── Support (Phase 17) ───────────────────────────────────────────────────
+    // Four collections, all `read`. A ticket, a note, a follower row and an attachment are
+    // RECORDS, and ADR-009 D-1 / ADR-011 D-1 say to read a record directly and delegate only
+    // a verdict — there is no verdict on this surface.
+    //
+    // Every WRITE stays delegated, and here the reason is unusually concrete rather than
+    // precautionary: jovi-mall creates tickets in-process from the payout, dispute and
+    // booking-refund paths, and every ticket write publishes on its in-process event bus
+    // (`ticket.created`, `ticket.assigned`, `ticket.status_changed`, `ticket.priority_changed`).
+    // A second writer would move the row and notify nobody — the failure D-2 exists to prevent,
+    // and one that does not show up in testing.
     [COLLECTIONS.TICKET]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'Rows are created in-process by refund, payout-request and dispute code',
+    },
+    [COLLECTIONS.TICKET_NOTE]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'Includes system notes written beside each transition, and internal notes the customer never sees',
+    },
+    [COLLECTIONS.TICKET_FOLLOWER]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'The 5-non-admin-follower limit is enforced in jovi-mall’s service, never here',
+    },
+    [COLLECTIONS.TICKET_ATTACHMENT]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'Rows reference uploaded files; the cleanup worker sweeps them on a terminal-status clock',
     },
 
     // ── Editorial — the one place ownership moved (ADR-004 D-4) ──────────────

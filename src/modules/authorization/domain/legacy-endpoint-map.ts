@@ -38,8 +38,11 @@ import { PermissionName } from './permission.catalog';
  * it fails the suite.
  *
  * ── `null` means no permission, not no guard ──────────────────────────────────
- * The two admin self-profile routes become `/administrators/me`, which every
- * administrator may reach by definition — `selfService`, not an ungranted permission.
+ * The two admin self-profile routes became `/administrators/me`, which every administrator
+ * may reach by definition — `selfService`, not an ungranted permission. Those were the only
+ * `null` rows and they are gone (Phase 17), so **no row uses `null` today**. The type keeps
+ * it: the next self-service port needs it, and narrowing to `PermissionName` would make that
+ * row unwritable rather than merely unusual.
  */
 
 export interface LegacyEndpoint {
@@ -53,13 +56,17 @@ export interface LegacyEndpoint {
 }
 
 export const LEGACY_ENDPOINT_MAP: readonly LegacyEndpoint[] = [
-    // ── Admin self-profile (2) — modules/admins/routes.ts ────────────────────
+    // ── Admin self-profile (2) — PORTED, rows deleted at Phase 17 ────────────
+    // `GET`/`PATCH /api/admin/profile` became `GET`/`PATCH /administrators/me`
+    // (`administrator.routes.ts:37-56`), both `selfService` — which is what `permission: null`
+    // on those rows meant. They had been ported since Phase 2 and the rows outlived them,
+    // which is the drift the header's own convention ("porting a route means … deleting the
+    // row") exists to prevent, and the reason `LEGACY_ENDPOINT_COUNT` is asserted.
+    //
     // `POST /api/admin/products/bulk-vectorise` was the third row here and is PORTED
     // (Phase 12) to `POST /api/v1/dev-tools/catalogue/vectorise`. It was the only legacy
     // endpoint that was a developer tool rather than a domain operation, and it now runs
     // through the same jovi-mall controller behind a tier-1 permission and an audit row.
-    { method: 'GET', path: '/api/admin/profile', permission: null, target: 'GET /administrators/me' },
-    { method: 'PATCH', path: '/api/admin/profile', permission: null, target: 'PATCH /administrators/me' },
 
     // ── Agents (11) — PORTED at Phase 9 → src/modules/agents/ ────────────────
     // Every one, plus four that never existed there: the LIST (PHASE-0 found detail-only,
@@ -102,26 +109,15 @@ export const LEGACY_ENDPOINT_MAP: readonly LegacyEndpoint[] = [
     // that had no legacy equivalent at all. The jovi-mall mount stays alive until cutover
     // (a dashboard consumes the queue), but it is dashboard surface now, not admin surface.
 
-    // ── Tickets (18) — modules/tickets/routes/admin-ticket.routes.ts ─────────
-    // Eighteen, not the nineteen PHASE-0 counted. See the header.
-    { method: 'POST', path: '/api/admin/tickets', permission: 'support.tickets.create', target: '/support' },
-    { method: 'GET', path: '/api/admin/tickets', permission: 'support.tickets.read', target: '/support' },
-    { method: 'GET', path: '/api/admin/tickets/reference/orders', permission: 'support.reference.read', target: '/support' },
-    { method: 'GET', path: '/api/admin/tickets/reference/products', permission: 'support.reference.read', target: '/support' },
-    { method: 'GET', path: '/api/admin/tickets/:id', permission: 'support.tickets.read', target: '/support' },
-    { method: 'PATCH', path: '/api/admin/tickets/:id', permission: 'support.tickets.update', target: '/support' },
-    { method: 'PATCH', path: '/api/admin/tickets/:id/status', permission: 'support.tickets.update', target: '/support' },
-    { method: 'PATCH', path: '/api/admin/tickets/:id/assign', permission: 'support.tickets.assign', target: '/support' },
-    { method: 'PATCH', path: '/api/admin/tickets/:id/priority', permission: 'support.tickets.update', target: '/support' },
-    { method: 'POST', path: '/api/admin/tickets/:id/close', permission: 'support.tickets.lifecycle', target: '/support' },
-    { method: 'POST', path: '/api/admin/tickets/:id/reopen', permission: 'support.tickets.lifecycle', target: '/support' },
-    { method: 'POST', path: '/api/admin/tickets/:id/followers', permission: 'support.tickets.followers.manage', target: '/support' },
-    { method: 'DELETE', path: '/api/admin/tickets/:id/followers/:userId', permission: 'support.tickets.followers.manage', target: '/support' },
-    { method: 'POST', path: '/api/admin/tickets/:ticketId/notes', permission: 'support.tickets.notes.write', target: '/support' },
-    { method: 'GET', path: '/api/admin/tickets/:ticketId/notes', permission: 'support.tickets.notes.read', target: '/support' },
-    { method: 'POST', path: '/api/admin/tickets/:ticketId/attachments', permission: 'support.tickets.attachments.write', target: '/support' },
-    { method: 'GET', path: '/api/admin/tickets/:ticketId/attachments', permission: 'support.tickets.attachments.read', target: '/support' },
-    { method: 'DELETE', path: '/api/admin/tickets/attachments/:id', permission: 'support.tickets.attachments.write', target: '/support' },
+    // ── Tickets (18) — PORTED at Phase 17 → src/modules/support/ ────────────
+    // All eighteen, plus a net-new `POST /:ticketId/claim`: claiming from the pool used
+    // to be a side effect of assigning a ticket to yourself, and the tier rules make it a
+    // distinct act — every tier may claim, but Support may only ever ASSIGN upward.
+    //
+    // This is the one family that kept NO public twin. The old mount's only admin access
+    // control was the `assigned_admin_id` exclusivity lock, which is deleted, and it could
+    // not have enforced the tier matrix that replaced it — a legacy `admin` is a platform
+    // `users` row and carries no tier.
 
     // ── Blog: articles (9) + authors (5) — modules/blog/routes/admin-blog.routes.ts
     { method: 'GET', path: '/api/admin/articles', permission: 'content.articles.read', target: '/content' },
@@ -149,4 +145,4 @@ export const LEGACY_ENDPOINT_MAP: readonly LegacyEndpoint[] = [
 ];
 
 /** The count every document gets wrong. Asserted by `test-authz.ts`. */
-export const LEGACY_ENDPOINT_COUNT = 37;
+export const LEGACY_ENDPOINT_COUNT = 17;
