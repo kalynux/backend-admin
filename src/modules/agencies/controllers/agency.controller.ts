@@ -14,6 +14,8 @@ import { AgencyReadModel, AgencyReadRepository } from '../repositories/agency.re
 import { ContractEventReadRepository } from '../repositories/contract-event.read.repository';
 import { ContractReadRepository } from '../repositories/contract.read.repository';
 import { toContractEventDto, toRosterEntryDto } from '../read-models/contract.dto';
+import { AgencyPoliciesDto, toAgencyPoliciesDto } from '../read-models/agency-policies.dto';
+import { VendorConnectionReadRepository } from '../../vendors/repositories/vendor-context.read.repository';
 import {
     DeactivateAgencyBody,
     ListAgencyActivityQuery,
@@ -50,6 +52,14 @@ const agencies = new AgencyReadRepository();
 const contracts = new ContractReadRepository();
 const contractEvents = new ContractEventReadRepository();
 const audit = new AuditRepository();
+/**
+ * Reached for one number: how many vendor connections a policy bump has left waiting.
+ *
+ * The collection belongs to the vendor module's context repository, which already counts
+ * it from the other side — reusing that is what keeps the vendor's
+ * `counts.agencyConnections.pausedReapproval` and this figure counting the same rows.
+ */
+const vendorConnections = new VendorConnectionReadRepository();
 
 interface AgencyDto {
     id: string;
@@ -87,8 +97,18 @@ interface AgencyDetailDto extends AgencyDto {
         verifiedAt: string | null;
         verifiedBy: { id: string | null; source: string; name: string | null } | null;
     };
-    policies: Record<string, unknown> | null;
+    policies: AgencyPoliciesDto | null;
     policyVersion: number;
+    /**
+     * How many vendor connections are sitting in `paused_reapproval` right now.
+     *
+     * `policyVersion` is the field with the largest blast radius on this screen — bumping
+     * it pauses EVERY vendor connection for re-approval — and until now there was no way
+     * to see how many were in that state as a result. The vendor side has
+     * `counts.agencyConnections.pausedReapproval`; this is the agency's equivalent, and
+     * the two are counted off the same collection so they cannot disagree.
+     */
+    policyVersionPausedConnections: number;
     timezone: string | null;
     preferredLanguage: string | null;
 }
@@ -120,7 +140,7 @@ function toAgencyDto(agency: AgencyReadModel): AgencyDto {
     };
 }
 
-function toAgencyDetailDto(agency: AgencyReadModel): AgencyDetailDto {
+function toAgencyDetailDto(agency: AgencyReadModel, pausedConnections: number): AgencyDetailDto {
     const kyc = agency.kyc_details ?? {};
     return {
         ...toAgencyDto(agency),
@@ -145,8 +165,17 @@ function toAgencyDetailDto(agency: AgencyReadModel): AgencyDetailDto {
                       }
                     : null,
         },
-        policies: agency.policies ?? null,
+        /**
+         * ⚠ **camelCase as of the dashboard-request round.** This shipped as
+         * `agency.policies ?? null` — jovi-mall's sub-document assigned whole, four nested
+         * blocks of `snake_case` on the wire against README's camelCase promise, and
+         * undocumented besides. Every field is named now; see
+         * `read-models/agency-policies.dto.ts`, which also explains why the projection can
+         * stay wide.
+         */
+        policies: toAgencyPoliciesDto(agency.policies),
         policyVersion: agency.policy_version ?? 0,
+        policyVersionPausedConnections: pausedConnections,
         timezone: agency.timezone ?? null,
         preferredLanguage: agency.preferred_language ?? null,
     };
@@ -210,7 +239,15 @@ export class AgencyController {
 
     /** GET /api/v1/agencies/:agencyId */
     static get = asyncHandler(async (req: Request, res: Response) => {
-        sendSuccess(res, toAgencyDetailDto(await loadOr404(req.params.agencyId)));
+        const agency = await loadOr404(req.params.agencyId);
+
+        // One extra indexed count, for the number that makes `policyVersion` legible: how
+        // many vendor connections the last bump left waiting for re-approval.
+        const pausedConnections = await vendorConnections.countPausedReapprovalForAgency(
+            req.params.agencyId,
+        );
+
+        sendSuccess(res, toAgencyDetailDto(agency, pausedConnections));
     });
 
     /**

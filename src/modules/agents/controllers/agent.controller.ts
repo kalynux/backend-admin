@@ -151,7 +151,29 @@ function toAgentDetailDto(agent: AgentReadModel) {
         ...toAgentDto(agent),
         emailVerified: agent.email_verified === true,
         phoneVerified: agent.phone_verified === true,
-        vehicle: agent.vehicle_info ?? null,
+        /**
+         * ⚠ **Named-field mapping as of the dashboard-request round.** It shipped as
+         * `agent.vehicle_info ?? null` and was DOCUMENTED as `{ type, plate }` while
+         * actually serving `{ vehicle_type, plate_number, color, photo_file_id }` — so the
+         * contract and the wire disagreed on both the casing and the field names.
+         *
+         * `photoFileId` stays an opaque id, like every other file reference here (ADR-009
+         * D-6). `GET /api/v1/files/:fileId` is what turns it into a picture.
+         */
+        vehicle: agent.vehicle_info
+            ? {
+                  /** `bike` · `car` · `van` · `truck`. */
+                  type: agent.vehicle_info.vehicle_type ?? null,
+                  plateNumber: agent.vehicle_info.plate_number ?? null,
+                  /**
+                   * A documented vocabulary rather than an enum — a lowercase English
+                   * token from `VEHICLE_COLORS`, or whatever the agent typed when it is
+                   * not one. Never localised on the wire.
+                   */
+                  color: agent.vehicle_info.color ?? null,
+                  photoFileId: agent.vehicle_info.photo_file_id?.toString() ?? null,
+              }
+            : null,
         homeBase: {
             label: agent.home_base?.label ?? null,
             serviceRadiusKm: agent.home_base?.service_radius_km ?? null,
@@ -221,6 +243,37 @@ function toAgentDetailDto(agent: AgentReadModel) {
             lastKnown: {
                 status: lastKnown.status ?? 'unknown',
                 position: lastKnown.last_position ?? null,
+                /**
+                 * A NAME for the position — "Bonapriso, Douala".
+                 *
+                 * Resolved server-side, once per position, and stored beside it. Not on
+                 * read: reverse-geocoding per render is a bill per operator who opens the
+                 * tab, and it hands the same person's coordinates to a geocoding provider
+                 * once per viewer rather than once per position.
+                 *
+                 * `null` when nothing resolved — never `''`, and never a coordinate pair
+                 * dressed up as a name. `source` is an OPEN string (it names the provider,
+                 * and a future "nearest landmark" resolution would be additive), so render
+                 * it raw and do not `switch` on it.
+                 *
+                 * ⚠ It inherits the position's exposure and then some: `[9.7043, 4.0511]`
+                 * needs a tool to read and "Bonapriso, Douala" does not. Anything deciding
+                 * whether to reveal the coordinates is deciding the same about this.
+                 *
+                 * ⚠ There is deliberately no `accuracyMetres`, and it is not an oversight:
+                 * **geo-tracker records no accuracy anywhere.** The WebSocket
+                 * `location_update` frame does not carry one, so nothing on the platform
+                 * has ever known how good a fix is. Shipping a field that is null on every
+                 * row in every circumstance would teach a client to expect data that does
+                 * not exist.
+                 */
+                place: lastKnown.last_place?.label
+                    ? {
+                          label: lastKnown.last_place.label,
+                          source: lastKnown.last_place.source ?? null,
+                          resolvedAt: toIso(lastKnown.last_place.resolved_at),
+                      }
+                    : null,
                 reportedAt: toIso(lastKnown.last_reported_at),
                 source: lastKnown.source ?? null,
                 isStale:
@@ -228,7 +281,32 @@ function toAgentDetailDto(agent: AgentReadModel) {
                     || Date.now() - reportedAt.getTime() > TRACKING_STATE_STALE_AFTER_MS,
             },
         },
-        device: agent.device ?? null,
+        /**
+         * ⚠ **Named-field mapping as of the dashboard-request round.** This shipped as
+         * `agent.device ?? null` — jovi-mall's sub-document assigned whole — so eight
+         * `snake_case` keys reached the browser against README's "the translation happens
+         * in this service and never leaks". The projection above was already enumerated,
+         * so the key set was bounded; the casing was not.
+         */
+        device: agent.device
+            ? {
+                  platform: agent.device.platform ?? null,
+                  appVersion: agent.device.app_version ?? null,
+                  /** `always` · `while_in_use` · `denied` · `unknown`. */
+                  locationPermission: agent.device.location_permission ?? null,
+                  /**
+                   * Tri-state, and `null` is not `false`. An unknown flag is never coerced
+                   * to a block — `device_location_disabled` is a real dispatch
+                   * ineligibility reason, and inventing one from silence would strand an
+                   * agent whose app has simply not reported yet.
+                   */
+                  locationServicesEnabled: agent.device.location_services_enabled ?? null,
+                  backgroundLocationEnabled: agent.device.background_location_enabled ?? null,
+                  batteryOptimizationExempt: agent.device.battery_optimization_exempt ?? null,
+                  pushEnabled: agent.device.push_enabled ?? null,
+                  reportedAt: toIso(agent.device.reported_at),
+              }
+            : null,
         capacity: {
             max: agent.capacity?.max_active_shipments ?? 0,
             active: agent.capacity?.active_shipment_count ?? 0,
@@ -238,7 +316,32 @@ function toAgentDetailDto(agent: AgentReadModel) {
             trustScore: agent.cod?.trust_score ?? null,
             maxThreshold: agent.cod?.max_threshold ?? null,
         },
-        trustSignals: agent.trust_signals ?? null,
+        /**
+         * ⚠ **Named-field mapping as of the dashboard-request round**, for the same reason
+         * as `device` above — thirteen `snake_case` keys were reaching the wire, entirely
+         * undocumented, because the sub-document was assigned whole.
+         *
+         * `null` throughout rather than `0`: an agent who has never been rated has no
+         * rating, which is a different fact from a rating of zero and reads very
+         * differently on a screen deciding whether to dispatch to them.
+         */
+        trustSignals: agent.trust_signals
+            ? {
+                  onTimeRate: agent.trust_signals.on_time_rate ?? null,
+                  assignmentResponseRate: agent.trust_signals.assignment_response_rate ?? null,
+                  completedShipments: agent.trust_signals.completed_shipments ?? null,
+                  customerRatingAvg: agent.trust_signals.customer_rating_avg ?? null,
+                  customerRatingCount: agent.trust_signals.customer_rating_count ?? null,
+                  agencyRatingAvg: agent.trust_signals.agency_rating_avg ?? null,
+                  agencyRatingCount: agent.trust_signals.agency_rating_count ?? null,
+                  vendorRatingAvg: agent.trust_signals.vendor_rating_avg ?? null,
+                  vendorRatingCount: agent.trust_signals.vendor_rating_count ?? null,
+                  codCleanReturnCount: agent.trust_signals.cod_clean_return_count ?? null,
+                  codDiscrepancyCount: agent.trust_signals.cod_discrepancy_count ?? null,
+                  codVolumeReturned: agent.trust_signals.cod_volume_returned ?? null,
+                  computedAt: toIso(agent.trust_signals.computed_at),
+              }
+            : null,
         settings: {
             autoAcceptAssignments: agent.settings?.auto_accept_assignments === true,
             navigationApp: agent.preferences?.navigation_app ?? null,

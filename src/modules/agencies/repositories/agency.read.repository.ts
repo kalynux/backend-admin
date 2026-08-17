@@ -246,6 +246,35 @@ export class AgencyReadRepository extends PlatformReadRepository<AgencyReadModel
     }
 
     /**
+     * The BUSINESS name only — the Magazin's, or `null`.
+     *
+     * ── How this differs from `findNamesByIds`, and why both exist ──────────────
+     * That one falls back to `display_name`, deliberately: its callers are money and
+     * billing rows that must name their counterparty somehow, and "no label at all" is
+     * useless on a payout list.
+     *
+     * This one refuses the fallback, because its callers render `businessName` BESIDE
+     * `contactName`, and `display_name` IS the contact name — an agency's contact person.
+     * Falling back would print the same human's name in a column headed "Agency" and a
+     * sub-line headed "Contact person", which is precisely the mislabelling the dashboard
+     * reported: the column has been showing a person where a business belongs.
+     *
+     * `null` where the Magazin has none — an agency mid-onboarding legitimately has no
+     * business name yet and must still be identifiable by its id. `null`, never `''`.
+     */
+    async findBusinessNamesByIds(ids: ObjectId[]): Promise<Map<string, string | null>> {
+        if (ids.length === 0) return new Map();
+
+        const rows = await this.aggregateBy<{ _id: ObjectId; magazin?: { name?: string | null } | null }>([
+            { $match: { _id: { $in: ids } } },
+            ...this.magazinLookup(),
+            { $project: { _id: 1, 'magazin.name': 1 } },
+        ]);
+
+        return new Map(rows.map((row) => [row._id.toString(), row.magazin?.name ?? null]));
+    }
+
+    /**
      * The join, in one place so the list and the detail cannot drift.
      *
      * `$unwind` with `preserveNullAndEmptyArrays` rather than a plain unwind: an agency

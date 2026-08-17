@@ -33,7 +33,7 @@ live on the [agents](agents.md) surface.
 
 | Missing | Why |
 |---|---|
-| **Editing an agency's policies** | Pricing, returns and damage terms are the agency's own commercial record, negotiated with the vendors connected to it. Every edit bumps `policyVersion`, which **pauses those connections for re-approval** — an administrator changing a price on their behalf would silently re-open every relationship they have |
+| **Editing an agency's policies** | Pricing, returns and damage terms are the agency's own commercial record, negotiated with the vendors connected to it. Every edit bumps `policyVersion`, which **pauses those connections for re-approval** — an administrator changing a price on their behalf would silently re-open every relationship they have. Unchanged by the dashboard-request round, which projected the terms' *content* and added no write |
 | **Un-verifying** | Revoking a verification that gates nothing would be theatre. `deactivate` is the real lever |
 | **Creating an agency** | Onboarding is a four-step flow that provisions a Magazin along the way. A row inserted from here would be missing it, and every later read would report a business with no name |
 
@@ -94,7 +94,7 @@ name client-side instead.
 |---|---|
 | `businessName` | From the Magazin. `null` — never `""` — when absent |
 | `logoFileId` | **An opaque id.** This service resolves no file URLs |
-| `contactName` | The agency's contact person, not the business |
+| `contactName` | The agency's contact **person**, not the business. `businessName` above is the business, off the Magazin. Never render one under a heading meant for the other — a column headed "Agency" showing `contactName` shows a human |
 | `onboardingComplete` | `onboarding_step === 0` is the COMPLETE sentinel; the boolean is computed once so nobody reads it backwards |
 | `verified` / `verifiedLegacyMirror` | **Both mirrors are shown deliberately.** The first is canonical, the second deprecated. They are written together, so a **disagreement means a hand-edited document** — showing both makes that visible instead of hiding it |
 
@@ -127,8 +127,47 @@ Every list field, plus:
       "verifiedAt": "2025-09-20T10:00:00.000Z",
       "verifiedBy": { "id": "665f…", "source": "wi-admin", "name": "Ada Nkemelu" }
     },
-    "policies": { "…the agency's own commercial terms…": "…" },
+    "policies": {
+      "pricing": {
+        "storageBased": {
+          "enabled": true,
+          "monthlyStorageFeePerSku": 500,
+          "pickPackFeePerOrder": 250,
+          "localDeliveryFee": 1000,
+          "outOfRegionDeliveryFee": 2500
+        },
+        "pickupBased": {
+          "enabled": false,
+          "baseRateFirstKg": 800,
+          "additionalPerKg": 200,
+          "outOfRegionSurcharge": 1500
+        },
+        "additionalFees": {
+          "codHandlingFee": { "type": "percentage", "value": 2 },
+          "failedDeliveryFee": 500,
+          "rtoFee": 1200,
+          "peakSeasonSurcharge": null
+        },
+        "notes": null
+      },
+      "returns": {
+        "payer": "vendor",
+        "handlingFee": 300,
+        "returnWindowDays": 7,
+        "notes": null
+      },
+      "damage": {
+        "claimDeadlineDays": 3,
+        "maxRefundPerItem": 50000,
+        "inspector": "admin",
+        "investigationFee": 0,
+        "notes": null
+      },
+      "cod": { "enabled": true, "maxOrderAmount": 200000 },
+      "documents": []
+    },
     "policyVersion": 4,
+    "policyVersionPausedConnections": 12,
     "timezone": "Africa/Douala",
     "preferredLanguage": "fr"
   }
@@ -139,8 +178,20 @@ Every list field, plus:
 |---|---|
 | `coverageAreas` | From the Magazin |
 | `kyc.verifiedBy` | **Present only while verified.** An unverified agency carrying a stale approver would read as approved on any screen that renders the block without checking the flag first |
-| `policies` | The agency's own terms, read-only here. `null` when unset |
+| `policies` | The agency's own terms, read-only here. `null` when unset. **camelCase and field-by-field since the dashboard-request round** — it previously shipped jovi-mall's raw sub-document, four nested blocks of `snake_case`. Each inner block is independently `null` when the agency has stored none |
+| `policies.pricing.storageBased.enabled: false` | **The agency does not offer warehousing at all** — different from offering it at zero. Say so rather than printing a rate nobody agreed to |
+| `policies.pricing.additionalFees.codHandlingFee.type` | `percentage` or `fixed`, and it decides how `value` reads |
+| `policies.cod.maxOrderAmount` | **`null` means no ceiling**, not zero. Zero would block every COD order |
+| `policies.damage.inspector` · `.investigationFee` | **Administrator-controlled upstream**, not the agency's to set — which is why they can differ from everything else in the block |
+| `policies.documents[]` | Up to two links to off-platform term sheets. URLs to somewhere else entirely: render them as links, and note this service never fetches or previews them |
 | `policyVersion` | Bumping it pauses every vendor connection for re-approval — which is why nothing here edits policies |
+| **`policyVersionPausedConnections`** | How many vendor connections are sitting in `paused_reapproval` **right now**. New in the dashboard-request round: `policyVersion` is the field with the largest blast radius on this screen and there was no way to see the consequence. The vendor side has had `counts.agencyConnections.pausedReapproval` all along; the two count the same collection, from opposite ends |
+
+> **Why `policies` is projected whole when nothing else here is.** These are commercial terms
+> already visible to every vendor connected to the agency, so there is no field that could be
+> added to them which this surface should not see. The projection stays wide and the **mapper**
+> is the lock: a field added upstream reaches the read model and stops there rather than
+> appearing on the wire uninvited.
 
 ### Errors
 
@@ -202,9 +253,12 @@ most of what the screen is for.
         "lastPaidAt": "2026-08-05T09:00:00.000Z"
       },
       "terms": {
-        "employment": { "…": "…" },
-        "remittance": { "…": "…" },
-        "feeSplit": { "…": "…" },
+        "employment": { "type": "contractor", "employeeRef": "AG-114",
+                        "startedAt": "2026-01-04T00:00:00.000Z", "endsAt": null },
+        "remittance": { "cadence": "weekly", "dayOfWeek": 1,
+                        "dayOfMonth": null, "graceHours": 24 },
+        "feeSplit":   { "model": "percentage", "agentSharePercent": 70,
+                        "agentFlatFee": null, "currency": "XAF" },
         "coverageRegions": [],
         "shipmentValueCeiling": 500000,
         "proposedBy": "agency",

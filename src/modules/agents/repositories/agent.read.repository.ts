@@ -71,16 +71,52 @@ export interface AgentReadModel extends Document {
         changed_by_source?: 'platform' | 'admin';
         changed_by_name?: string | null;
     };
-    device?: Record<string, unknown>;
+    device?: {
+        platform?: string | null;
+        app_version?: string | null;
+        location_permission?: string | null;
+        location_services_enabled?: boolean | null;
+        background_location_enabled?: boolean | null;
+        battery_optimization_exempt?: boolean | null;
+        push_enabled?: boolean | null;
+        reported_at?: Date | null;
+    };
     last_known_tracking_state?: {
         status?: string;
         last_position?: { type?: string; coordinates?: number[] } | null;
         last_reported_at?: Date | null;
         source?: string | null;
+        /**
+         * A resolved name for `last_position` — "Bonapriso, Douala".
+         *
+         * Written by jovi-mall when the position arrives, reverse-geocoded once per
+         * position and cached against it, never resolved on read. `null` when nothing
+         * resolved.
+         */
+        last_place?: { label?: string; source?: string; resolved_at?: Date } | null;
     };
     cod?: { trust_score?: number; max_threshold?: number };
-    trust_signals?: Record<string, unknown>;
-    vehicle_info?: Record<string, unknown> | null;
+    trust_signals?: {
+        on_time_rate?: number | null;
+        assignment_response_rate?: number | null;
+        completed_shipments?: number | null;
+        customer_rating_avg?: number | null;
+        customer_rating_count?: number | null;
+        agency_rating_avg?: number | null;
+        agency_rating_count?: number | null;
+        vendor_rating_avg?: number | null;
+        vendor_rating_count?: number | null;
+        cod_clean_return_count?: number | null;
+        cod_discrepancy_count?: number | null;
+        cod_volume_returned?: number | null;
+        computed_at?: Date | null;
+    };
+    vehicle_info?: {
+        vehicle_type?: string | null;
+        plate_number?: string | null;
+        color?: string | null;
+        photo_file_id?: ObjectId | null;
+    } | null;
     home_base?: { service_radius_km?: number | null; label?: string | null };
     settings?: { auto_accept_assignments?: boolean };
     preferences?: { navigation_app?: string };
@@ -192,6 +228,12 @@ const AGENT_DETAIL_EXTRAS = {
     'last_known_tracking_state.last_position': 1,
     'last_known_tracking_state.last_reported_at': 1,
     'last_known_tracking_state.source': 1,
+    // Enumerated field by field like everything else in this projection, not taken whole:
+    // the block is jovi-mall's to grow, and a whitelist is what stops a field added there
+    // arriving here on its own.
+    'last_known_tracking_state.last_place.label': 1,
+    'last_known_tracking_state.last_place.source': 1,
+    'last_known_tracking_state.last_place.resolved_at': 1,
     'cod.max_threshold': 1,
     'trust_signals.on_time_rate': 1,
     'trust_signals.assignment_response_rate': 1,

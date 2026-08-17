@@ -58,8 +58,8 @@ export interface ContractReadModel extends Document {
     updated_at: Date;
     /** Populated by the roster's `$lookup`. */
     agent?: { _id: ObjectId; name?: string; status?: string } | null;
-    /** Populated by the agent-side `$lookup`. */
-    agency?: { _id: ObjectId; status?: string } | null;
+    /** Populated by the agent-side `$lookup`, with the Magazin nested for the business name. */
+    agency?: { _id: ObjectId; status?: string; magazin?: { name?: string } | null } | null;
 }
 
 /**
@@ -163,10 +163,82 @@ export class ContractReadRepository extends PlatformReadRepository<ContractReadM
     async listForAgent(agentId: string, query: ContractQuery): Promise<Paginated<ContractReadModel>> {
         return this.aggregatePage<ContractReadModel>(pageOf(query), {
             match: [{ $match: buildContractFilter({ agentId }, query) }],
-            join: lookupOne(COLLECTIONS.DELIVERY_AGENCY, 'agency_id', 'agency', CONTRACT_AGENCY_PROJECTION),
-            project: { agency: CONTRACT_AGENCY_PROJECTION },
+            join: agencyLookup(),
+            project: { agency: { ...CONTRACT_AGENCY_PROJECTION, magazin: 1 } },
         });
     }
+
+    /**
+     * ONE contract, with BOTH decorations — the addressable read.
+     *
+     * ── Why it exists ──────────────────────────────────────────────────────────
+     * A contract was reachable only by finding it inside somebody's list, so an operator
+     * could not link a colleague to one and a ticket naming a contract id had nowhere to
+     * point. That is worth fixing on its own, independently of the writes it also enables.
+     *
+     * ── Why both joins rather than one ─────────────────────────────────────────
+     * The two list reads each decorate with the party the reader does not already know —
+     * the roster knows its agency, the agent's list knows its agent. A reader who arrived
+     * by contract id knows neither.
+     *
+     * Two `$lookup`s over a single document, so the cost argument that shapes the lists
+     * does not apply: there is no page to multiply by.
+     */
+    async findByIdWithBoth(contractId: string): Promise<ContractReadModel | null> {
+        if (!Types.ObjectId.isValid(contractId)) return null;
+
+        return this.aggregateOne<ContractReadModel>(
+            [
+                { $match: { _id: new ObjectId(contractId) } },
+                ...lookupOne(COLLECTIONS.DELIVERY_AGENT, 'agent_id', 'agent', ROSTER_AGENT_PROJECTION),
+                ...agencyLookup(),
+            ],
+            {
+                agent: ROSTER_AGENT_PROJECTION,
+                agency: { ...CONTRACT_AGENCY_PROJECTION, magazin: 1 },
+            },
+        );
+    }
+}
+
+/**
+ * The agency join, plus the Magazin the business name lives on.
+ *
+ * A nested `$lookup` rather than a second top-level one: the Magazin is keyed on
+ * `agency_id`, so it can only be reached from inside the agency stage, and doing it here
+ * keeps `agency.magazin.name` next to the rest of the agency's identity instead of
+ * arriving as a sibling nobody would think to join up.
+ *
+ * `preserveNullAndEmptyArrays` on both levels, for the same reason: an agency with no
+ * Magazin is mid-onboarding, which is a state to show rather than a row to drop.
+ */
+function agencyLookup(): Document[] {
+    return [
+        {
+            $lookup: {
+                from: COLLECTIONS.DELIVERY_AGENCY,
+                localField: 'agency_id',
+                foreignField: '_id',
+                pipeline: [
+                    { $project: CONTRACT_AGENCY_PROJECTION },
+                    {
+                        $lookup: {
+                            from: COLLECTIONS.AGENCY_MAGAZIN,
+                            localField: '_id',
+                            foreignField: 'agency_id',
+                            // Name only. A Magazin carries addresses, coverage areas and
+                            // support contacts, none of which belongs on a contract row.
+                            pipeline: [{ $project: { _id: 0, name: 1 } }],
+                            as: 'magazin',
+                        },
+                    },
+                    { $unwind: { path: '$magazin', preserveNullAndEmptyArrays: true } },
+                ],
+                as: 'agency',
+            },
+        },
+        { $unwind: { path: '$agency', preserveNullAndEmptyArrays: true } },
+    ];
 }
 
 function pageOf(query: ContractQuery) {

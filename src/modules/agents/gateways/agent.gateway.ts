@@ -101,7 +101,23 @@ function asState(result: unknown): Record<string, unknown> | null {
         kycStatus: kyc?.status ?? null,
         banned: ban?.banned ?? null,
         trackingAllowed: tracking?.allowed ?? null,
-        codMaxThreshold: cod?.maxThreshold ?? null,
+        /**
+         * ⚠ **Two shapes, and reading only the first was a real defect.**
+         *
+         * Five of the six writes here answer with an agent, where the threshold is nested
+         * at `cod.maxThreshold`. `PUT /cod-threshold` does not: jovi-mall runs
+         * `setAgentThreshold` and then returns `getAllocation`, so the answer is a
+         * `CodAllocation` carrying `maxThreshold` at the TOP level.
+         *
+         * Reading `cod?.maxThreshold` alone therefore recorded `null` on every row of the
+         * one write on this surface flagged `financial` — the audit trail could say a
+         * threshold had been set and never what it was set to. Reported by the dashboard
+         * as DATA-EXPOSURE §3.
+         *
+         * Both are read rather than branching on the action, so a future endpoint
+         * answering either shape is covered without anybody remembering this.
+         */
+        codMaxThreshold: cod?.maxThreshold ?? (agent.maxThreshold as number | undefined) ?? null,
     };
 }
 
@@ -269,13 +285,19 @@ export async function setTracking(
  * jovi-mall refuses a value below what the agent's contracts have already allocated —
  * that check needs the contracts, which is why the bound is not validated here. The
  * refusal reaches the dashboard as its own 4xx with `details.platformCode`.
+ *
+ * ⚠ **This answers a `CodAllocation`, NOT an agent**, and the annotation used to say
+ * otherwise. jovi-mall's handler runs `setAgentThreshold` then `getAllocation` and returns
+ * the latter — which is the more useful answer (a client gets the fresh headroom rather
+ * than an agent it has to re-read), but it is a different shape, and `asState` reading
+ * only the agent one is what made every audit row on this write record a `null` threshold.
  */
 export async function setCodThreshold(
     agentId: string,
     maxThreshold: number,
     before: AgentSnapshot,
     context: ActorContext,
-): Promise<PlatformAgent> {
+): Promise<PlatformCodAllocation> {
     return auditedDelegation(
         'agents.cod_threshold.set',
         context,
@@ -283,7 +305,7 @@ export async function setCodThreshold(
         { maxThreshold },
         before,
         async () => {
-            const result = await platformRequest<PlatformAgent>({
+            const result = await platformRequest<PlatformCodAllocation>({
                 method: 'PUT',
                 path: `/agents/${agentId}/cod-threshold`,
                 body: { maxThreshold },
@@ -293,6 +315,20 @@ export async function setCodThreshold(
             return result.data;
         },
     );
+}
+
+/**
+ * The agent's COD pool and how much of it their contracts have claimed.
+ *
+ * `maxThreshold` is at the TOP level here, unlike the `cod.maxThreshold` on an agent — see
+ * `asState`, which reads both.
+ */
+export interface PlatformCodAllocation {
+    agentId: string;
+    maxThreshold: number;
+    allocated: number;
+    headroom: number;
+    contracts: unknown[];
 }
 
 /**

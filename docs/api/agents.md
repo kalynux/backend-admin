@@ -39,6 +39,15 @@ and `agents.cod_threshold.set` is `financial`, so neither could be granted by fa
 |---|---|
 | **A live position** | See the tracking block below. wi-admin has no data door into geo-tracker |
 | **Editing contract terms** | A live contract's terms change by proposal between the two parties, never by edit — an administrator imposing a fee split neither party proposed would bind an agent to a number nobody agreed. `transfer` moves a relationship rather than rewriting one |
+| **Approving a pending contract** | Same reasoning, sharper: a contract with `terms.proposedBy: null` exists precisely because nobody has stated terms, so approving it binds an agent to a default that pays **zero** |
+| **Adjusting a contract's `cod.threshold`** | A third reason, not the same one. It is that contract's slice of a pool bounded across every allocating contract, `0` **blocks all COD** rather than meaning "no limit", and the arithmetic is jovi-mall's. `PUT /agents/:agentId/cod-threshold` sets the agent's whole pool and is the lever that exists |
+
+> **Freezing and ending a relationship ARE offered**, as of the dashboard-request round —
+> `POST /contracts/:contractId/{suspend,reinstate,terminate}`, documented in
+> [contracts.md](contracts.md). "Do not let an administrator impose terms" and "do not let an
+> administrator stop an abusive relationship" are different claims, and only the first was ever
+> argued here. Terminate still requires the counterparty and the outstanding balances cleared;
+> there is no override.
 | **Creating an agent** | They sign up. An agent is a platform identity, not an agency-owned record |
 
 ---
@@ -141,7 +150,12 @@ Every list field, plus:
     "…all list fields…": "…",
     "emailVerified": true,
     "phoneVerified": true,
-    "vehicle": { "type": "motorcycle", "plate": "LT 4412 A" },
+    "vehicle": {
+      "type": "bike",
+      "plateNumber": "LT 4412 A",
+      "color": "red",
+      "photoFileId": "6612aabbccddeeff00112233"
+    },
     "homeBase": { "label": "Bonapriso, Douala", "serviceRadiusKm": 12 },
 
     "kyc": {
@@ -160,18 +174,46 @@ Every list field, plus:
       "changedAt": "2026-02-02T10:00:00.000Z",
       "changedBy": { "id": "665f…", "role": "admin", "source": "wi-admin", "name": "Ada Nkemelu" },
       "lastKnown": {
-        "status": "tracking",
+        "status": "streaming",
         "position": { "type": "Point", "coordinates": [9.7043, 4.0511] },
+        "place": {
+          "label": "Bonapriso, Douala, Cameroun",
+          "source": "reverse_geocode:nominatim",
+          "resolvedAt": "2026-08-13T08:41:14.000Z"
+        },
         "reportedAt": "2026-08-13T08:41:12.000Z",
-        "source": "geo-tracker",
+        "source": "geo_tracker",
         "isStale": true
       }
     },
 
-    "device": { "platform": "android", "appVersion": "3.4.1" },
+    "device": {
+      "platform": "android",
+      "appVersion": "3.4.1",
+      "locationPermission": "always",
+      "locationServicesEnabled": true,
+      "backgroundLocationEnabled": true,
+      "batteryOptimizationExempt": false,
+      "pushEnabled": true,
+      "reportedAt": "2026-08-13T08:40:00.000Z"
+    },
     "capacity": { "max": 4, "active": 2, "reconciledAt": "2026-08-13T08:00:00.000Z" },
     "cod": { "trustScore": 87, "maxThreshold": 250000 },
-    "trustSignals": { "…": "…" },
+    "trustSignals": {
+      "onTimeRate": 0.94,
+      "assignmentResponseRate": 0.88,
+      "completedShipments": 412,
+      "customerRatingAvg": 4.6,
+      "customerRatingCount": 188,
+      "agencyRatingAvg": 4.8,
+      "agencyRatingCount": 31,
+      "vendorRatingAvg": null,
+      "vendorRatingCount": 0,
+      "codCleanReturnCount": 96,
+      "codDiscrepancyCount": 2,
+      "codVolumeReturned": 3820000,
+      "computedAt": "2026-08-13T02:00:00.000Z"
+    },
     "settings": { "autoAcceptAssignments": false, "navigationApp": "google_maps" },
     "timezone": "Africa/Douala",
     "preferredLanguage": "fr"
@@ -194,6 +236,47 @@ and serving it as a live position is a bug.
 
 For the authoritative tracking answer, call
 [`GET /agents/:agentId/tracking-policy`](#get-agentsagentidtracking-policy).
+
+#### `lastKnown.place` — a name for the position
+
+```jsonc
+"place": { "label": "Bonapriso, Douala, Cameroun",
+           "source": "reverse_geocode:nominatim",
+           "resolvedAt": "2026-08-13T08:41:14.000Z" }
+```
+
+- **Resolved server-side, once per position**, and stored beside it — not on read.
+  Reverse-geocoding per render would be a bill per operator who opens the tab, and would hand
+  the same person's coordinates to a geocoding provider once per *viewer* rather than once per
+  *position*.
+- **`null` when nothing resolved** — never `""`, and never a coordinate pair dressed up as a
+  name. Resolution failure is not fatal: the position and the state still arrive.
+- `source` is an **open string** naming the resolver — it carries the active provider, and a
+  future "nearest landmark" or "agency coverage region" resolution would be additive. Render it
+  raw; do not `switch` on it.
+- ⚠️ **It inherits the position's exposure and then some.** `[9.7043, 4.0511]` needs a tool to
+  read; "Bonapriso, Douala" does not. Whatever decides whether to reveal the coordinates decides
+  the same thing about this.
+- Coordinates remain GeoJSON **`[longitude, latitude]`**, in that order.
+
+#### There is no `accuracyMetres`, and that is a finding rather than an omission
+
+**geo-tracker records no GPS accuracy anywhere.** Its WebSocket `location_update` frame does not
+carry one, so nothing on the platform has ever known how good a fix is. Adding it starts at the
+agent mobile application, then the frame, then geo-tracker's location domain, then the
+notification, then this mirror — four layers, one of which is a release of a phone app.
+
+A field that is `null` on every row in every circumstance would teach a client to expect data
+that does not exist, so none is shipped.
+
+#### Why this block was empty until now
+
+`last_known_tracking_state` was the schema default (`status: "unknown"`, `position: null`) on
+every agent in the database, and the reason was a path mismatch between two services:
+geo-tracker POSTed its tracking-state notifications to `/api/tracking/agent-state`, which
+jovi-mall did not serve. Delivery is best-effort, so every notification was dropped and logged.
+jovi-mall now serves that path, and geo-tracker's notification carries the agent's last fix —
+which is what gives this block coordinates to hold and a place to name.
 
 ### Other field notes
 
@@ -253,6 +336,7 @@ The same contract core as the [agency roster](agencies.md#get-agenciesagencyidag
       "lifecycle": { "…": "…" },
       "agency": {
         "id": "665c0011223344556677889a",
+        "businessName": "Littoral Express Delivery",
         "status": "active",
         "contactName": "Nadège M.",
         "country": "CM"
@@ -263,14 +347,32 @@ The same contract core as the [agency roster](agencies.md#get-agenciesagencyidag
 }
 ```
 
-> **The agency's business name is not here.** It lives on the Magazin, and joining a second
-> collection to decorate a list that is already a join would cost an extra lookup per page for a
-> label the dashboard can resolve from the agency id — `GET /agencies/:agencyId` is one request
-> away.
+> ### ⚠️ `businessName` is the business; `contactName` is a **person**
+>
+> `contactName` is the agency's contact individual — it always was, and a column headed
+> "Agency" rendering it has been showing a human's name.
+>
+> `businessName` is new (dashboard-request round) and comes off the Magazin. It used to be
+> withheld on the grounds that a second `$lookup` was not worth "a label the dashboard can
+> resolve from the agency id". That holds for **one** agency and not for a page of rows: with
+> no batch-by-ids route anywhere on this service, the client's alternative is one request per
+> distinct agency, in every client ever built against this endpoint. The lookup runs after
+> skip/limit, so it touches at most one page.
+>
+> **`null` where the Magazin has none** — an agency mid-onboarding legitimately has no business
+> name yet and must still be identifiable by its id. `null`, never `""`, and never silently
+> substituted with `contactName`.
 
 The same two reading traps apply as on the roster: `terms.coverageRegions: []` means **all
 regions**, and `terms.proposedBy` — not `origin` — decides whose turn it is on a pending
 contract.
+
+**`terms.employment`, `terms.remittance` and `terms.feeSplit` are documented field by field in
+[contracts.md](contracts.md)**, and ship **camelCase** as of the dashboard-request round — they
+previously carried jovi-mall's raw sub-documents.
+
+For one contract by its own id, plus the three administrative interventions, see
+[contracts.md](contracts.md).
 
 ---
 
@@ -533,7 +635,29 @@ already allocated is refused there**, and that check needs the contracts.
 
 ### Response (200)
 
-The updated agent, message `"COD threshold updated"`.
+⚠️ **A `CodAllocation`, not the updated agent** — the previous wording here was wrong.
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "agentId": "665b…",
+    "maxThreshold": 250000,
+    "allocated": 180000,
+    "headroom": 70000,
+    "contracts": [ /* per-contract slices */ ]
+  },
+  "message": "COD threshold updated"
+}
+```
+
+jovi-mall runs the write and then returns a **fresh allocation**, which is the more useful
+answer — a client gets the resulting headroom rather than an agent it has to re-read. Note
+`maxThreshold` sits at the **top level** here, not under `cod` as it does on an agent.
+
+That difference was also a real defect: this service's audit `after` read `cod.maxThreshold`
+and therefore recorded `null` on every row of the one write on this surface flagged
+`financial`. Fixed in the dashboard-request round; both shapes are read now.
 
 ### Errors
 
