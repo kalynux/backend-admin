@@ -582,6 +582,7 @@ What a customer actually paid.
 | `orderId` | 24-hex | |
 | `bookingId` | 24-hex | |
 | `userId` | 24-hex | **The payer — not one kind of id.** An order payment stores a *customer* id and a booking payment a *user* id. The filter matches whichever is stored, which is the only thing it can honestly do |
+| `reference` | string, 1–128 | **A payment reference, matched exactly against `gatewayRef` OR `merchantRef`.** One parameter for both because the person pasting one cannot tell which kind they hold: a customer reads *ours* off their record, a provider's dispute email quotes *theirs*. Exact equality, never a prefix — both fields are indexed and both values are quoted in full |
 | `from` / `to` | ISO-8601 instant | Max span 366 days |
 
 ### Response (200)
@@ -600,10 +601,11 @@ What a customer actually paid.
         "purpose": "primary"
       },
       "payer": { "id": "665f1c2a9b3e4a91c7d2e5f0", "kind": "customer_or_user" },
-      "gateway": "mtn_momo",
-      "method": "mobile_money",
-      "gatewayRef": "MP260812.1402.A44127",
-      "status": "succeeded",
+      "gateway": "NOTCHPAY",
+      "method": "MOBILE",
+      "gatewayRef": "trx.p8Kq2mFh3xR7",
+      "merchantRef": "jm_pt_9f2c41ab77e0463d8a15c6be02d7f318",
+      "status": "SUCCEEDED",
       "amount": 54200,
       "currency": "XAF",
       "refunds": { "totalRefunded": 27500, "netAmount": 26700, "hasPartialRefund": true },
@@ -619,7 +621,11 @@ What a customer actually paid.
 |---|---|
 | **`settles`** | Exactly one of the three is set. **`cartId` with `orderIds` is the common case and the one that surprises people**: a multi-vendor checkout is *one* payment settling *N* orders, so a row whose `orderId` is `null` is not an incomplete record |
 | `payer.kind` | Always `"customer_or_user"` — **a deliberate `unknown` rather than a guess.** Nothing on the row says which |
-| `gatewayRef` | **The string quoted in a dispute** |
+| `gateway` | `NOTCHPAY` · `MYCOOLPAY` · `STRIPE`, stored uppercase exactly as written here |
+| `method` | `MOBILE` · `CARD` · `CASH` |
+| `gatewayRef` | **The provider's own reference — the string quoted in a dispute** |
+| `merchantRef` | **Ours**, `jm_pt_<32 hex>`, minted per attempt and echoed back by the provider on its callback. `null` on rows written before the field existed and on any row whose provider never returned one. Searchable through `?reference=` |
+| `status` | `INITIATED` · `PENDING` · `SUCCEEDED` · `FAILED` · `CANCELLED` · `REFUNDED`, uppercase |
 | `amount` | The amount **at payment time**, never re-read off the order |
 | `refunds.netAmount` | `amount − totalRefunded`, computed on the way out |
 

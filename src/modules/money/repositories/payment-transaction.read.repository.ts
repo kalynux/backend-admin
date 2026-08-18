@@ -68,6 +68,20 @@ export interface PaymentTransactionReadModel extends Document {
     method: string;
     /** The gateway's own transaction reference — the string quoted in a dispute. */
     gatewayRef: string;
+    /**
+     * OUR reference, minted per attempt and echoed back by the gateway on its callback
+     * (NotchPay `reference`, My-CoolPay `app_transaction_ref`, Stripe `metadata.merchantRef`).
+     *
+     * `jm_pt_<32 hex>` on a payment transaction. Null on every row written before the field
+     * existed, and on any row whose gateway never echoed one back.
+     *
+     * Projected, unlike `idempotencyKey` and `gatewayPayloadHash` beside it, and the
+     * difference is what each one is FOR. Those two are verification and dedup material — a
+     * caller who learns them moves closer to forging or suppressing a settlement. This is a
+     * routing label the provider already holds, that appears on the customer's own record,
+     * and that Support is asked to trace when a payment and an order disagree.
+     */
+    merchantRef?: string | null;
     status: string;
     /** The amount AT PAYMENT TIME. Never re-read off the order — that is the whole point. */
     amountSnapshot: number;
@@ -89,6 +103,7 @@ const PAYMENT_TRANSACTION_PROJECTION = {
     gateway: 1,
     method: 1,
     gatewayRef: 1,
+    merchantRef: 1,
     status: 1,
     amountSnapshot: 1,
     currencySnapshot: 1,
@@ -106,6 +121,8 @@ export interface PaymentSearchQuery extends ListQueryBase {
     orderId?: string;
     bookingId?: string;
     userId?: string;
+    /** A gateway reference or a merchant reference, matched exactly against either. */
+    reference?: string;
     from?: Date;
     to?: Date;
 }
@@ -155,14 +172,32 @@ export function buildPaymentFilter(query: PaymentSearchQuery): Filter<PaymentTra
     if (query.bookingId) clauses.push({ bookingId: toObjectIdOrNothing(query.bookingId) });
     if (query.userId) clauses.push({ userId: toObjectIdOrNothing(query.userId) });
 
+    /**
+     * The reference lookup — one term, both references.
+     *
+     * A person holding a reference does not know which KIND they are holding: a customer
+     * reads ours off their receipt, a provider's dispute email quotes theirs, and the two
+     * are indistinguishable to the person pasting one into a search box. Asking which is a
+     * question only this codebase can answer, so the filter answers it instead.
+     *
+     * Exact equality, never a regex. Both fields carry an index in jovi-mall
+     * (`gatewayRef` plain, `merchantRef` sparse-unique), both values are opaque tokens
+     * quoted in full, and a prefix search over a money collection is a scan that a query
+     * string can request. `escapeRegex`/`containsInsensitive` are for names; these are not
+     * names.
+     */
+    if (query.reference) {
+        clauses.push({ $or: [{ gatewayRef: query.reference }, { merchantRef: query.reference }] });
+    }
+
     const range = dateRange(query.from, query.to);
     if (range) clauses.push({ createdAt: range });
 
     if (clauses.length === 0) return {} as Filter<PaymentTransactionReadModel>;
     if (clauses.length === 1) return clauses[0] as Filter<PaymentTransactionReadModel>;
 
-    // `$and`, not `Object.assign` — the order clause is an `$or`, and merging two
-    // `$or`-shaped filters by assignment silently drops the earlier one.
+    // `$and`, not `Object.assign` — the order clause and the reference clause are both
+    // `$or`-shaped, and merging two of those by assignment silently drops the earlier one.
     return { $and: clauses } as Filter<PaymentTransactionReadModel>;
 }
 

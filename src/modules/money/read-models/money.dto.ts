@@ -331,6 +331,14 @@ export interface PaymentDto {
     method: string;
     /** The gateway's own reference — the string quoted in a dispute. */
     gatewayRef: string;
+    /**
+     * OUR reference, echoed back by the gateway on its callback — `jm_pt_<32 hex>`.
+     *
+     * `null` on every row written before the field existed, and on any row whose provider
+     * never returned one. Both references are searchable through `?reference=`, which
+     * matches either, because the person holding one cannot tell which kind it is.
+     */
+    merchantRef: string | null;
     status: string;
     /** The amount AT PAYMENT TIME, never re-read off the order. */
     amount: number;
@@ -361,6 +369,7 @@ export function toPaymentDto(row: PaymentTransactionReadModel): PaymentDto {
         gateway: row.gateway,
         method: row.method,
         gatewayRef: row.gatewayRef,
+        merchantRef: row.merchantRef ?? null,
         status: row.status,
         amount: row.amountSnapshot,
         currency: row.currencySnapshot,

@@ -531,6 +531,7 @@ export class MoneyController {
             orderId: query.orderId,
             bookingId: query.bookingId,
             userId: query.userId,
+            reference: query.reference,
             from: query.from,
             to: query.to,
             page: query.page,
@@ -547,8 +548,10 @@ export class MoneyController {
      * The refund rows are the half the payment cannot state: `totalRefunded` says how much
      * went back, and these say when, through which gateway and at whose request. A `pending`
      * or `failed` refund beside a `totalRefunded` that has not moved is exactly what a stuck
-     * refund looks like — and NotchPay's and MyCoolPay's gateway refunds are explicit
-     * placeholders, so that state is expected rather than exotic.
+     * refund looks like — and on the mobile rails that state is expected rather than exotic:
+     * My-CoolPay's API has no refund endpoint at all, and NotchPay's is implemented but
+     * disabled on the merchant account, so both settle by manual payout against a HIGH
+     * support ticket until that changes.
      */
     static getPayment = asyncHandler(async (req: Request, res: Response) => {
         const row = await payments.findById(req.params.transactionId);

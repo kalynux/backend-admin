@@ -226,6 +226,17 @@ export const ListPaymentsQuerySchema = listQuery(PAYMENT_SORT, '-createdAt', {
      * filter matches whichever is stored, which is the only thing it can honestly do.
      */
     userId: objectId.optional(),
+    /**
+     * A payment reference — either the gateway's own (`gatewayRef`) or ours
+     * (`merchantRef`, `jm_pt_<32 hex>`). Matched EXACTLY against both, because the person
+     * pasting one cannot tell which kind they hold.
+     *
+     * Its own bound rather than `platformTerm`'s 40: a merchant reference is 38 characters
+     * and a provider's is arbitrary, so 40 would silently refuse a legitimate lookup. 128
+     * is well past every reference either provider has been observed to mint, and the value
+     * reaches Mongo as an equality term, never as a pattern.
+     */
+    reference: z.string().trim().min(1).max(128).optional(),
     ...dateRangeFields(),
 }).superRefine(dateRangeRule({ maxDays: MONEY_MAX_RANGE_DAYS }));
 
