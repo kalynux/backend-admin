@@ -40,7 +40,7 @@ interface Fetched {
 async function call(port: number, path: string, headers: Record<string, string> = {}): Promise<Fetched> {
     const response = await fetch(`http://127.0.0.1:${port}${path}`, { headers });
     const text = await response.text();
-    let body: any = null;
+    let body: any;
     try {
         body = JSON.parse(text);
     } catch {

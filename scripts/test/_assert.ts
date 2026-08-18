@@ -30,7 +30,7 @@ export function suite(title: string): Suite {
         },
 
         assert(name: string, fn: () => boolean): void {
-            let ok = false;
+            let ok: boolean;
             try {
                 ok = fn();
             } catch (err) {

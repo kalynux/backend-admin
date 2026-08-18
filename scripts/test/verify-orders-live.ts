@@ -105,7 +105,7 @@ async function call(
     });
 
     const text = await response.text();
-    let body: any = null;
+    let body: any;
     try { body = JSON.parse(text); } catch { body = text; }
     return { status: response.status, body, cookies: parseCookies(response.headers) };
 }

@@ -26,7 +26,7 @@ process.env.ADMIN_DASHBOARD_ORIGINS ||= 'http://localhost:5175';
 process.env.ADMIN_JWT_SECRET = 'test-access-secret-not-used-in-any-deployment';
 process.env.ADMIN_JWT_REFRESH_SECRET = 'test-refresh-secret-different-from-access';
 
-/* eslint-disable @typescript-eslint/no-var-requires */
+ 
 import * as tokens from '../../src/modules/admin-identity/domain/token.service';
 import * as passwords from '../../src/modules/admin-identity/domain/password.service';
 import * as mfa from '../../src/modules/admin-identity/domain/mfa.service';

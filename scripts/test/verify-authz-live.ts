@@ -94,7 +94,7 @@ async function call(
     });
 
     const text = await response.text();
-    let body: any = null;
+    let body: any;
     try { body = JSON.parse(text); } catch { body = text; }
 
     return { status: response.status, body, cookies: parseCookies(response.headers) };
@@ -635,7 +635,7 @@ async function main(): Promise<number> {
             rogueApp.use('/api/v1/rogue', rogue);
 
             try {
-                // eslint-disable-next-line @typescript-eslint/no-var-requires
+                 
                 const { assertRouteManifestComplete } = require('../../src/api/route-manifest');
                 assertRouteManifestComplete(rogueApp);
                 return false;

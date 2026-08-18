@@ -117,7 +117,7 @@ async function call(
         ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
     });
     const text = await response.text();
-    let body: any = null;
+    let body: any;
     try { body = JSON.parse(text); } catch { body = text; }
     return { status: response.status, body, cookies: parseCookies(response.headers) };
 }

@@ -331,14 +331,14 @@ const READ_ONLY_SURFACE = ['findOneBy', 'findBy', 'findPage', 'countBy', 'aggreg
 const WRITE_METHODS = ['insertOneDoc', 'updateOneBy', 'deleteOneBy', 'insertOne', 'updateOne', 'deleteOne'];
 
 t.assert('PlatformReadRepository exposes no write method', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+     
     const { PlatformReadRepository } = require('../../src/infra/platform/platform.repository');
     const surface = Object.getOwnPropertyNames(PlatformReadRepository.prototype);
     return !WRITE_METHODS.some((method) => surface.includes(method));
 });
 
 t.assert('PlatformReadRepository exposes the expected read surface', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+     
     const { PlatformReadRepository } = require('../../src/infra/platform/platform.repository');
     const surface = Object.getOwnPropertyNames(PlatformReadRepository.prototype);
     return READ_ONLY_SURFACE.every((method) => surface.includes(method));
@@ -389,7 +389,7 @@ t.assert('aggregatePage refuses an exclusion in the caller’s extra projection'
  * scanning for a keyword, because the bug was a missing traversal, not a missing line.
  */
 t.assert('...at any depth — a nested `_id: 0` is refused, not just a top-level one', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+     
     const { assertInclusionOnly } = require('../../src/infra/platform/platform.repository');
     return throws(() => assertInclusionOnly({ magazin: { _id: 0, name: 1 } }))
         && throws(() => assertInclusionOnly({ a: { b: { c: false } } }))
@@ -426,7 +426,7 @@ t.assert('aggregatePage refuses $out and $merge on both stage lists', () => {
 });
 
 t.assert('PlatformOwnedRepository does expose writes', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+     
     const { PlatformOwnedRepository } = require('../../src/infra/platform/platform.repository');
     const surface = Object.getOwnPropertyNames(PlatformOwnedRepository.prototype);
     return ['insertOneDoc', 'updateOneBy', 'deleteOneBy'].every((m) => surface.includes(m));
