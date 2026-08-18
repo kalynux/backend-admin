@@ -1,0 +1,78 @@
+# wi-admin CI
+#
+# The first automated check this repository has ever had. Everything it runs already
+# existed — including `scripts/test/verify-audit-live.ts`, which had not compiled since
+# Phase 12 and which no command in this repository reported.
+#
+# See PRODUCTION-READINESS plan step 0.D.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # ADR-019 D-1 pins the runtime in three places: `engines`, the Dockerfile and here.
+  NODE_VERSION: '22'
+
+jobs:
+  check:
+    name: typecheck · lint · DB-free suites · audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # No `.env` step, and the asymmetry with jovi-mall's workflow is real rather than
+      # an oversight: this service's `config/env.ts` SUPPLIES every value with a default
+      # and validates at boot, so the DB-free suites run against those defaults. Verified
+      # by running them with no environment file at all. jovi-mall's module configs read
+      # process.env at import time in a few places, which is why its workflow composes
+      # one from `.env.example`.
+
+      - name: Type-check src
+        run: npm run typecheck
+
+      # scripts/ entered the type checker in plan step 0.C, having been excluded from
+      # BOTH tsconfig.json and eslint's ignore list — the one tree no check could see.
+      - name: Type-check scripts
+        run: npm run typecheck:scripts
+
+      - name: Lint (src + scripts)
+        run: npm run lint
+
+      # DISCOVERED from package.json rather than listed here, so a suite added later runs
+      # without its author touching this file. `verify:*` is excluded on purpose — those
+      # need Mongo as a REPLICA SET (the audit store is fail-closed and only a real
+      # replica set proves it) and belong to the job Phase 2.B.4 makes possible.
+      - name: DB-free suites
+        run: |
+          set -euo pipefail
+          SUITES=$(node -p "Object.keys(require('./package.json').scripts).filter(k => k.startsWith('test:')).join(' ')")
+          failed=""
+          for suite in $SUITES; do
+            echo "── $suite"
+            npm run --silent "$suite" || failed="$failed $suite"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::failing suites:$failed"
+            exit 1
+          fi
+
+      # A REAL gate here, unlike jovi-mall's, because this repository's backlog is already
+      # clear: `npm audit --omit=dev` reports 0 vulnerabilities. The difference is surface
+      # area — jovi-mall carries googleapis, firebase-admin, stripe, cloudinary, sharp,
+      # nodemailer and handlebars; this service carries almost none of it. Keeping the gate
+      # hard is what stops that from changing quietly.
+      - name: npm audit (production dependencies)
+        run: npm audit --omit=dev
