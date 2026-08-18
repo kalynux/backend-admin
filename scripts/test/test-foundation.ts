@@ -20,6 +20,7 @@ import { ERROR_CODES } from '../../src/core/errors/error-codes';
 import { AppError, createAppError } from '../../src/core/errors/app-error';
 import { clearable, csvList } from '../../src/core/validation/zod.helpers';
 import { REDACTED_PATHS } from '../../src/core/logging/logger';
+import { ERROR_CATEGORY_VALUES } from '../../src/core/errors/error-category';
 
 const t = suite('wi-admin foundation');
 
@@ -296,6 +297,29 @@ t.assert('details are carried through', () => {
 t.assert('instanceof survives the prototype dance', () => {
     const err = createAppError(ERROR_CODES.NOT_FOUND, 404);
     return err instanceof AppError && err instanceof Error;
+});
+
+// ─── 3b. The taxonomy — this service's copy of the cross-service contract ────
+//
+// ⚠ THIS ASSERTION WAS MISSING, and its absence was invisible because ADR-016 says it
+// exists. That document describes the nine-value taxonomy as held by "three hardcoded
+// assertions in three repositories", each spelling the names out because there is no
+// shared package — jovi-mall's `test:errors` §1 and geo-tracker's `TestCategoryContract`
+// do exactly that. This service defined ERROR_CATEGORY_VALUES and asserted nothing about
+// it, so wi-admin was the one copy that could drift in silence: renaming a category here
+// would have gone green in every check this repository runs.
+//
+// Sorted before comparing, so the ORDER of the definition is free to change and only the
+// SET is the contract. Changing this list means changing it in three repositories.
+t.section('3b. Error taxonomy — the cross-service contract copy');
+
+t.assert('exactly nine categories, spelled as the other two services spell them', () => {
+    const want = [
+        'authentication', 'authorization', 'business_rule', 'conflict',
+        'external_service', 'internal', 'not_found', 'rate_limit', 'validation',
+    ];
+    const got = [...ERROR_CATEGORY_VALUES].sort();
+    return got.length === want.length && want.every((value, i) => got[i] === value);
 });
 
 // ─── 4. Validation helpers ───────────────────────────────────────────────────
