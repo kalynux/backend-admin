@@ -32,6 +32,7 @@ import { AuditLogModel } from '../../src/modules/audit/models/audit-log.model';
 import { AuditExportModel } from '../../src/modules/audit/models/audit-export.model';
 import { auditedTransaction, auditedAttempt } from '../../src/modules/audit/domain/audit.writer';
 import { runExport } from '../../src/modules/audit/domain/audit-export.service';
+import { systemActor, systemContext } from '../../src/modules/audit/domain/audit-context';
 import { hash } from '../../src/modules/admin-identity/domain/password.service';
 import { AuditIntent } from '../../src/modules/audit/domain/audit.types';
 
@@ -255,13 +256,23 @@ async function main(): Promise<void> {
     // ── 5. Export end to end ────────────────────────────────────────────────
     t.section('5. Export: a durable file, then stamping');
 
+    // `actor` and `context` became REQUIRED when Phase 12 gave the export its own audit
+    // row, and this verifier was never updated — it stopped compiling and nothing reported
+    // it, because scripts/ was outside every tsconfig until plan step 0.C. Mirrors what
+    // `scripts/audit-export.ts` passes: there is genuinely no administrator behind a CLI
+    // export, and inventing one would be a lie. The correlation id is shared with the
+    // manifest so the row and the file join.
+    const exportCorrelationId = randomUUID();
+
     const exportResult = await runExport({
         from: new Date(Date.now() - 3_600_000),
         to: new Date(Date.now() + 3_600_000),
         source: 'cli',
         requestedBy: null,
-        correlationId: randomUUID(),
+        correlationId: exportCorrelationId,
         purge: false,
+        actor: systemActor('audit verification run'),
+        context: systemContext('scripts/test/verify-audit-live.ts', exportCorrelationId),
     });
     exportIds.push(exportResult.manifest._id);
 

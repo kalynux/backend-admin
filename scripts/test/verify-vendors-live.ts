@@ -104,7 +104,7 @@ async function call(
     });
 
     const text = await response.text();
-    let body: any = null;
+    let body: any;
     try { body = JSON.parse(text); } catch { body = text; }
 
     return { status: response.status, body, cookies: parseCookies(response.headers) };
@@ -368,8 +368,6 @@ async function main(): Promise<number> {
 
         // ── 3. Gate A — the suspension is enforced, and enforced narrowly ─────
         t.section('3. Gate A — enforced in jovi-mall, and narrowly');
-
-        const platformBase = env().JOVI_MALL_BASE_URL as string;
 
         const suspended = await write(admin, 'POST', `/api/v1/vendors/${id}/suspend`,
             { reason: 'verification run' });

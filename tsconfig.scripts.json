@@ -1,0 +1,23 @@
+{
+  "//": [
+    "Type-checking config for the scripts/ tree — the 18 suites plus the live verifiers.",
+    "",
+    "A SECOND config rather than a widening of tsconfig.json: the build config has",
+    "`rootDir: ./src` and emits to dist/, so including scripts/**/* there would ship the",
+    "test corpus in the build output.",
+    "",
+    "`rootDir` widens to the project root because scripts/ sits beside src/; `noEmit`",
+    "because nothing here is built. src/**/* stays included so the `declare global` blocks",
+    "that add req.admin and req.requestId are in scope — the same reason the ts-node `files`",
+    "flag exists in tsconfig.json, and the same failure it was added to fix.",
+    "",
+    "Run via `npm run typecheck:scripts`. See PRODUCTION-READINESS plan step 0.C."
+  ],
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true
+  },
+  "include": ["scripts/**/*", "src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

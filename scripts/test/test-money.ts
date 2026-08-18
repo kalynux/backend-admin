@@ -1233,9 +1233,11 @@ t.assert('no :param sits beside a literal at the same depth under /earnings', ()
     const earnings = moneyRoutes
         .map((r) => r.fullPath.replace('/api/v1/money/earnings/', ''))
         .filter((path) => !path.startsWith('/api'));
-    const secondSegments = earnings
-        .filter((path) => moneyRoutes.some((r) => r.fullPath.includes('/earnings/')))
-        .map((path) => path.split('/')[0]);
+    // The `.filter()` that used to sit here ignored its own argument — its predicate was
+    // `moneyRoutes.some(r => r.fullPath.includes('/earnings/'))`, a constant, so it kept
+    // every path or none of them and narrowed nothing. `earnings` is already exactly the
+    // routes under /earnings/, which is what the filter was reaching for.
+    const secondSegments = earnings.map((path) => path.split('/')[0]);
     return !secondSegments.some((segment) => segment.startsWith(':'));
 });
 

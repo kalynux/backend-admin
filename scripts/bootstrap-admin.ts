@@ -86,6 +86,14 @@ async function main(): Promise<void> {
     if (!args.email) usage('--email is required');
     if (!args.name) usage('--name is required');
 
+    // Captured as consts because the narrowing the two guards above produce does NOT
+    // survive into the audited callback further down: TypeScript resets property narrowing
+    // inside a closure, since it cannot know when the callback runs. Narrowed consts do
+    // survive, so this is the fix rather than a non-null assertion — which would silence
+    // the check instead of satisfying it.
+    const email = args.email;
+    const displayName = args.name;
+
     // Validates configuration before touching anything, and fails closed on a bad env.
     env();
     await connectAll();
@@ -106,8 +114,8 @@ async function main(): Promise<void> {
         process.exit(1);
     }
 
-    if (await accounts.findByEmail(args.email)) {
-        process.stderr.write(`\n[bootstrap] Refusing: an administrator with ${args.email} already exists.\n\n`);
+    if (await accounts.findByEmail(email)) {
+        process.stderr.write(`\n[bootstrap] Refusing: an administrator with ${email} already exists.\n\n`);
         process.exit(1);
     }
 
@@ -134,7 +142,7 @@ async function main(): Promise<void> {
                 tier: null,
                 sessionId: null,
             },
-            target: { type: 'administrator', id: null, label: args.email },
+            target: { type: 'administrator', id: null, label: email },
             context: {
                 method: 'CLI',
                 path: 'npm run bootstrap:admin',
@@ -142,12 +150,12 @@ async function main(): Promise<void> {
                 ip: null,
                 userAgent: null,
             },
-            payload: { email: args.email, displayName: args.name, tier: BOOTSTRAP_TIER },
+            payload: { email, displayName, tier: BOOTSTRAP_TIER },
         },
         async (session) => {
             const created = await accounts.create({
-                email: args.email,
-                displayName: args.name,
+                email,
+                displayName,
                 passwordHash,
                 tier: BOOTSTRAP_TIER,
                 // No creator, and the only account for which that is true. Every
