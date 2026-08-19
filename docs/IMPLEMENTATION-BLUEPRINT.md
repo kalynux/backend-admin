@@ -159,7 +159,7 @@ the admin notification stack (Phase 7).
 | # | Work | Size |
 |---|---|---|
 | J1 🔴 | Remove `'admin'` from `auth.schemas.ts:43,59` and both `AuthService` branches (`:166`, `:294`) — closes public admin registration + self-elevation | ~10 lines |
-| J2 🔴 | Fail closed when `JWT_SECRET` unset (drop the `\|\| 'secret'` fallback) | 1 line + boot guard |
+| J2 ✅ | Fail closed when `JWT_SECRET` unset (drop the `\|\| 'secret'` fallback) | 1 line + boot guard. **Done** — `getJwtSecret()` + `assertSigningSecrets()`. geo-tracker had the same fallback and it was closed separately on 2026-08-19 (Phase 3 step 3.E.2) |
 | J3 🔴 | Remove the refresh-token `console.log` in `auth.middleware.ts` | 1 line |
 | J4 ✅ | New `requireAdminCaller` middleware — constant-time service-token compare + **synthetic actor** from headers. Shipped Phase 4; the actor is richer than "a userId" — see ADR-004 D-1 | ~130 lines, 2 files |
 | J5 ◐ | **Dual-mount** the admin routers under `/api/internal/admin/*` via a per-router factory — NOT a guard swap, see ADR-004 D-5. COD done (Phase 4); 11 routers remain (Phase 5). `users` is mounted internal-**only**, having no legacy public twin (ADR-007 D-2) | ~35-line factory refactor per router |

@@ -229,7 +229,7 @@ Any customer can promote themselves.
 
 | # | Issue | Evidence | Severity |
 |---|---|---|---|
-| A1 | `JWT_SECRET` falls back to the literal string `'secret'` when unset | `auth.middleware.ts` — `jwt.verify(token, process.env.JWT_SECRET \|\| 'secret')`. Already recorded in `CLAUDE.md` as a known cross-service defect (geo-tracker fails closed instead) | 🔴 High |
+| A1 | `JWT_SECRET` falls back to the literal string `'secret'` when unset | `auth.middleware.ts` — `jwt.verify(token, process.env.JWT_SECRET \|\| 'secret')`. Already recorded in `CLAUDE.md` as a known cross-service defect (geo-tracker fails closed instead) — ⚠ **superseded: that parenthesis was FALSE.** geo-tracker read `getEnv("JWT_SECRET", "secret")` too, and did so until 2026-08-19. Both sides fail closed now (Phase 3 step 3.E.2). Kept as the discovery record; see `PRODUCTION-READINESS/06-CROSS-SERVICE.md` § X-8 | 🔴 High |
 | A2 | Refresh token written to stdout | `auth.middleware.ts` — `console.log('No access token — attempting silent refresh. refreshToken:', refreshToken)`. A long-lived credential in application logs | 🔴 High |
 | A3 | `two_factor_enabled` is decorative | Stored in `admin.model.ts:43`, surfaced in `admin-profile.dto.ts:55`, **enforced nowhere** | 🟠 Medium |
 | A4 | `last_login_ip` never populated | `AdminRepository.recordLogin()` has zero callers; docstring claims the auth middleware calls it | 🟠 Medium |
@@ -318,7 +318,7 @@ What the dashboard needs, against what exists. `⛔` = nothing exists today.
 
 1. **Public admin self-registration** — `POST /api/auth/register { role: "admin" }` (§4.2 Path 1).
 2. **Admin self-elevation** — `POST /api/auth/add-role { role: "admin" }` from any session (§4.2 Path 2).
-3. **`JWT_SECRET` defaults to `'secret'`** — a deploy that forgets the env var accepts tokens anyone can forge.
+3. **`JWT_SECRET` defaults to `'secret'`** — a deploy that forgets the env var accepts tokens anyone can forge. ✅ **Fixed** — jovi-mall's fallback was removed in the Phase-0 emergency patch; geo-tracker's equivalent `getEnv("JWT_SECRET", "secret")` survived until 2026-08-19 and is now closed too (Phase 3 step 3.E.2).
 4. **No audit trail whatsoever** — `AuditLogger` is a `console.log` stub with a `query()` that returns `[]`. Financial admin actions (remittance confirmation, trust adjustment, payout mark-paid, dispute resolution) leave no record.
 
 ### 🟠 High
@@ -430,7 +430,7 @@ without inventing a second convention. **This is a proposal, not a discovery fin
 | `role === 'admin'` boolean | Permission-checked operations; tiers are seed data mapped to permissions, resolvable per-admin |
 | Console-stub audit | Append-only `admin_audit_log`, written on the delegation path so it cannot be bypassed |
 | 5 routers on one prefix, 5× auth | One router tree, auth resolved once per request, permissions cached in Redis |
-| `JWT_SECRET \|\| 'secret'` | Fail closed at boot: refuse to start when a required secret is unset (geo-tracker's behavior) |
+| `JWT_SECRET \|\| 'secret'` | Fail closed at boot: refuse to start when a required secret is unset — ⚠ the original said *"(geo-tracker's behavior)"*, which was **not true at the time**; geo-tracker was made to behave that way on 2026-08-19 |
 | Tokens in logs | Structured logger with redaction; never log credential material |
 | 2FA flag that does nothing | Real TOTP enrolment + enforcement, mandatory for L1 |
 | No separation of duties | Financial actions above a threshold require a second admin's approval (design in Phase 1) |

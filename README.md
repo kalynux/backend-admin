@@ -3,6 +3,13 @@
 The **only** backend the admin dashboard talks to. Owns every administration operation on
 the WiMall platform.
 
+> **Deploying, migrating and rotating secrets** are in [`../docs/RUNBOOK.md`](../docs/RUNBOOK.md),
+> not here; the release shape is [`ADR-019`](../docs/ADR-019-RELEASE-SHAPE.md). Note in particular
+> that `JOVI_MALL_SERVICE_TOKEN` is the **same value** as jovi-mall's
+> `INTERNAL_ADMIN_SERVICE_TOKEN` under a different name — rotating one side alone 401s every
+> platform write while leaving every read working, because reads go straight to the shared
+> database. `ADMIN_JWT_SECRET` is deliberately **not** shared with anything.
+
 | | |
 |---|---|
 | Stack | Express 4 · TypeScript · Mongoose 8 · Redis · Zod · pino |
@@ -39,7 +46,8 @@ npm start                # node dist/server.js
 npm run lint             # eslint, zero warnings allowed
 
 npm run bootstrap:admin -- --email you@example.com --name "Your Name"
-npm run ensure:indexes   # build wi-admin indexes (production: autoIndex is off there)
+npm run ensure:indexes   # build wi-admin indexes (production: autoIndex is off there). Ledgers itself.
+npm run migrate:status   # was ensure:indexes run here, and from which version of its target list?
 npm run authz:matrix     # print the level → permission matrix
 npm run audit:export -- --from ISO --to ISO [--purge]   # export the audit trail; --purge deletes aged rows
 
@@ -315,7 +323,7 @@ Each of these is a defect catalogued in `docs/PHASE-0-DISCOVERY.md`, fixed here 
 
 | jovi-mall | wi-admin |
 |---|---|
-| `process.env.X \|\| 'default'` in six places, incl. `JWT_SECRET \|\| 'secret'` | one Zod-validated config, fails closed, reports every problem at once |
+| `process.env.X \|\| 'default'` in six places, incl. `JWT_SECRET \|\| 'secret'` (⚠ historical — jovi-mall's `JWT_SECRET` fallback is gone, and geo-tracker's went on 2026-08-19) | one Zod-validated config, fails closed, reports every problem at once |
 | `cors({ origin: true, credentials: true })` — reflects any origin | exact-match allowlist, normalised origins |
 | `console.*` logging (leaked a refresh token to stdout) | pino with a redaction list |
 | No rate limiting anywhere | global limiter; strict auth limiter in Phase 2 |
@@ -415,3 +423,10 @@ sitting at tier 3 is now denied most routes — that is the phase working. Run
 `npm run ensure:indexes` before first boot in production, since the partial unique index on
 `admin_approval_requests.request_key` is what makes four-eyes idempotent and `autoIndex` is
 off there.
+
+Since plan step 2.C.5 that run **ledgers itself** to `admin_schema_migrations` — name, sha256 of
+`ensure-indexes.ts`, environment, who, how long, and the outcome (failures included, written
+before the connections close). `npm run migrate:status` reads it back and exits non-zero unless
+the state is `applied`, so it works as a deploy check. The checksum is the point: adding a
+collection to that script's target list and not re-running reports as **`applied-but-changed`**
+rather than hiding inside `applied`, and that list grows every phase.

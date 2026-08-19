@@ -7,3 +7,9 @@ dist/
 npm-debug.log*
 .DS_Store
 coverage/
+
+# Runtime OUTPUT path, not source. `ADMIN_AUDIT_EXPORT_DIR` defaults to
+# ./var/audit-exports and the audit retention chain points at what lands there.
+# Plan D-7: it is a named Docker volume, never an image layer and never source
+# control. The five files removed from the index here were `verify-audit-*` runs.
+var/

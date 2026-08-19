@@ -1,0 +1,45 @@
+# What never enters the build context.
+
+# ─── CORRECTNESS ─────────────────────────────────────────────────────────────
+
+# `bcrypt` resolves a PLATFORM binary at install time and this tree is developed on
+# Windows, so a host `node_modules/` carries `bcrypt/prebuilds/win32-x64`. Copying it
+# into a linux image produces a container that starts and then throws on the first
+# password hash. `npm ci` runs INSIDE the image for exactly this reason.
+node_modules
+**/node_modules
+
+# `ADMIN_AUDIT_EXPORT_DIR` defaults to `./var/audit-exports` — a RUNTIME OUTPUT path
+# holding the exported NDJSON that the audit retention chain points at. Plan D-7: it
+# is a named volume mounted at /app/var/audit-exports, never an image layer. Baking a
+# developer's export runs into the image would ship real audit rows to every host, and
+# an image that loses them leaves audit records stamped `exported` pointing at nothing.
+# This is a second instance of ADR-019 D-1a, which names only jovi-mall's uploads.
+var
+
+# ─── SECRETS ─────────────────────────────────────────────────────────────────
+
+# Compose supplies the container's environment. `.env.example` is kept: it documents
+# the contract and carries no secret.
+.env
+.env.*
+!.env.example
+
+# ─── BUILD OUTPUT AND NOISE ──────────────────────────────────────────────────
+
+# The builder stage produces dist/ itself; a host copy is a Windows-built artefact of
+# unknown vintage shadowing it.
+dist
+
+.git
+.gitignore
+.github
+.vscode
+*.log
+npm-debug.log*
+.DS_Store
+coverage
+
+# Documentation, including the ADR set. Large, and no code path reads it.
+docs
+*.md

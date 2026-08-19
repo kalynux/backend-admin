@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Administration backend for the WiMall platform — the only service the admin dashboard talks to",
   "main": "dist/server.js",
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
@@ -12,6 +15,7 @@
     "typecheck:scripts": "tsc -p tsconfig.scripts.json",
     "bootstrap:admin": "ts-node scripts/bootstrap-admin.ts",
     "ensure:indexes": "ts-node scripts/ensure-indexes.ts",
+    "migrate:status": "ts-node scripts/migrate-status.ts",
     "authz:matrix": "ts-node scripts/print-authz-matrix.ts",
     "audit:export": "ts-node scripts/audit-export.ts",
     "test:foundation": "ts-node scripts/test/test-foundation.ts",

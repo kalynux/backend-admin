@@ -238,7 +238,7 @@ R1 says no admin endpoints remain. Three things need an explicit ruling:
 | Work | Detail |
 |---|---|
 | 🔴 Close the escalation holes | Remove `'admin'` from both Zod enums (`auth.schemas.ts:43,59`) and both `AuthService` switch branches (`:166`, `:294`). Admins can no longer be created here at all. |
-| 🔴 Fail closed on secrets | `JWT_SECRET \|\| 'secret'` → refuse to boot when unset. |
+| 🔴 Fail closed on secrets | `JWT_SECRET \|\| 'secret'` → refuse to boot when unset. ✅ **Done** in jovi-mall (`assertSigningSecrets()`); geo-tracker carried the identical fallback and was closed on 2026-08-19, Phase 3 step 3.E.2. |
 | 🔴 Stop logging refresh tokens | `auth.middleware.ts` `console.log`. |
 | Delete the admin surface | 12 routers, 9 admin controllers, ~82 route declarations, 13 `api-doc/admin/` files. Resolves the 5-router `/admin` stacking defect and the 5×-auth cost. |
 | Move admin-only services out | `admin-agency.service` (215), `article-author.service` (95), `admin-profile.service` (81). |
