@@ -21,6 +21,24 @@ export interface AdminSnapshotDto {
     tier: AdminTier;
     jobTitle: string | null;
     department: string | null;
+    /**
+     * **Reserved — always `null` today** (G-2, closed 2026-08-20 by documenting it).
+     *
+     * `admin_accounts` stores no avatar and wi-admin has no write-side file surface at all —
+     * its `files` module is two GETs delegating to jovi-mall, and there is no `multer`
+     * anywhere — so an administrator picture would be a storage decision, a permission, a
+     * route and a moderation question, not a field. Deferred until one is actually wanted.
+     *
+     * The field stays on the wire because the stored shape has it and because a customer
+     * seeing a face is the point of D-5: the day an avatar exists, `snapshotOf` is the only
+     * line that changes. Removing it here would also leave jovi-mall still promising it —
+     * `avatar_url` is a field of `PublicAdminSnapshot`, the projection every non-admin reader
+     * is shown — which is a worse-shaped promise, not a smaller one.
+     *
+     * **Clients: render the initials fallback and do not branch on this.** It is documented
+     * as reserved in `docs/api/support.md`; what made a permanently-null field a broken
+     * promise was that it was undocumented.
+     */
     avatarUrl: string | null;
 }
 
