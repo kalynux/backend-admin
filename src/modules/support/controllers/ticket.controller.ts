@@ -3,6 +3,7 @@ import { asyncHandler } from '../../../core/http/async-handler';
 import { createAppError } from '../../../core/errors/app-error';
 import { ERROR_CODES } from '../../../core/errors/error-codes';
 import { sendCreated, sendPaginated, sendSuccess } from '../../../core/http/responses';
+import { requestLogger } from '../../../core/logging/logger';
 import { requireAdminIdentity } from '../../admin-identity/domain/admin-identity.types';
 import { AdminAccountRepository } from '../../admin-identity/repositories/admin-account.repository';
 import { actorContextOf } from '../../audit/domain/audit-context';
@@ -365,16 +366,44 @@ export class SupportTicketController {
  * did, so this swallows. It is also a no-op when the ticket is unassigned, and jovi-mall
  * guards the write on the assignee id — so a refresh racing a reassignment loses harmlessly
  * rather than overwriting the new holder.
+ *
+ * ── Swallowed is not the same as unobserved (G-6) ─────────────────────────────
+ * Swallowing is right; swallowing *silently* was not. The snapshot is the only record of
+ * this administrator there will ever be on jovi-mall's side, so a failure here means a
+ * rename stays unpropagated — visible to a customer reading the ticket, and to nobody else.
+ * The `warn` carries the three identifiers that make it actionable: without the holder id it
+ * answers "something failed", with it, "this administrator's rename did not propagate",
+ * which is the question.
+ *
+ * **Do not add a counter here.** wi-admin has no Prometheus registry — `GET
+ * /api/v1/system/metrics` delegates to *jovi-mall's*, and `infra/geo/prom-text.ts` only
+ * parses geo-tracker's exposition. Adding one means `prom-client`, an exposition route, a
+ * scrape target and a decision about whether this service joins the metrics estate: an ADR,
+ * not a line in a `catch`. A log carrying the three ids answers "did this rename propagate",
+ * which is the whole question this signal exists for.
+ *
+ * The missing-account branch stays silent deliberately, and is a different fault: an
+ * assignment pointing at an account that no longer exists is not a rename failing to
+ * propagate, and the place to catch it is the assign path, not a best-effort refresh.
  */
 async function refreshHolder(req: Request, ticket: Parameters<typeof assignmentStateOf>[0]): Promise<void> {
     const holderId = assignmentStateOf(ticket).holderId;
     if (!holderId) return;
 
+    const context = actorContextOf(req);
     try {
         const account = await accounts.findById(holderId);
         if (!account) return;
-        await gateway.refreshSnapshot(String(ticket._id), snapshotOf(account), actorContextOf(req));
-    } catch {
-        // Deliberately silent: see the docstring. The write it accompanies already succeeded.
+        await gateway.refreshSnapshot(String(ticket._id), snapshotOf(account), context);
+    } catch (err) {
+        // Swallowed — the write it accompanies already succeeded — but never unobserved.
+        requestLogger(context.requestId).warn(
+            {
+                ticketId: String(ticket._id),
+                holderId,
+                err: err instanceof Error ? err.message : String(err),
+            },
+            'support: assignee snapshot refresh failed — this administrator’s details may be stale on the ticket',
+        );
     }
 }

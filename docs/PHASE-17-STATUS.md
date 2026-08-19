@@ -138,7 +138,7 @@ Honest debts in Part A, none of which block it.
 | G-3 | **No `test-support.ts` in wi-admin** | The policy core is covered by `test:authz` (+6 assertions) and the boot assertions cover routes and audit coverage. The DTO, the scope filter's Mongo shape and the gateway paths are not yet asserted DB-free |
 | G-4 | **No `docs/api/support.md`** | The contract is not written down, so by this repo's own rule it is not promised |
 | G-5 | **`assigned_admin`'s wire shape changed in jovi-mall** | Was `{user_id, role, name, avatar}`, now `{name, job_title, department, avatar_url}`. It was always `null` in practice so nothing relied on it, but the role-facing api-docs still describe the old shape |
-| G-6 | **The D-10 refresh is best-effort and silent** | A failed snapshot refresh is swallowed so it cannot fail the write it accompanies. Correct, but it means a rename can stay unpropagated with no signal |
+| ~~G-6~~ | ✅ **CLOSED 2026-08-20 — the D-10 refresh has a signal** (Phase 4, step 4.B.7) | Still swallowed — a ticket write that succeeded must not report failure because a cosmetic name refresh did — but no longer silent. The `catch` logs at **`warn`** through `requestLogger`, carrying the ticket id, the **holder id** and the error message. Without the holder id the line answers "something failed"; with it, "this administrator’s rename did not propagate", which is the question. **No counter, deliberately** (D-14): wi-admin has no Prometheus registry — `/system/metrics` delegates to jovi-mall’s and `prom-text.ts` only parses geo-tracker’s — so adding one is an ADR about joining the metrics estate, not a line in a `catch`. The docstring says so, at the `catch`, so the next reader does not "finish" the step by starting unplanned infrastructure |
 
 ---
 
