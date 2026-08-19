@@ -62,9 +62,11 @@ defineRoute(router, {
 });
 
 /**
- * Deleting an attachment is keyed on the ATTACHMENT, matching jovi-mall's own route. It
- * therefore carries no ticket scope — see the controller for why, and the Phase 17 status
- * document for the follow-up.
+ * Deleting an attachment is keyed on the ATTACHMENT, matching jovi-mall's own route — so
+ * unlike every sibling it cannot take its ticket scope from the path. The handler resolves
+ * the attachment to its ticket first and then applies the same `loadScoped` + `assertMayAct`
+ * pair as the rest of the surface; `test:authz` asserts it, derived from these declarations
+ * rather than from a list, so a mutating route added here is covered by construction.
  */
 defineRoute(router, {
     mountedAt,

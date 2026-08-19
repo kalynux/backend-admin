@@ -712,6 +712,92 @@ t.assert('no route declares noAudit while the allowlist is empty', () => {
     return SCANNED.every((file) => !stripComments(readFileSync(file, 'utf8')).includes('noAudit('));
 });
 
+/**
+ * ── The fourth layer: a mutating handler must REACH its tier scope (G-1) ─────
+ *
+ * `defineRoute` proves a route declared a PERMISSION. It cannot prove the handler behind it
+ * applied the per-record SCOPE, and on the support surface those are different questions:
+ * `support.tickets.attachments.write` says you may delete attachments, and the tier scope
+ * says whose. `deleteAttachment` held the first and not the second, so any holder of that
+ * one permission could delete any attachment on any ticket — including one belonging to a
+ * tier they cannot see.
+ *
+ * This is keyed on the two FILES rather than on a list of handler names, which is the whole
+ * point: the write set is derived from the route declarations, so a mutating route added
+ * next year is covered without anybody remembering to extend a list here. That is what
+ * would have caught the original.
+ *
+ * ⚠ It scans source rather than calling anything, so it proves the call is PRESENT, not that
+ * it runs on every branch. `verify:authz` is where the behaviour is exercised end to end.
+ */
+const TICKET_ROUTES = join(SRC, 'modules', 'support', 'routes', 'ticket.routes.ts');
+const TICKET_CONTROLLER = join(SRC, 'modules', 'support', 'controllers', 'ticket.controller.ts');
+
+/**
+ * `create` is the one exemption and it is structural, not an oversight: `POST /` makes a
+ * ticket that does not exist yet, so there is no record for a scope to be applied to. Every
+ * other mutating handler addresses an existing one.
+ */
+const SCOPE_EXEMPT_HANDLERS = new Set(['create']);
+
+/** Handler names behind a mutating route, read out of the route declarations. */
+function mutatingHandlerNames(routeSource: string): string[] {
+    const names: string[] = [];
+    // Each `defineRoute({...})` block is delimited by the closing `});` of the call.
+    for (const block of stripComments(routeSource).split('defineRoute(').slice(1)) {
+        const body = block.split('});')[0];
+        if (!/method: '(post|put|patch|delete)'/.test(body)) continue;
+        const handler = /handler:\s*SupportTicketController\.(\w+)/.exec(body);
+        if (handler) names.push(handler[1]);
+    }
+    return names;
+}
+
+/** One handler's body, from `static <name> = asyncHandler(` to the closing `});`. */
+function handlerBody(controllerSource: string, name: string): string | null {
+    const marker = `static ${name} = asyncHandler(`;
+    const at = controllerSource.indexOf(marker);
+    if (at === -1) return null;
+    const rest = controllerSource.slice(at);
+    const end = rest.indexOf('\n    });');
+    return end === -1 ? rest : rest.slice(0, end);
+}
+
+t.assert('the support route file yields a non-trivial set of mutating handlers', () =>
+    mutatingHandlerNames(readFileSync(TICKET_ROUTES, 'utf8')).length >= 10);
+
+t.assert('every mutating support handler reaches loadScoped — including the attachment delete', () => {
+    const routes = readFileSync(TICKET_ROUTES, 'utf8');
+    const controller = stripComments(readFileSync(TICKET_CONTROLLER, 'utf8'));
+    const offenders: string[] = [];
+
+    for (const name of mutatingHandlerNames(routes)) {
+        if (SCOPE_EXEMPT_HANDLERS.has(name)) continue;
+        const body = handlerBody(controller, name);
+        if (body === null) {
+            offenders.push(`${name} (no such handler)`);
+        } else if (!body.includes('loadScoped(')) {
+            offenders.push(`${name} (never reaches loadScoped)`);
+        }
+    }
+
+    if (offenders.length > 0) console.error(`      offenders: ${offenders.join(', ')}`);
+    return offenders.length === 0;
+});
+
+/**
+ * The delete is keyed on the attachment, so reaching the scope needs a lookup first. Assert
+ * the lookup specifically: a future "simplification" that drops it would leave `loadScoped`
+ * in the file and satisfy the check above while reopening the hole.
+ */
+t.assert('deleteAttachment resolves the attachment to its ticket before scoping it', () => {
+    const body = handlerBody(stripComments(readFileSync(TICKET_CONTROLLER, 'utf8')), 'deleteAttachment');
+    return body !== null
+        && body.includes('findTicketIdByAttachment(')
+        && body.indexOf('findTicketIdByAttachment(') < body.indexOf('loadScoped(')
+        && body.includes('assertMayAct(');
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('9. Legacy endpoint map (Phase 5 checklist)');
 

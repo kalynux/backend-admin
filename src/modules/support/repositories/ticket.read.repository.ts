@@ -220,3 +220,51 @@ export class TicketReadRepository extends PlatformReadRepository<TicketReadModel
         return (found as TicketReadModel | null) ?? null;
     }
 }
+
+/**
+ * The one field of an attachment this service reads: which ticket owns it.
+ *
+ * ── Why a whole repository for a single id ────────────────────────────────────
+ * `DELETE /tickets/attachments/:attachmentId` is keyed on the ATTACHMENT, matching
+ * jovi-mall's route, so the ticket's scope cannot be applied until the ticket is known.
+ * This is the read that makes it known — and the moment it exists, the delete goes through
+ * the same `loadScoped` + `assertMayAct` pair as every other write on the surface, rather
+ * than through a second copy of the scope rule.
+ *
+ * ── Why the projection is two fields ──────────────────────────────────────────
+ * An attachment row carries `file_name`, `mime_type`, `uploaded_by_user_id`, and a
+ * `visible_to_user_ids` list. None of it is needed to answer "whose ticket is this", and
+ * an attachment on a ticket the caller may not see is precisely the row whose metadata must
+ * not leave the database. `{_id, ticket_id}` is the whole answer.
+ */
+export interface TicketAttachmentOwnerRead extends Document {
+    _id: ObjectId;
+    ticket_id: ObjectId;
+}
+
+const ATTACHMENT_OWNER_PROJECTION = {
+    _id: 1,
+    ticket_id: 1,
+} as const;
+
+export class TicketAttachmentReadRepository extends PlatformReadRepository<TicketAttachmentOwnerRead> {
+    constructor() {
+        super(COLLECTIONS.TICKET_ATTACHMENT, ATTACHMENT_OWNER_PROJECTION);
+    }
+
+    /**
+     * The owning ticket's id, or null when no such attachment exists.
+     *
+     * Deliberately **unscoped**, and that is safe only because of what the caller does next:
+     * it returns an id, never a record, and the id is immediately fed to `findScoped`, which
+     * is where the scope is applied. A caller that used this answer for anything else would
+     * be reintroducing the hole this closes.
+     *
+     * jovi-mall hard-deletes attachments (`ticket-attachment.service.ts:208`), so there is no
+     * `deletedAt` to filter — unlike `tickets`, which is soft-deleted.
+     */
+    async findTicketIdByAttachment(attachmentId: string): Promise<string | null> {
+        const found = await this.findOneBy({ _id: new ObjectId(attachmentId) } as Filter<TicketAttachmentOwnerRead>);
+        return found?.ticket_id ? found.ticket_id.toString() : null;
+    }
+}

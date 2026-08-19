@@ -10,7 +10,7 @@ import { resolveScope } from '../../authorization/domain/resource-scope';
 import { assignableTiers, mayActOnTicket, mayClaim } from '../domain/assignment-authority';
 import { snapshotOf } from '../domain/admin-snapshot';
 import * as gateway from '../gateways/ticket.gateway';
-import { TicketReadRepository } from '../repositories/ticket.read.repository';
+import { TicketAttachmentReadRepository, TicketReadRepository } from '../repositories/ticket.read.repository';
 import { assignmentStateOf, toTicketDetailDto, toTicketDto } from '../read-models/ticket.dto';
 import {
     AddFollowerBody,
@@ -52,6 +52,7 @@ import {
  */
 
 const tickets = new TicketReadRepository();
+const attachments = new TicketAttachmentReadRepository();
 const accounts = new AdminAccountRepository();
 
 /** The caller's own snapshot, for the assigner stamp and the D-10 refresh. */
@@ -308,15 +309,40 @@ export class SupportTicketController {
     });
 
     /**
-     * ⚠ Keyed on the ATTACHMENT id, so the ticket's scope cannot be applied first.
+     * Delete an attachment — scoped through its ticket, in three reads.
      *
-     * jovi-mall's route is `DELETE /tickets/attachments/:id` and the attachment row is what
-     * names its ticket, so enforcing the scope here would need a second read this service
-     * cannot make without a `ticket_attachments` lookup. It has one — the collection is
-     * registered — but wiring it is deliberately left as a follow-up rather than shipped
-     * half-done: see the module's entry in the Phase 17 status document.
+     * ── Why this one is keyed on the ATTACHMENT and every neighbour is not ────────
+     * jovi-mall's route is `DELETE /tickets/attachments/:id`: the attachment id is the whole
+     * address, and the attachment row is the only thing that names its ticket. So the scope
+     * cannot be applied first here the way it is everywhere else on this surface — it has to
+     * be *reached*, by resolving the attachment to its ticket and then loading that ticket
+     * exactly as `update`, `assign` and `attachFile` do. **Do not "simplify" the lookup away**
+     * on the grounds that the gateway already takes an attachment id; the lookup is not
+     * plumbing, it is the only thing standing between this route and any attachment on the
+     * platform.
+     *
+     * ── The two checks, in the same order as every other write ────────────────────
+     * `loadScoped` is the tier scope — a ticket outside it is **not found**, 404, so nobody
+     * can map another tier's queue by watching statuses change. `assertMayAct` is the
+     * assignment lock — 403, because by then the caller can already see the ticket and
+     * concealing the reason would protect nothing.
+     *
+     * ── Why a missing attachment answers TICKET_NOT_FOUND ─────────────────────────
+     * The same code and the same message as an out-of-scope ticket, deliberately. Two 404s
+     * that differ only in their `error.code` are still an existence oracle: a Support-tier
+     * administrator holding an attachment id could otherwise learn that it exists on a ticket
+     * they may not see. Identical answers make the two indistinguishable by construction,
+     * which is the same argument `TICKET_NOT_FOUND`'s own docstring makes for 404-over-403.
      */
     static deleteAttachment = asyncHandler(async (req: Request, res: Response) => {
+        const ticketId = await attachments.findTicketIdByAttachment(req.params.attachmentId);
+        if (!ticketId) {
+            throw createAppError(ERROR_CODES.TICKET_NOT_FOUND, 404, 'Support ticket not found');
+        }
+
+        const { ticket } = await loadScoped(req, ticketId);
+        assertMayAct(req, ticket);
+
         const removed = await gateway.deleteAttachment(req.params.attachmentId, actorContextOf(req));
         sendSuccess(res, removed);
     });
