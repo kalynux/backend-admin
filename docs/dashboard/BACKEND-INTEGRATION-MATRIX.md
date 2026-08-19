@@ -380,14 +380,26 @@ nothing was pending — **that is not an error; branch on the count.**
 
 ### ⚠ Corrections found in Phase 9, verified against the running service
 
-1. **Three writes return jovi-mall's raw Mongoose document, not the camelCase DTO.** `cancel`,
-   `dispute/resolve` and dispatch's `data.order` are all `await OrderModel.findById(orderId)`
-   forwarded untouched (`jovi-mall/src/modules/orders/admin-order.controller.ts:107,139,162`).
-   The line above once called dispatch "the one documented place the storage casing surfaces" — it is
-   three places, and `orders.md:339,379` describe the other two as "the updated order". **It is also
-   the whole document**, including the `delivery_address.coordinates` and `raw_input` the read
-   projection deliberately withholds — see `DATA-EXPOSURE-REGISTER.md` §6. The dashboard discards all
-   three bodies at the service boundary and refetches.
+1. ✅ **FIXED 2026-08-20 — three writes returned jovi-mall's raw Mongoose document, not the
+   camelCase DTO.** `cancel`, `dispute/resolve` and dispatch's `data.order` were all
+   `await OrderModel.findById(orderId)` forwarded untouched
+   (`jovi-mall/src/modules/orders/admin-order.controller.ts:107,139,162`). The line above once
+   called dispatch "the one documented place the storage casing surfaces" — it was three places,
+   and `orders.md` described the other two as "the updated order". **It was also the whole
+   document**, including the `delivery_address.coordinates` and `raw_input` the read projection
+   deliberately withholds — `DATA-EXPOSURE-REGISTER.md` §6.
+
+   All three now answer with an **`OrderDetailDto`**, re-read through `ORDER_DETAIL_PROJECTION`
+   and mapped by the same function `GET /orders/:orderId` uses — one function, so the write and
+   the read cannot disagree. Dispatch keeps `{ shipmentsAssigned, order }`; only the `order` half
+   changed. `orders.md` is corrected in all three places.
+
+   ⚠ **Keep discarding the bodies anyway.** `orders.service.ts` returning only `{ message }` /
+   `{ shipmentsAssigned }` is structural rather than disciplinary — there is no order object for a
+   call site to reach into — and `OrderDetail.test.tsx`'s coordinate assertion is defence in
+   depth against the *next* delegated write, not only this one. This fix is not a reason to
+   "clean it up"; adopting the returned DTO is a separate, optional change that would save a
+   refetch.
 2. **`GET /orders` can answer `meta.searchMatchesTruncated: true`**, undocumented. Set when the
    customer or vendor name pre-match hits its cap of 200 each. The analogue of the vendor
    directory's `businessNameMatchesTruncated`, and read with the same strict `=== true`.
@@ -1232,7 +1244,7 @@ filters `createdAt`, **not `completedAt`**, so `pending`/`failed` rows are not s
 |---|---|
 | **Envelope** | Success `{ success, data, meta?, message? }` — `data` always present (object, array or `null`). Error `{ success, requestId, error { code, message, statusCode, category, details? } }`. **Branch on `error.code`, never `message`.** `details` is **omitted** when absent |
 | **Nine categories** | `authentication` · `authorization` · `validation` · `not_found` · `conflict` · `business_rule` · `rate_limit` · `external_service` · `internal`. Derived from `(code, statusCode)`. The right key for generic handling: re-login / hide affordance / show field errors / back off / escalate |
-| **camelCase** | Both databases are snake_case; the translation happens in wi-admin and never leaks. Do not copy field names from `docs/jovi-mall/`. (One documented exception: `POST /orders/:id/dispatch` returns jovi-mall's raw order document) |
+| **camelCase** | Both databases are snake_case; the translation happens in wi-admin and never leaks. Do not copy field names from `docs/jovi-mall/`. **No exceptions as of 2026-08-20** — the three delegated order writes were the last snake_case leak and now answer with `OrderDetailDto` |
 | **Money** | A plain number in the account currency (default `XAF`). **Never divide by 100** |
 | **Pagination** | `page` ≥1 default 1; `limit` default 20, **hard max 100 everywhere**; no `?limit=all`. `meta = { total, page, limit, pages }` where **an empty list reports `pages: 0`**. One cursor-paged exception: `/accounts/:t/:id/activity` |
 | **Sorting** | One key, `?sort=field` / `?sort=-field`, per-endpoint allowlist; an undeclared field is a `400` naming the permitted set. Some lists offer no `sort` at all (`/administrators`, `/approvals`, `/cod/remittances`, `/cod/deposits`, `/money/earnings/accounts`, `/audit/legacy`) |

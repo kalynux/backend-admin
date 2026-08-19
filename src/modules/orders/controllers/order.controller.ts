@@ -18,6 +18,7 @@ import {
     VendorRefReadRepository,
 } from '../repositories/order-context.read.repository';
 import {
+    OrderDetailDto,
     toOrderDetailDto,
     toOrderListItemDto,
     toOrderTimelineEntryDto,
@@ -62,6 +63,46 @@ function toAuditState(order: OrderReadModel): Record<string, unknown> {
         totalAmount: order.total_amount,
         currency: order.currency,
     };
+}
+
+/**
+ * The order detail, read through the PROJECTED path and mapped by the DTO — the single
+ * function behind both the GET and the three delegated writes' responses.
+ *
+ * ── Why the writes answer through this and not through jovi-mall's reply ──────
+ * jovi-mall echoes the whole Mongoose order document back from `cancel`,
+ * `dispute/resolve` and `dispatch`: snake_case, and carrying `delivery_address.coordinates`
+ * and `.raw_input` (a customer's home, and the text they typed before picking a geocoding
+ * result), every `items[]` entry whole including `pickup_location.address_snapshot` (a
+ * vendor's premises), plus `payment_intent_id` and `price_breakdown`. This service's own
+ * read of the same order refuses exactly those fields twice over — once in
+ * `ORDER_DETAIL_PROJECTION`, once in `toOrderDetailDto` — and **neither lock sits in the
+ * path of a delegated write's response**. So the write handed back the PII the read
+ * withholds (DATA-EXPOSURE-REGISTER § 6).
+ *
+ * Answering through *this* function rather than through a second mapper is the part worth
+ * keeping: the write and the read cannot disagree, because there is nothing for them to
+ * disagree in. A future field added to the DTO reaches all four surfaces or none.
+ *
+ * The re-read is the DETAIL projection, not `loadOr404`'s list one. Both exclude the
+ * coordinates, but a list-projected document mapped by `toOrderDetailDto` would answer with
+ * `items: []`, `priceBreakdown: null` and no address — a *different* shape from the GET,
+ * which is the defect this step exists to close rather than a smaller version of it.
+ *
+ * ── Why this returns null rather than throwing ────────────────────────────────
+ * The GET turns a null into its 404; a WRITE must not. By the time a write re-reads, its
+ * mutation has committed in jovi-mall and its audit row is stamped — converting a completed
+ * cancellation into `404 Order not found` would tell the client the opposite of what
+ * happened and invite a retry. `orders` has no delete path in either service, so the null
+ * branch is unreachable in practice; it answers `data: null` with the success message if it
+ * ever is reached, which is the register's own "thin acknowledgement" fallback.
+ */
+async function readOrderDetail(orderId: string): Promise<OrderDetailDto | null> {
+    const order = await orders.findDetailById(orderId);
+    if (!order) return null;
+
+    const names = await hydrateNames([order]);
+    return toOrderDetailDto(order, names);
 }
 
 /** Vendor and customer display names for a page of orders, in two batched reads. */
@@ -142,11 +183,10 @@ export class OrderController {
 
     /** GET /api/v1/orders/:orderId */
     static detail = asyncHandler(async (req: Request, res: Response) => {
-        const order = await orders.findDetailById(req.params.orderId);
-        if (!order) throw createAppError(ERROR_CODES.NOT_FOUND, 404, 'Order not found');
+        const dto = await readOrderDetail(req.params.orderId);
+        if (!dto) throw createAppError(ERROR_CODES.NOT_FOUND, 404, 'Order not found');
 
-        const names = await hydrateNames([order]);
-        sendSuccess(res, toOrderDetailDto(order, names));
+        sendSuccess(res, dto);
     });
 
     /**
@@ -209,37 +249,57 @@ export class OrderController {
         sendSuccess(res, eligibility);
     });
 
-    /** POST /api/v1/orders/:orderId/dispute/resolve */
+    /**
+     * POST /api/v1/orders/:orderId/dispute/resolve
+     *
+     * Answers with the projected detail DTO, not jovi-mall's echoed document —
+     * `readOrderDetail` carries the reasoning.
+     */
     static resolveDispute = asyncHandler(async (req: Request, res: Response) => {
         const body = req.body as ResolveDisputeBody;
         const order = await loadOr404(req.params.orderId);
 
-        const updated = await gateway.resolveDispute(
+        await gateway.resolveDispute(
             req.params.orderId,
             body.outcome,
             toAuditState(order),
             actorContextOf(req),
         );
 
-        sendSuccess(res, updated, { message: `Dispute resolved as ${body.outcome}` });
+        const after = await readOrderDetail(req.params.orderId);
+        sendSuccess(res, after, { message: `Dispute resolved as ${body.outcome}` });
     });
 
-    /** POST /api/v1/orders/:orderId/cancel */
+    /**
+     * POST /api/v1/orders/:orderId/cancel
+     *
+     * Answers with the projected detail DTO, not jovi-mall's echoed document —
+     * `readOrderDetail` carries the reasoning.
+     */
     static cancel = asyncHandler(async (req: Request, res: Response) => {
         const body = req.body as CancelOrderBody;
         const order = await loadOr404(req.params.orderId);
 
-        const updated = await gateway.cancel(
+        await gateway.cancel(
             req.params.orderId,
             body.reason,
             toAuditState(order),
             actorContextOf(req),
         );
 
-        sendSuccess(res, updated, { message: 'Order cancelled' });
+        const after = await readOrderDetail(req.params.orderId);
+        sendSuccess(res, after, { message: 'Order cancelled' });
     });
 
-    /** POST /api/v1/orders/:orderId/dispatch */
+    /**
+     * POST /api/v1/orders/:orderId/dispatch
+     *
+     * The odd one of the three: its response is `{ shipmentsAssigned, order }` and it keeps
+     * that shape. Only the `order` half was the exposure, so only the `order` half is
+     * projected. `shipmentsAssigned` stays because the dashboard branches on it, and `0` is
+     * a **no-op, not an error** — the usual cause is the vendor's auto-redirect dispatching
+     * a moment earlier.
+     */
     static dispatch = asyncHandler(async (req: Request, res: Response) => {
         const body = req.body as DispatchOrderBody;
         const order = await loadOr404(req.params.orderId);
@@ -251,7 +311,8 @@ export class OrderController {
             actorContextOf(req),
         );
 
-        sendSuccess(res, result, {
+        const after = await readOrderDetail(req.params.orderId);
+        sendSuccess(res, { shipmentsAssigned: result.shipmentsAssigned, order: after }, {
             message: result.shipmentsAssigned > 0
                 ? `Dispatched ${result.shipmentsAssigned} shipment(s) to the delivery agency`
                 : 'Nothing to dispatch — no shipment on this order was pending',

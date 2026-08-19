@@ -336,7 +336,12 @@ Decide a payment dispute.
 
 ### Response (200)
 
-The updated order, message `"Dispute resolved as won"`.
+**The order, in exactly the shape [`GET /orders/:orderId`](#get-ordersorderid) returns** —
+`data` is an `OrderDetailDto`, camelCase, re-read through the same projection. Message
+`"Dispute resolved as won"`.
+
+`deliveryAddress` is textual only here as well: the write answers through the same mapper as
+the read, so the coordinates and the customer's raw input are excluded on both.
 
 ### Errors
 
@@ -376,7 +381,9 @@ audiences** — it is not a status column.
 
 ### Response (200)
 
-The updated order, message `"Order cancelled"`.
+**The order, in exactly the shape [`GET /orders/:orderId`](#get-ordersorderid) returns** —
+`data` is an `OrderDetailDto`, camelCase, re-read through the same projection. Message
+`"Order cancelled"`.
 
 ### Errors
 
@@ -415,13 +422,18 @@ Mint shipments and start the auto-assignment broadcast.
 {
   "success": true,
   "data": {
-    "order": { "_id": "6670…", "order_number": "ORD-2026-008841",
-               "fulfillment_status": "processing", "…": "…" },
-    "shipmentsAssigned": 2
+    "shipmentsAssigned": 2,
+    "order": { "id": "6670…", "orderNumber": "ORD-2026-008841",
+               "fulfillmentStatus": "processing", "…": "…" }
   },
   "message": "Dispatched 2 shipment(s) to the delivery agency"
 }
 ```
+
+`order` is an **`OrderDetailDto`** — the same shape
+[`GET /orders/:orderId`](#get-ordersorderid) returns, camelCase, re-read through the same
+projection. Only the `order` half changed; `shipmentsAssigned` is unchanged and is still what
+you branch on.
 
 When nothing was pending, `shipmentsAssigned` is `0` and the message is
 `"Nothing to dispatch — no shipment on this order was pending"`. **That is a `200`, not an

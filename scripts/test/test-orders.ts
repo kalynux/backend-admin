@@ -222,6 +222,79 @@ t.assert('no projection names both a path and a subpath of it', () => {
     return true;
 });
 
+/**
+ * ── The projection has to sit in the WRITE path too (DATA-EXPOSURE § 6) ───────
+ * Both locks above guard the read. Until Phase 4 neither sat in the path of a delegated
+ * write's response: `cancel`, `dispute/resolve` and the `order` half of `dispatch` answered
+ * with jovi-mall's echoed Mongoose document, so the write handed back exactly the
+ * `delivery_address.coordinates` / `.raw_input` / `address_snapshot` the read refuses.
+ *
+ * A projection scan cannot see that — the offending fields are never *named* in this
+ * service, they arrive over HTTP — so these assert the shape of the handlers instead.
+ */
+const controllerCode = files.find((f) => f.file.endsWith('order.controller.ts'))!.code;
+
+/** One handler's body, from `static <name> = asyncHandler(` to the closing `});`. */
+function handlerBody(source: string, name: string): string | null {
+    const at = source.indexOf(`static ${name} = asyncHandler(`);
+    if (at === -1) return null;
+    const rest = source.slice(at);
+    const end = rest.indexOf('\n    });');
+    return end === -1 ? rest : rest.slice(0, end);
+}
+
+/** The three delegated writes whose response carried the raw platform document. */
+const DELEGATED_ORDER_WRITES = ['cancel', 'resolveDispute', 'dispatch'];
+
+t.assert('all three delegated write handlers are found by the scan', () =>
+    DELEGATED_ORDER_WRITES.every((name) => handlerBody(controllerCode, name) !== null));
+
+t.assert('each delegated write re-reads through the projected detail before answering', () => {
+    const offenders = DELEGATED_ORDER_WRITES.filter(
+        (name) => !(handlerBody(controllerCode, name) ?? '').includes('readOrderDetail('),
+    );
+    if (offenders.length > 0) console.error(`      offenders: ${offenders.join(', ')}`);
+    return offenders.length === 0;
+});
+
+/**
+ * The sharper one. Reaching `readOrderDetail` is not enough — the defect returns the moment
+ * the gateway's own reply is what reaches `sendSuccess`. So: whatever `await gateway.*`
+ * was assigned to must not appear in the response payload at all. `dispatch` keeps
+ * `result.shipmentsAssigned`, which is a number and is the one exemption.
+ */
+t.assert('no delegated write sends the gateway’s reply as its payload', () => {
+    const offenders: string[] = [];
+
+    for (const name of DELEGATED_ORDER_WRITES) {
+        const body = handlerBody(controllerCode, name) ?? '';
+        const assigned = /const\s+(\w+)\s*=\s*await\s+gateway\./.exec(body)?.[1];
+        if (!assigned) continue;   // nothing was kept — cancel and resolveDispute
+
+        const payload = body.slice(body.indexOf('sendSuccess(res,')).split(`${assigned}.shipmentsAssigned`).join('');
+        if (new RegExp(`\\b${assigned}\\b`).test(payload)) offenders.push(`${name} (sends ${assigned})`);
+    }
+
+    if (offenders.length > 0) console.error(`      offenders: ${offenders.join(', ')}`);
+    return offenders.length === 0;
+});
+
+t.assert('dispatch keeps its { shipmentsAssigned, order } shape — only the order half was the finding', () => {
+    const body = handlerBody(controllerCode, 'dispatch') ?? '';
+    return body.includes('shipmentsAssigned: result.shipmentsAssigned') && body.includes('order: after');
+});
+
+/**
+ * One mapper, reached by one function, so the write and the read cannot disagree. A second
+ * call site is how they drift apart again — which is the class of defect § 6 is, not just
+ * the instance.
+ */
+t.assert('the controller maps the detail DTO in exactly one place', () =>
+    (controllerCode.match(/toOrderDetailDto\(/g) ?? []).length === 1);
+
+t.assert('the detail GET answers through that same function', () =>
+    (handlerBody(controllerCode, 'detail') ?? '').includes('readOrderDetail('));
+
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('4. The search uses the index it was designed for');
 

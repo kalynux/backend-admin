@@ -256,18 +256,29 @@ links and never fetches or previews them, since we resolve no file URLs anywhere
 
 ## 6. Three order writes return the whole raw platform document
 
-> ### ⚠️ NOT FIXED as of 2026-08-17 — and it is the largest item left on this register
+> ### ✅ FIXED 2026-08-20 — Phase 4 step 16 (4.B.4)
 >
-> Outside all nine backend requests, which is the only reason it is not in that change. The
-> finding is accepted as written and the fix is the one named below: map the write responses
-> through `toOrderDetailDto` before answering. wi-admin already re-reads the order to build the
-> audit `before`, so the mapper is one call away.
+> All three writes now answer with an **`OrderDetailDto`**: the order is re-read through
+> `ORDER_DETAIL_PROJECTION` and mapped by `toOrderDetailDto` — so `delivery_address.coordinates`,
+> `raw_input` and `items[].delivery.pickup_location.address_snapshot` are excluded by the same two
+> locks that guard the read, and nothing snake_case leaves. `dispatch` keeps
+> `{ shipmentsAssigned, order }`; only the `order` half changed, and `0` is still a no-op rather
+> than an error.
 >
-> **Keep the client-side mitigation until it lands.** Discarding `data` structurally in
-> `orders.service.ts` — so there is no order object for a call site to reach into — is the right
-> shape, and better than a rule somebody has to remember.
+> **The fix is one function, deliberately.** `readOrderDetail(orderId)` in
+> `order.controller.ts` is what `GET /orders/:orderId` answers through as well, so the write and
+> the read cannot disagree — which is the class this finding is, not just the instance. A field
+> added to the DTO reaches all four surfaces or none.
 >
-> Recommended as the next item after the BR round.
+> **⚠ Keep the client-side mitigation.** `orders.service.ts` discarding `data` structurally, and
+> `OrderDetail.test.tsx` asserting stubbed coordinates never reach the DOM, are defence in depth
+> against the *next* delegated write — not a workaround for this one. They should survive the
+> fix. Adopting the returned DTO to save a refetch is a separate, optional change.
+>
+> Documentation corrected with it: `orders.md` in all three places (it described two of them as
+> "the updated order"), and `BACKEND-INTEGRATION-MATRIX.md`'s Phase 9 correction 1 and its
+> **camelCase** rule row, which carried dispatch as the one documented casing exception. There is
+> now no exception.
 
 
 **Priority: high.** Found in Phase 9 (orders and shipments).
