@@ -52,9 +52,11 @@ jobs:
         run: npm run lint
 
       # DISCOVERED from package.json rather than listed here, so a suite added later runs
-      # without its author touching this file. `verify:*` is excluded on purpose — those
-      # need Mongo as a REPLICA SET (the audit store is fail-closed and only a real
-      # replica set proves it) and belong to the job Phase 2.B.4 makes possible.
+      # without its author touching this file. `verify:*` is excluded from THIS loop on
+      # purpose — those need Mongo as a REPLICA SET (the audit store is fail-closed and
+      # only a real replica set proves it) plus Redis and a running jovi-mall, and they
+      # run in the `live-suites` job below (plan step 24.3). Keeping them out is what
+      # stops a database outage from reading as a broken type-check.
       - name: DB-free suites
         run: |
           set -euo pipefail
@@ -76,3 +78,177 @@ jobs:
       # hard is what stops that from changing quietly.
       - name: npm audit (production dependencies)
         run: npm audit --omit=dev
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  The live suites — the job that needs a database (plan step 24.3)
+  # ═══════════════════════════════════════════════════════════════════════════
+  #
+  # All thirteen `verify:*` suites, against a real Mongo, a real Redis and a real
+  # jovi-mall. These are the only things that can prove the fail-closed audit actually
+  # commits, that the tier scope is a filter rather than a hope, that a delegated write
+  # fires jovi-mall's in-process subscribers, and that the DTO a client receives is the
+  # one the projection promised. No DB-free suite can make any of those claims.
+  #
+  # ── MONGO MUST BE A REPLICA SET, and for this service it is not negotiable ──
+  # wi-admin's audit subsystem is FAIL-CLOSED: every audited write runs inside a
+  # transaction, and MongoDB offers no transactions outside a replica set or a mongos.
+  # `assertAuditStoreTransactional()` therefore REFUSES TO BOOT against a standalone
+  # `mongod` — which is the correct behaviour and will read as a broken CI job to
+  # whoever meets it first. `verify:audit` is the suite that proves it.
+  #
+  # This also settles the blueprint's third open question, which listed standalone-vs-
+  # replica-set as undecided: it is decided, by the code, and has been since Phase 3.5.
+  #
+  # It is started with `docker run` rather than as a `services:` container because a
+  # service container cannot be given `--replSet` and then initiated — GitHub starts it
+  # before any step runs, and `rs.initiate()` has to happen afterwards.
+  #
+  # ── FIVE SUITES NEED jovi-mall RUNNING, and one of them fails QUIETLY ───────
+  # `verify:vendors`, `verify:users`, `verify:accounts` and `verify:billing` fail or
+  # crash outright without it. `verify:platform` is the one to watch: it SKIPS its
+  # delegated half loudly and still reports green — **30 assertions with jovi-mall,
+  # 12 without**. So a green run proves nothing about how many ran, which is why the
+  # step below waits for `/api/health` and fails the job if it never answers.
+  #
+  # That is why this job checks out the sibling repository. Same `CROSS_REPO_TOKEN`
+  # pattern as jovi-mall's `taxonomy-contract.yml`, same rule: **absent, the job FAILS
+  # rather than skips.** A live-suite job that passes by not running is worse than none.
+  live-suites:
+    name: live suites · Mongo (replica set) + Redis + jovi-mall
+    runs-on: ubuntu-latest
+    needs: check
+
+    services:
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      MONGO_URI: mongodb://127.0.0.1:27017/jovi_mall_ci?replicaSet=rs0
+      MONGO_URI_ADMIN: mongodb://127.0.0.1:27017/wi_admin_ci?replicaSet=rs0
+      REDIS_URL: redis://127.0.0.1:6379
+      JOVI_MALL_BASE_URL: http://127.0.0.1:8022
+      JOVI_MALL_SERVICE_TOKEN: ci-internal-admin-token
+      # The pair that must MATCH across the boundary. Nothing anywhere compares one
+      # side's value against the other's, so this job is also the only place a mismatch
+      # would surface — see docs/RUNBOOK.md § Rotation.
+      INTERNAL_ADMIN_SERVICE_TOKEN: ci-internal-admin-token
+      JWT_SECRET: ci-only-secret-not-used-anywhere-else-32b
+
+    steps:
+      - name: Require the cross-repo token
+        env:
+          CROSS_REPO_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+        run: |
+          if [ -z "${CROSS_REPO_TOKEN}" ]; then
+            echo "::error::CROSS_REPO_TOKEN is not set, so jovi-mall cannot be checked out."
+            echo "::error::Five of the thirteen live suites need it running; verify:platform"
+            echo "::error::would silently shrink from 30 assertions to 12 rather than fail."
+            echo "::error::Create a fine-grained PAT with contents:read on kalynux/jovi-mall"
+            echo "::error::and store it as the repository secret CROSS_REPO_TOKEN."
+            exit 1
+          fi
+
+      - name: Check out wi-admin
+        uses: actions/checkout@v4
+        with:
+          path: admin
+
+      - name: Check out jovi-mall
+        uses: actions/checkout@v4
+        with:
+          repository: kalynux/jovi-mall
+          token: ${{ secrets.CROSS_REPO_TOKEN }}
+          path: jovi-mall
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # A single-node replica set: `rs.initiate()` with one member elects itself primary
+      # in a couple of seconds and supports transactions exactly as a three-node set does.
+      - name: Start MongoDB as a single-node replica set
+        run: |
+          set -euo pipefail
+          docker run -d --name mongo -p 27017:27017 mongo:7 --replSet rs0 --bind_ip_all
+          for i in $(seq 1 30); do
+            if docker exec mongo mongosh --quiet --eval 'db.adminCommand({ ping: 1 })' >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          docker exec mongo mongosh --quiet --eval '
+            try { rs.status() } catch (e) { rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "127.0.0.1:27017" }] }) }
+          '
+          # Wait for the election. Without this the first transactional write races the
+          # primary step-up and fails with NotWritablePrimary — intermittently, which is
+          # worse than failing outright.
+          for i in $(seq 1 30); do
+            if docker exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary' | grep -q true; then
+              echo "replica set is primary"; break
+            fi
+            sleep 2
+          done
+
+      - name: Install jovi-mall
+        working-directory: jovi-mall
+        run: npm ci
+
+      # jovi-mall reads process.env at module import in a few places, so it needs a file.
+      # `.env.example` IS its deployment contract, which is why it is the source here.
+      - name: Start jovi-mall
+        working-directory: jovi-mall
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          {
+            echo "WHATSAPP_ACCESS_TOKEN=ci-placeholder-not-a-real-token"
+            echo "WHATSAPP_PHONE_NUMBER_ID=ci-placeholder-phone-number-id"
+            echo "MONGO_URI=${MONGO_URI}"
+            echo "REDIS_URL=${REDIS_URL}"
+            echo "JWT_SECRET=${JWT_SECRET}"
+            echo "INTERNAL_ADMIN_SERVICE_TOKEN=${INTERNAL_ADMIN_SERVICE_TOKEN}"
+            echo "NODE_ENV=development"
+          } >> .env
+          npm run dev > /tmp/jovi-dev.log 2>&1 &
+          echo $! > /tmp/jovi.pid
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8022/api/health >/dev/null; then echo "jovi-mall is up"; exit 0; fi
+            sleep 2
+          done
+          echo "::error::jovi-mall did not become healthy — five live suites cannot run"
+          tail -120 /tmp/jovi-dev.log
+          exit 1
+
+      - name: Install wi-admin
+        working-directory: admin
+        run: npm ci
+
+      # DISCOVERED from package.json, like the DB-free loop above, so a live suite added
+      # later runs without its author touching this file.
+      - name: Live suites
+        working-directory: admin
+        run: |
+          set -uo pipefail
+          SUITES=$(node -p "Object.keys(require('./package.json').scripts).filter(k => k.startsWith('verify:')).join(' ')")
+          failed=""
+          for suite in $SUITES; do
+            echo "── $suite"
+            npm run --silent "$suite" || failed="$failed $suite"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::failing live suites:$failed"
+            exit 1
+          fi
+
+      - name: Stop jovi-mall
+        if: always()
+        run: |
+          if [ -f /tmp/jovi.pid ]; then kill "$(cat /tmp/jovi.pid)" 2>/dev/null || true; fi
+          echo "── last 60 lines of the jovi-mall log ──"
+          tail -60 /tmp/jovi-dev.log || true
