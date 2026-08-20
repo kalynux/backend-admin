@@ -321,10 +321,49 @@ Three things only a live run proves, each of which fails silently otherwise:
 
 ## Still open
 
-- **DATA-EXPOSURE §6** — three order writes return jovi-mall's raw document, including
+**One item, as of 2026-08-20.** The list was three; Phase 4 closed two of them, and the
+distinction between *how* they closed is the useful part — one was fixed, one was answered.
+
+- **A live position for administrators.** Unchanged: ADR-009 D-2 stands, narrowed only by
+  ADR-015 D-5's unauthenticated `/healthz` · `/readyz` · `/metrics` door, which exposes no
+  agent. Opening the **data** door means either minting platform `users` rows for
+  administrators or giving geo-tracker a service-caller identity, and neither is small.
+  Owned by **6.I**.
+
+### Closed
+
+- ~~**DATA-EXPOSURE §6**~~ — three order writes returned jovi-mall's raw document, including
   `delivery_address.coordinates` and `raw_input`, which the corresponding read deliberately
-  withholds. Outside all nine requests, and the largest remaining item on that register.
-- **A live position for administrators.** Unchanged: ADR-009 D-2 stands. Opening that door means
-  either minting platform user rows for administrators or giving geo-tracker a service-caller
-  identity, and neither is small.
-- **`accuracyMetres`** (F-3), which starts at the agent mobile application.
+  withholds. ✅ **FIXED 2026-08-20**, Phase 4 step 16 (wi-admin `0106944`). All three answer with
+  an `OrderDetailDto` re-read through `ORDER_DETAIL_PROJECTION`, so the write and the read can
+  never disagree again. Recorded in `dashboard/DATA-EXPOSURE-REGISTER.md` § 6.
+
+- ~~**`accuracyMetres`**~~ (F-3) — ✅ **CLOSED AS OUT OF SCOPE 2026-08-20**, Phase 4 step 23,
+  by owner decision (Phase 4 plan D-1 ★). **Answered, not merely dropped**: it is now listed in
+  `PRODUCTION-READINESS/07-UNBUILT-SCOPE.md` § 3, which is the one place a future reader looks
+  to find out whether an absence was a decision.
+
+  **The reason is that it cannot be closed from here.** GPS accuracy exists nowhere on the
+  platform, and the field would have to originate **outside all three repositories**:
+
+  1. the **Flutter agent application** would have to read the platform accuracy estimate off
+     the device and put it on the wire — nothing else can produce the number;
+  2. geo-tracker's WebSocket `location_update` frame and its location domain would have to
+     carry it (`grep Accuracy` over that domain returns nothing today);
+  3. it would have to reach the checkpoint trail, since a live position is not what an
+     administrator reads — `last_known_tracking_state` is, and ADR-009 D-2 keeps it that way;
+  4. only then could wi-admin surface it.
+
+  None of those four exists. Leaving it on an open register that no work in these repositories
+  can discharge is the failure mode this closure is against: an item nobody can act on makes
+  every other item on the list look equally inert.
+
+  **What was shipped instead stands and is the right answer for the request behind it.** The
+  BR-003 pipeline delivers a real position with `capturedAt` and a reverse-geocoded place name,
+  and `accuracyMetres` was deliberately not shipped as a permanent `null` — *a field that is
+  `null` on every row in every circumstance teaches a client to expect data that does not
+  exist.* Closing it changes nothing on the wire.
+
+  ↩ **If it is ever wanted, it starts in the agent app, not here** — and it is then a
+  four-part change across two repositories and a mobile release, which is the shape a
+  requester needs to know before asking.
