@@ -36,6 +36,7 @@
     "test:accounts": "ts-node scripts/test/test-accounts.ts",
     "test:devtools": "ts-node scripts/test/test-devtools.ts",
     "test:notifications": "ts-node scripts/test/test-notifications.ts",
+    "test:support": "ts-node scripts/test/test-support.ts",
     "verify:notifications": "ts-node scripts/test/verify-notifications-live.ts",
     "verify:live": "ts-node scripts/test/verify-live.ts",
     "verify:auth": "ts-node scripts/test/verify-auth-live.ts",
