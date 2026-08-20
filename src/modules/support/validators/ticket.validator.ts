@@ -146,9 +146,19 @@ export const AddFollowerSchema = z.object({
  * An internal note. `isPublic` defaults to FALSE, and the default is the safety property:
  * these are staff notes on somebody's support ticket, and the failure direction of a missing
  * flag must be "the customer does not see it".
+ *
+ * ⚠ **The flag only became true of the stored note in Phase 4, step 21.** jovi-mall calls it
+ * `visibility` and its schema is non-strict, so `isPublic` was dropped in transit and every
+ * note filed `'public'`. The translation now happens in `ticket.gateway.ts`; this schema is
+ * unchanged in shape, and `test-support.ts` asserts both halves.
+ *
+ * `content` is capped at **300**, which is jovi-mall's own limit rather than a number chosen
+ * here. It was 2000, so a 301–2000 character note passed this validator and came back as a
+ * `PLATFORM_OPERATION_REJECTED` naming a limit no wi-admin document mentioned. A boundary
+ * that accepts what the next hop refuses is not validating, it is deferring.
  */
 export const CreateNoteSchema = z.object({
-    content: z.string().trim().min(1).max(2000),
+    content: z.string().trim().min(1).max(300),
     isPublic: z.boolean().default(false),
 }).strict();
 

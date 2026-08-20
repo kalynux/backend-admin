@@ -353,6 +353,21 @@ export async function removeFollower(
     );
 }
 
+/**
+ * Add an internal note.
+ *
+ * ── `isPublic` is TRANSLATED here, and it used to be dropped ──────────────────
+ * jovi-mall's `CreateNoteSchema` names the field **`visibility`** — a `'public' | 'private'`
+ * enum defaulting to `'public'` — and it is a plain `z.object()`, so an `isPublic` key was
+ * *stripped* rather than refused and every note this service created was filed **public**
+ * whatever the flag said. A staff note on somebody's support case, shown to them, answered
+ * `201`, by a validator whose docstring promised the opposite. Found writing
+ * `docs/api/support.md` (Phase 4, step 21).
+ *
+ * The wire name stays `isPublic`: a boolean is the right shape for the one choice this
+ * surface offers, and the translation belongs at the transport boundary, which is the only
+ * layer that knows what jovi-mall calls it.
+ */
 export async function createNote(
     ticketId: string,
     body: { content: string; isPublic: boolean },
@@ -373,7 +388,11 @@ export async function createNote(
             const result = await platformRequest<unknown>({
                 method: 'POST',
                 path: `/tickets/${ticketId}/notes`,
-                body,
+                // ⚠ `visibility`, not `isPublic` — see the docstring. jovi-mall's schema is
+                // non-strict, so the wrong key is dropped silently and the note defaults to
+                // `'public'`: the failure mode is a 201 with the customer reading staff
+                // commentary.
+                body: { content: body.content, visibility: body.isPublic ? 'public' : 'private' },
                 actor: context.actor,
                 requestId: context.requestId,
             });
@@ -457,7 +476,11 @@ export async function referenceLookup(
     const result = await platformRequest<unknown>({
         method: 'GET',
         path: `/tickets/reference/${resource}`,
-        query: search ? { search } : undefined,
+        // ⚠ `q`, not `search`. jovi-mall's `TicketReferenceController.parsePagination` reads
+        // `req.query.q`; a `search` parameter was accepted here, forwarded, and ignored there
+        // — so the lookup always answered the unfiltered first page while looking as though
+        // it had searched. Found writing `docs/api/support.md` (Phase 4, step 21).
+        query: search ? { q: search } : undefined,
         actor: context.actor,
         requestId: context.requestId,
     });

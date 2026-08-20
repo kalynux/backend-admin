@@ -198,17 +198,17 @@ do not reach for `financial` merely because a read concerns money.
 | Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
 |---|---|:-:|:-:|:-:|---|---|
 | `support.errors.lookup` | read | ● | ● | ● | — | Look up an error a vendor, agency, agent or customer hit, by its reference |
-| `support.tickets.read` † | read | ● | ● | ● | scoped:tickets | View support tickets |
-| `support.tickets.create` † | write | ● | ● | ● | — | Open a support ticket on someone’s behalf |
-| `support.tickets.update` † | write | ● | ● | ● | scoped:tickets | Edit a ticket’s subject, body, status or priority |
-| `support.tickets.assign` † | write | ● | ● | ● | — | Assign a ticket to an administrator, or take it from the unassigned queue |
-| `support.tickets.lifecycle` † | write | ● | ● | ● | scoped:tickets | Close and reopen tickets |
-| `support.tickets.followers.manage` † | write | ● | ● | ● | scoped:tickets | Add and remove ticket followers |
-| `support.tickets.notes.read` † | read | ● | ● | ● | scoped:tickets | Read internal notes on a ticket — never visible to the customer |
-| `support.tickets.notes.write` † | write | ● | ● | ● | scoped:tickets | Add an internal note to a ticket |
-| `support.tickets.attachments.read` † | read | ● | ● | ● | scoped:tickets | View files attached to a ticket |
-| `support.tickets.attachments.write` † | write | ● | ● | ● | scoped:tickets | Attach a file to a ticket, or remove one |
-| `support.reference.read` † | read | ● | ● | ● | — | Look up the orders and products a ticket can reference |
+| `support.tickets.read` | read | ● | ● | ● | scoped:tickets | View support tickets |
+| `support.tickets.create` | write | ● | ● | ● | — | Open a support ticket on someone’s behalf |
+| `support.tickets.update` | write | ● | ● | ● | scoped:tickets | Edit a ticket’s subject, body, status or priority |
+| `support.tickets.assign` | write | ● | ● | ● | — | Assign a ticket to an administrator, or take it from the unassigned queue |
+| `support.tickets.lifecycle` | write | ● | ● | ● | scoped:tickets | Close and reopen tickets |
+| `support.tickets.followers.manage` | write | ● | ● | ● | scoped:tickets | Add and remove ticket followers |
+| `support.tickets.notes.read` | read | ● | ● | ● | scoped:tickets | Read internal notes on a ticket — never visible to the customer |
+| `support.tickets.notes.write` | write | ● | ● | ● | scoped:tickets | Add an internal note to a ticket |
+| `support.tickets.attachments.read` | read | ● | ● | ● | scoped:tickets | View files attached to a ticket |
+| `support.tickets.attachments.write` | write | ● | ● | ● | scoped:tickets | Attach a file to a ticket, or remove one |
+| `support.reference.read` | read | ● | ● | ● | — | Look up the orders and products a ticket can reference |
 
 ### `content`  — *no endpoints yet*
 

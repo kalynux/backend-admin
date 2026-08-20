@@ -97,6 +97,7 @@ const pick = (name: string) => files.find((f) => f.file.endsWith(name))!;
 const gatewayCode = pick('ticket.gateway.ts').code;
 const controllerCode = pick('ticket.controller.ts').code;
 const repoCode = pick('ticket.read.repository.ts').code;
+const validatorCode = pick('ticket.validator.ts').code;
 
 type AuditSpec = { permission: string | null; target: string; transport: string };
 const auditCatalog = AUDIT_CATALOG as unknown as Record<string, AuditSpec>;
@@ -526,6 +527,40 @@ for (const [name, method, path] of GATEWAY_PATHS) {
  */
 t.assert('the snapshot refresh does NOT ride the assign endpoint', () =>
     !(gatewayBody('refreshSnapshot') ?? '').includes('/assign'));
+
+/**
+ * ── The two wire names jovi-mall does NOT share with us (step 21) ─────────────
+ *
+ * Both were found writing `docs/api/support.md`, and both were invisible because the
+ * receiving schema is non-strict: the wrong key is stripped, not refused, so the call
+ * succeeded and did something other than what it said.
+ *
+ *  - a note's `isPublic` is jovi-mall's `visibility: 'public' | 'private'`, which DEFAULTS
+ *    to public — so the dropped key filed every staff note where the customer reads it,
+ *    the exact inversion of the validator's stated safety default;
+ *  - the reference lookup's `search` is jovi-mall's `q`, so the form's type-ahead answered
+ *    the unfiltered first page while looking as though it had searched.
+ *
+ * These assert the TRANSLATION, not the parameter — a test that only checked `isPublic`
+ * reaches the gateway is exactly the test that passed while the bug was live.
+ */
+t.assert('a note’s isPublic is translated to jovi-mall’s visibility enum', () => {
+    const body = gatewayBody('createNote') ?? '';
+    return body.includes("visibility: body.isPublic ? 'public' : 'private'");
+});
+t.assert('...and the request body is never forwarded wholesale', () => {
+    const body = gatewayBody('createNote') ?? '';
+    const sent = body.slice(body.indexOf('platformRequest'));
+    // `body,` — the ES shorthand — is how the defect was written, so that is the shape to
+    // refuse. `body: body` is not a thing anybody types.
+    return !sent.includes('body,') && !sent.includes('isPublic:');
+});
+t.assert('...and the note cap matches jovi-mall’s 300, so the 400 is ours to explain', () =>
+    validatorCode.includes('content: z.string().trim().min(1).max(300)'));
+t.assert('the reference lookup sends q, the parameter jovi-mall actually reads', () => {
+    const body = gatewayBody('referenceLookup') ?? '';
+    return body.includes('{ q: search }') && !/{ search }/.test(body);
+});
 
 t.assert('every delegated write leaves through platformRequest', () =>
     GATEWAY_PATHS.every(([name]) => (gatewayBody(name) ?? '').includes('platformRequest')));

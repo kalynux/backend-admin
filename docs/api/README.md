@@ -27,6 +27,7 @@ the dashboard's behalf and returns the result in its own envelope.
 | [agencies.md](agencies.md) | `/agencies` — delivery agencies, verification, rosters, contracts |
 | [agents.md](agents.md) | `/agents` — delivery agents, KYC, tracking, COD threshold, bans, transfer |
 | [contracts.md](contracts.md) | `/contracts` — one agent↔agency contract: the full terms, and the three administrative interventions |
+| [support.md](support.md) | `/support/tickets` — the support queue: assignment, lifecycle, followers, notes, attachments |
 | [orders.md](orders.md) | `/orders` — order directory, timeline, disputes, cancel, dispatch, refund |
 | [shipments.md](shipments.md) | `/shipments` — shipment directory, offer trail, reassign, cancel |
 | [cod.md](cod.md) | `/cod` — cash-on-delivery overview, holders, remittances, deposits, discrepancies, trust |
@@ -38,7 +39,7 @@ the dashboard's behalf and returns the result in its own envelope.
 | [notifications.md](notifications.md) | `/notifications` — the administrator inbox and preferences |
 | [files.md](files.md) | `/files` — turning a `*FileId` this service returns into a name, a type and a URL |
 
-**190 versioned endpoints** across 20 route groups, plus 2 unversioned health probes.
+**209 versioned endpoints** across 21 route groups, plus 2 unversioned health probes.
 
 ---
 
