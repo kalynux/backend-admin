@@ -236,7 +236,7 @@ async function main(): Promise<number> {
 
         const app = createApp();
         server = await new Promise<Server>((resolve) => {
-            const instance = app.listen(0, () => resolve(instance));
+            const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
         });
         port = (server.address() as { port: number }).port;
 

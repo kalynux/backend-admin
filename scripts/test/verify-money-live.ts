@@ -443,7 +443,7 @@ async function main(): Promise<number> {
         const app = createApp();
         t.assert('createApp() passes every boot assertion, dual control included', () => Boolean(app));
 
-        server = await new Promise<Server>((resolve) => { const s = app.listen(0, () => resolve(s)); });
+        server = await new Promise<Server>((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
         const address = server.address();
         port = typeof address === 'object' && address ? address.port : 0;
 

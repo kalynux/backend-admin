@@ -261,8 +261,16 @@ function decisionState(row: IApprovalRequest, status: ApprovalStatus, by: string
  * sweeping the same rows produces skips, not duplicate rows.
  *
  * A failure here must not fail the read that triggered it. An expired-but-unstamped request
- * is refused by `assertDecidable` anyway (it compares `expires_at`), so the sweep is a
- * bookkeeping convenience, not the enforcement.
+ * is refused by `assertDecidable` anyway — it compares `expires_at` against the clock, not
+ * only `status` — so the sweep is a bookkeeping convenience, not the enforcement.
+ *
+ * ⚠ **That sentence was FALSE from the day it was written until 2026-08-20** (F-1, Phase 4
+ * step 24). `assertDecidable` branched on `status` alone, so this sweep *was* the whole
+ * enforcement, and a request could be approved after its deadline in the window between the
+ * two. Fixed at `assertDecidable`, where the reasoning now lives. Kept here because the
+ * mis-statement is the lesson: a docstring asserting what a *different* function does is an
+ * unverified claim, and this one stopped three `verify:authz` failures from being believed
+ * for weeks.
  */
 const EXPIRY_SWEEP_BATCH = 50;
 let lastSweepAt = 0;
@@ -276,41 +284,77 @@ export async function expireOverdue(now: Date = new Date()): Promise<number> {
     for (const approvalId of await approvals.findOverdueIds(now, EXPIRY_SWEEP_BATCH)) {
         const row = await approvals.findById(approvalId);
         if (!row) continue;
-
-        try {
-            await auditedTransaction<IApprovalRequest>(
-                decisionIntent(
-                    'approvals.expired',
-                    { kind: 'system' },
-                    systemContext('dual-control/domain/approval.service#expireOverdue'),
-                    row,
-                    { action: row.action, expiresAt: row.expires_at.toISOString() },
-                ),
-                async (session) => {
-                    const result = await approvals.expireOneIfPending(approvalId, now, session);
-                    if (!result) {
-                        // Another instance won, or it was decided in between. Not an error —
-                        // the outcome is recorded, by whoever got there first.
-                        throw new ApprovalAlreadyResolved();
-                    }
-                    return { result, ...decisionState(result, 'expired', null) };
-                },
-            );
-            expired += 1;
-        } catch (error) {
-            if (error instanceof ApprovalAlreadyResolved) continue;
-            // Never fail the read this was called from — see the header.
-            logger().warn({ approvalId, err: String(error) }, 'approval expiry sweep could not stamp a row');
-        }
+        if (await expireOneRow(row, now, '#expireOverdue')) expired += 1;
     }
 
     return expired;
+}
+
+/**
+ * Stamp ONE overdue request `expired`, as the system actor. Never throws.
+ *
+ * Extracted from the sweep so a single named row can be stamped **without** one — see
+ * `loadFresh`, which needs exactly that and cannot wait for the throttle. Idempotent by
+ * construction: `expireOneIfPending` is a compare-and-set on `status: 'pending'`, so a
+ * concurrent decision or a second instance produces a skip rather than a duplicate row.
+ *
+ * @returns whether this call is the one that stamped it.
+ */
+async function expireOneRow(row: IApprovalRequest, now: Date, source: string): Promise<boolean> {
+    const approvalId = row._id.toString();
+
+    try {
+        await auditedTransaction<IApprovalRequest>(
+            decisionIntent(
+                'approvals.expired',
+                { kind: 'system' },
+                systemContext(`dual-control/domain/approval.service${source}`),
+                row,
+                { action: row.action, expiresAt: row.expires_at.toISOString() },
+            ),
+            async (session) => {
+                const result = await approvals.expireOneIfPending(approvalId, now, session);
+                if (!result) {
+                    // Another instance won, or it was decided in between. Not an error —
+                    // the outcome is recorded, by whoever got there first.
+                    throw new ApprovalAlreadyResolved();
+                }
+                return { result, ...decisionState(result, 'expired', null) };
+            },
+        );
+        return true;
+    } catch (error) {
+        if (error instanceof ApprovalAlreadyResolved) return false;
+        // Never fail the read this was called from — see the header.
+        logger().warn({ approvalId, err: String(error) }, 'approval expiry could not stamp a row');
+        return false;
+    }
 }
 
 /** Internal-only: the sweep losing a race is a skip, not a 409 for the caller. */
 class ApprovalAlreadyResolved extends Error {}
 
 /** Lazily stamp overdue requests, then read. No sweeper process to own or monitor. */
+/**
+ * Load the request a decision is about to be made on, expiring it first if it is overdue.
+ *
+ * ── Two expiries, and the second is not redundant ─────────────────────────────
+ * `expireOverdue()` is the batch sweep and is **throttled** by
+ * `ADMIN_APPROVAL_SWEEP_MIN_INTERVAL_MS` — so on any request inside that window it does
+ * nothing at all, which is precisely when a caller is most likely to be racing a deadline.
+ * The row this call names is then stamped **unthrottled**: one compare-and-set on one
+ * document is bounded work that needs no protection, and the throttle exists to stop an
+ * unbounded number of transactions opening on a read path.
+ *
+ * Without it an overdue request was correctly *refused* (`assertDecidable` compares the
+ * clock) and left sitting at `pending` — visible in the queue, un-actionable, and with no
+ * `approvals.expired` row in the audit trail until some later read happened to sweep it.
+ * The refusal and the bookkeeping now agree, which is what `expireOverdue`'s docstring has
+ * always claimed. (Phase 4 step 24, the third of F-1's three `verify:authz` assertions.)
+ *
+ * `assertDecidable` keeps its own clock comparison as the backstop: if this stamp loses a
+ * race or fails, the decision is still refused.
+ */
 async function loadFresh(approvalId: string): Promise<IApprovalRequest> {
     await expireOverdue();
 
@@ -318,6 +362,15 @@ async function loadFresh(approvalId: string): Promise<IApprovalRequest> {
     if (!row) {
         throw createAppError(ERROR_CODES.AUTHZ_APPROVAL_NOT_FOUND, 404);
     }
+
+    const now = new Date();
+    if (row.status === 'pending' && row.expires_at.getTime() <= now.getTime()) {
+        await expireOneRow(row, now, '#loadFresh');
+        // Re-read so the caller sees the stamped status rather than the stale one; falling
+        // back to `row` keeps the clock comparison in `assertDecidable` as the guarantee.
+        return (await approvals.findById(approvalId)) ?? row;
+    }
+
     return row;
 }
 
@@ -532,7 +585,37 @@ export async function withdraw(
     return toApprovalDto(resolved);
 }
 
-function assertDecidable(row: IApprovalRequest): void {
+/**
+ * Refuse a decision on a request that is not decidable — resolved, withdrawn, or **overdue**.
+ *
+ * ── The clock is compared HERE, and it was not until 2026-08-20 (F-1) ─────────
+ * This branched on `row.status` alone, so a request past `expires_at` that the sweep had not
+ * yet stamped was still `pending` and was **approved normally** — a live run answered `202`,
+ * not `409`. Enforcement therefore rested entirely on `expireOverdue` having got there first,
+ * and that sweep is throttled by `ADMIN_APPROVAL_SWEEP_MIN_INTERVAL_MS` and runs only on a
+ * read path, so the window was operational rather than theoretical.
+ *
+ * ⚠ **The code said otherwise, in writing.** `expireOverdue`'s docstring stated that an
+ * expired-but-unstamped request *"is refused by `assertDecidable` anyway (it compares
+ * `expires_at`), so the sweep is a bookkeeping convenience, not the enforcement"*. Every
+ * clause of that was false, and it is exactly the sentence that stops a reader from checking.
+ * The comparison below is what makes it true; the docstring is now accurate rather than
+ * aspirational.
+ *
+ * ── Why the status check stays FIRST ──────────────────────────────────────────
+ * A row already stamped `expired` must keep answering `AUTHZ_APPROVAL_EXPIRED`, and a
+ * `rejected` or `withdrawn` row must keep answering `AUTHZ_APPROVAL_ALREADY_RESOLVED` with
+ * its own status in `details` — an overdue-but-rejected request was rejected, and reporting
+ * it as expired would rewrite what happened. The clock only decides the `pending` case.
+ *
+ * ── This does not make the sweep redundant ────────────────────────────────────
+ * It makes it what its docstring always claimed: bookkeeping. The stamped row is what the
+ * queue lists and what the audit trail records; this guard only stops one being *acted on*
+ * in the gap before the sweep reaches it.
+ *
+ * @param now injected so the boundary is testable without waiting for one.
+ */
+function assertDecidable(row: IApprovalRequest, now: Date = new Date()): void {
     if (row.status === 'expired') {
         throw createAppError(ERROR_CODES.AUTHZ_APPROVAL_EXPIRED, 409);
     }
@@ -540,6 +623,11 @@ function assertDecidable(row: IApprovalRequest): void {
         throw createAppError(ERROR_CODES.AUTHZ_APPROVAL_ALREADY_RESOLVED, 409, undefined, {
             status: row.status,
         });
+    }
+    if (row.expires_at.getTime() <= now.getTime()) {
+        // Same code and same status as a swept row: the caller must not be able to tell
+        // whether the sweep had run, and the remedy — raise it again — is identical.
+        throw createAppError(ERROR_CODES.AUTHZ_APPROVAL_EXPIRED, 409);
     }
 }
 

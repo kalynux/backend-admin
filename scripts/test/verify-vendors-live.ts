@@ -138,6 +138,10 @@ const FIXTURE_COLLECTIONS = [
     COLLECTIONS.PRODUCT,
     COLLECTIONS.USER,
     COLLECTIONS.VENDOR_SETTINGS,
+    // The delivery chain F-7 added, so a failed run leaves nothing behind either.
+    COLLECTIONS.PRODUCT_VARIANT,
+    COLLECTIONS.DELIVERY_AGENCY,
+    COLLECTIONS.VENDOR_AGENCY_CONNECTION,
 ] as const;
 
 async function cleanupPlatform(): Promise<void> {
@@ -203,7 +207,7 @@ async function main(): Promise<number> {
 
         const app = createApp();
         server = await new Promise<Server>((resolve) => {
-            const s = app.listen(0, () => resolve(s));
+            const s = app.listen(0, '127.0.0.1', () => resolve(s));
         });
         const address = server.address();
         port = typeof address === 'object' && address ? address.port : 0;
@@ -217,6 +221,20 @@ async function main(): Promise<number> {
 
         // ── Fixtures ──────────────────────────────────────────────────────────
         const userId = new ObjectId();
+        /**
+         * ⚠ The control vendor needs its OWN user (F-3, fixed 2026-08-20).
+         *
+         * Both fixtures shared `userId`, and `vendors.user_id` is **unique** — so this suite
+         * crashed on `E11000` before its first assertion and could not pass as written against
+         * any real database. It is exactly the class of defect a DB-free suite cannot see: the
+         * documents are individually valid and the collision is an index's.
+         */
+        const pendingUserId = new ObjectId();
+        /** The delivery agency the products route through — see the chain below (F-7). */
+        const agencyId = new ObjectId();
+        const agencyUserId = new ObjectId();
+        /** The vendor's pickup address. `pickup_location.vendor_address_id` must NAME it. */
+        const businessAddressId = new ObjectId();
         const vendorId = new ObjectId();
         const pendingVendorId = new ObjectId();
         const businessName = `Verify Vendors Emporium ${stamp}`;
@@ -231,15 +249,23 @@ async function main(): Promise<number> {
             [FIXTURE_TAG]: true,
         } as never);
 
-        const vendorDoc = (id: ObjectId, status: string, email: string) => ({
+        const vendorDoc = (id: ObjectId, status: string, email: string, owner: ObjectId = userId) => ({
             _id: id,
-            user_id: userId,
+            user_id: owner,
             display_name: `Verify Vendor ${stamp}`,
             email,
             phone: `+23767${String(stamp).slice(-7)}`,
             country: 'CM',
             status,
             onboarding_step: 0,
+            // Required for a `vendor_address` pickup: the rule checks the id is ON this list,
+            // and a null id is NOT a 'first address' fallback here (F-7).
+            business_addresses: [{
+                _id: businessAddressId,
+                label: 'Main Shop',
+                address_line1: '1 Verify Street',
+                city: 'Douala',
+            }],
             // The two things that must never come back out.
             payout_details: [{ method: 'mobile_money', mobile_money: { account_number: POISON_PAYOUT } }],
             kyc_details: { national_id_number: POISON_NIN, legit_verified: false, status: 'pending' },
@@ -251,8 +277,18 @@ async function main(): Promise<number> {
             vendorDoc(vendorId, 'active', `verify-vendors-${stamp}@example.test`) as never);
         // The control: a vendor left at the REGISTRATION DEFAULT, to prove the enforcement
         // is narrow. If `requireAuth` ever becomes `!== 'active'`, this one starts failing.
+        // Its own user — see `pendingUserId`.
+        await db.collection(COLLECTIONS.USER).insertOne({
+            _id: pendingUserId,
+            login_email: `verify-vendors-${stamp}-p@example.test`,
+            password_hash: 'irrelevant',
+            roles: ['vendor'],
+            status: 'active',
+            created_at: now, updated_at: now,
+            [FIXTURE_TAG]: true,
+        } as never);
         await db.collection(COLLECTIONS.VENDOR).insertOne(
-            vendorDoc(pendingVendorId, 'pending_verification', `verify-vendors-${stamp}-p@example.test`) as never);
+            vendorDoc(pendingVendorId, 'pending_verification', `verify-vendors-${stamp}-p@example.test`, pendingUserId) as never);
 
         await db.collection(COLLECTIONS.STORE).insertOne({
             _id: new ObjectId(),
@@ -264,21 +300,71 @@ async function main(): Promise<number> {
             [FIXTURE_TAG]: true,
         } as never);
 
+        /**
+         * ⚠ A fixture product must be able to pass the ACTIVATION GATE, or Gate C proves
+         * nothing (F-7, found and fixed 2026-08-20).
+         *
+         * The restore is deliberately not blind: `ProductPlatformSuspensionService` re-runs
+         * `ProductStatusValidationService.validate(product, 'active')` on every candidate and
+         * leaves anything still blocked exactly where it is. These fixtures carried a title
+         * and a status and nothing else, so **every one of them was refused** — the suspend
+         * half passed, the restore put nothing back, and the four assertions that need a
+         * product to be on sale failed behind it. Invisible until F-3's duplicate-key crash
+         * was fixed, because the suite had never reached this section.
+         *
+         * For a **physical** product the gate wants, in order: a description; at least one
+         * active variant priced above zero; that variant named as `defaultVariantId`; the
+         * vendor not suspended; an **active** default delivery agency on the vendor with an
+         * **active** vendor↔agency connection; and a pickup location. The fixtures below
+         * satisfy all of it.
+         */
+        const variantIds: ObjectId[] = [];
         const product = (title: string, status: string, extra: Record<string, unknown> = {}) => {
             const id = new ObjectId();
+            const variantId = new ObjectId();
+            variantIds.push(variantId);
+            const n = variantIds.length;
             return {
                 id,
+                variantId,
                 doc: {
                     _id: id,
                     vendorId,
                     title,
-                    slug: `${title.toLowerCase().replace(/\s+/g, '-')}-${stamp}`,
+                    description: `Fixture listing for ${title} — long enough to be a description.`,
+                    slug: `${title.toLowerCase().split(' ').join('-')}-${stamp}`,
                     type: 'physical',
                     status,
+                    defaultVariantId: variantId,
+                    delivery: {
+                        // `agency_id: null` falls back to the vendor's default, which the
+                        // fixtures set — the same resolution order order-creation uses.
+                        agency_id: null,
+                        free_delivery: false,
+                        // `vendor_address_id: null` is a real steady state, not missing data:
+                        // it means the vendor's first business address.
+                        pickup_location: {
+                            source: 'vendor_address',
+                            vendor_address_id: businessAddressId,
+                            agency_address_id: null,
+                        },
+                    },
                     deletedAt: null,
                     createdAt: now, updatedAt: now,
                     [FIXTURE_TAG]: true,
                     ...extra,
+                },
+                variant: {
+                    _id: variantId,
+                    productId: id,
+                    sku: `VV-${stamp}-${n}`,
+                    name: 'Default',
+                    status: 'active',
+                    price: 5000,
+                    stock: 10,
+                    optionSignature: `vv-${stamp}-${n}`,
+                    createdAt: now, updatedAt: now,
+                    [FIXTURE_TAG]: true,
                 },
             };
         };
@@ -298,6 +384,56 @@ async function main(): Promise<number> {
         await db.collection(COLLECTIONS.PRODUCT).insertMany([
             activeProduct.doc, draftProduct.doc, agencySuspended.doc, oversightTarget.doc,
         ] as never[]);
+        await db.collection(COLLECTIONS.PRODUCT_VARIANT).insertMany([
+            activeProduct.variant, draftProduct.variant, agencySuspended.variant, oversightTarget.variant,
+        ] as never[]);
+
+        /**
+         * The delivery chain a physical product needs before it may be `active`.
+         *
+         * Three rows and one field on the vendor, and every one of them is load-bearing —
+         * the gate walks them in order and stops at the first miss, so a partial chain fails
+         * exactly like no chain at all:
+         *
+         *   vendor.default_delivery_agency_id → an ACTIVE delivery_agencies row
+         *                                     → an ACTIVE vendor_agency_connections row
+         *
+         * Without this the restore refuses every candidate and Gate C asserts nothing. See
+         * the note on `product()` above (F-7).
+         */
+        await db.collection(COLLECTIONS.DELIVERY_AGENCY).insertOne({
+            _id: agencyId,
+            user_id: agencyUserId,
+            display_name: `Verify Vendors Courier ${stamp}`,
+            country: 'CM',
+            status: 'active',
+            // ⚠ The agency must OFFER the pickup style the product names.
+            // `PickupLocationValidationService` refuses a `vendor_address` pickup against an
+            // agency whose `pickup_based` pricing is off — which is the schema default, so an
+            // agency fixture that omits this blocks every physical product it serves. That was
+            // the single blocker behind all six Gate C / oversight failures (F-7).
+            policies: { pricing: { pickup_based: { enabled: true }, storage_based: { enabled: false } } },
+            created_at: now, updated_at: now,
+            [FIXTURE_TAG]: true,
+        } as never);
+
+        await db.collection(COLLECTIONS.VENDOR_AGENCY_CONNECTION).insertOne({
+            _id: new ObjectId(),
+            vendor_id: vendorId,
+            agency_id: agencyId,
+            status: 'active',
+            requester_role: 'vendor',
+            requested_by_user_id: userId,
+            requested_at: now,
+            responded_by_user_id: agencyUserId,
+            created_at: now, updated_at: now,
+            [FIXTURE_TAG]: true,
+        } as never);
+
+        await db.collection(COLLECTIONS.VENDOR).updateOne(
+            { _id: vendorId },
+            { $set: { default_delivery_agency_id: agencyId } },
+        );
 
         const id = vendorId.toString();
         const readProduct = (pid: ObjectId) =>

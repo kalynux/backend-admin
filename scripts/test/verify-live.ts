@@ -82,8 +82,20 @@ async function main(): Promise<number> {
             return Boolean(platformDb) && Boolean(adminDb) && platformDb !== adminDb;
         });
 
-        t.assert('the admin connection points at the database named in MONGO_URI_ADMIN', () =>
-            config.MONGO_URI_ADMIN.endsWith(adminConnection().name));
+        /**
+         * ⚠ Compare the URI's PATH SEGMENT, never the whole string (F-2, fixed 2026-08-20).
+         *
+         * This was `config.MONGO_URI_ADMIN.endsWith(adminConnection().name)`, which is false
+         * for **any** URI carrying query parameters — and this one carries `?replicaSet=rs0`,
+         * which wi-admin's fail-closed audit **requires**. So the assertion failed on exactly
+         * the configuration it exists to bless: the connection was correct and the check was
+         * not. A `URL`-parsed path segment says what was meant.
+         */
+        t.assert('the admin connection points at the database named in MONGO_URI_ADMIN', () => {
+            const path = decodeURIComponent(new URL(config.MONGO_URI_ADMIN).pathname);
+            const declared = path.startsWith('/') ? path.slice(1) : path;
+            return declared.length > 0 && declared === adminConnection().name;
+        });
 
         const redisPing = await pingRedis();
         t.assert('redis answers a ping', () => redisPing.ok);
@@ -93,7 +105,7 @@ async function main(): Promise<number> {
 
         const app = createApp();
         server = await new Promise<Server>((resolve) => {
-            const instance = app.listen(TEST_PORT, () => resolve(instance));
+            const instance = app.listen(TEST_PORT, '127.0.0.1', () => resolve(instance));
         });
         const address = server.address();
         const port = typeof address === 'object' && address ? address.port : 0;

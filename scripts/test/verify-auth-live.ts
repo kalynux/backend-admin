@@ -146,8 +146,18 @@ async function main(): Promise<number> {
         });
 
         const app = createApp();
+        /**
+         * ⚠ Bind **explicitly to `127.0.0.1`**, not to the wildcard (F-5, fixed 2026-08-20).
+         *
+         * `app.listen(0, cb)` binds the IPv6 wildcard `::`, and every call below fetches
+         * `http://127.0.0.1:<port>` — an IPv4 target reached through a dual-stack listener.
+         * That works almost always, which is what made this suite *flaky* rather than broken:
+         * step 0.4 saw `TypeError: fetch failed` on the very first request, and an identical
+         * re-run passed 64 / 64. Binding the same family the client dials removes the
+         * ambiguity instead of retrying around it. `verify-orders-live.ts` already did this.
+         */
         server = await new Promise<Server>((resolve) => {
-            const s = app.listen(0, () => resolve(s));
+            const s = app.listen(0, '127.0.0.1', () => resolve(s));
         });
         const address = server.address();
         port = typeof address === 'object' && address ? address.port : 0;
@@ -407,7 +417,7 @@ async function main(): Promise<number> {
 
         const strictApp = createApp();
         const strictServer = await new Promise<Server>((resolve) => {
-            const s = strictApp.listen(0, () => resolve(s));
+            const s = strictApp.listen(0, '127.0.0.1', () => resolve(s));
         });
         const strictPort = (strictServer.address() as { port: number }).port;
 
