@@ -283,13 +283,103 @@ on it. (`platform.client.ts` said Phase 4; deliberate deviation.)
 
 ## Deferred, and named so it is not forgotten
 
-- **J6's migration.** The `*_source` discriminator is added to the COD actor fields this phase
+> **All four were revisited on 2026-08-20** (Phase 4 step 22 of the production-readiness plan).
+> Two are closed as work, one is closed as a decision, one keeps its pointer. Each item below
+> keeps its original text and carries what happened underneath — the original wording is the
+> record of what was believed at the time, and two of the four estimates in it were wrong.
+
+- ~~**J6's migration.**~~ The `*_source` discriminator is added to the COD actor fields this phase
   touches. Backfilling the other ~7 fields belongs with the endpoints that use them, at Phase 5.
-- **J7's signature threading** across the shared services — same reason. Those services are called by
-  agency, agent, vendor and customer controllers plus 5 workers, so the change must be additive and
-  is best made per-domain rather than in one sweep.
-- **`SUPPORT_ADMIN_USER_ID`** names a real jovi-mall user acting as the system actor for
+
+  ✅ **CLOSED 2026-08-20.** Every `actorStampFields()` site now declares the pair, and the row-level
+  backfill is `npm run backfill:actor-source` in jovi-mall — ledgered under `schema_migrations`,
+  idempotent, `--dry-run`, `require.main`-guarded, applied on dev.
+
+  **The count was wrong, and that is the reason the step insisted on enumerating from source.**
+  "~7 other fields" is **twelve** stamps: seven top-level (`users.suspended_by`,
+  `vendors.suspended_by`, `subscriber_plans.assigned_by`, `payout_requests.resolved_by`,
+  `agency_remittances.resolved_by`, `agent_deposits.recorded_by`,
+  `cod_discrepancies.resolved_by`) and five nested (`vendors.kyc_details.reviewed_by`,
+  `delivery_agencies.kyc_details.verified_by`, `delivery_agents.kyc.verified_by`,
+  `delivery_agents.platform_ban.banned_by`, `delivery_agents.tracking.changed_by`). Two of them
+  hold their id in a column with no `_user_id` suffix, which is why `actorStamp()` has an
+  `idField` override at all.
+
+  Three things worth carrying forward:
+
+  - **The migration changes no rendered value.** Every wi-admin read site already writes
+    `row.<prefix>_source ?? 'platform'`. What the backfill buys is a database that says what the
+    screen says — and a fallback that becomes a redundancy rather than a guess.
+  - **A schema default does not reach an existing row**, which is the whole reason this is a
+    migration. Mongoose applies it on write; a `$set` on an old document does not add a missing
+    path. It would be invisible if everything read through mongoose — but wi-admin reads
+    `jovi_mall` with the **raw driver**, so it sees `undefined` where a hydrated document shows
+    `'platform'`.
+  - **A nested stamp must require its parent to exist.** A bare `$set` on
+    `tracking.changed_by_source` against a document with no `tracking` **creates** the
+    subdocument holding only that field, leaving `tracking.allowed` absent where the schema
+    promises a boolean. That is the one way the migration could do harm, and it is why the filter
+    is not simply `{ <path>: { $exists: false } }`.
+
+- ~~**J7's signature threading**~~ across the shared services — same reason. Those services are
+  called by agency, agent, vendor and customer controllers plus 5 workers, so the change must be
+  additive and is best made per-domain rather than in one sweep.
+
+  ✅ **CLOSED 2026-08-20** — and the estimate had gone stale rather than the work being large.
+  "~14 remain / ~16 signatures" was true when written; each later phase then threaded its own
+  domain **with the endpoint that needed it**, which is exactly what this entry prescribed. A
+  source census of every actor-stamped write found **one** left:
+
+  > `CodDiscrepancyService.resolve(discrepancyId, resolution, note, adminUserId: string)` wrote
+  > `resolved_by_user_id` alone. Resolving a discrepancy is an **admin-only** act — there is no
+  > agency or agent path to it — so since the split that column has held a wi-admin id with
+  > **nothing beside it saying so**, rendered next to a remittance on the same wi-admin screen
+  > that does show a name. It takes an `ActorRef` now, `cod-discrepancy.model.ts` gained
+  > `actorStampFields('resolved_by')`, and wi-admin's `DiscrepancyDto.resolvedByUserId` became
+  > `resolvedBy: ActorStampDto | null` — the shape `RemittanceDto` already used. One breaking
+  > wire change, documented in `docs/api/cod.md`.
+
+  **`agent-deposit` keeps its additive-optional-fields shape** rather than being converted to
+  `ActorRef`. It is functionally complete — it writes the source and the name through
+  `actorStamp()` — and reshaping a money path's signature for symmetry alone buys nothing a
+  reader needs.
+
+- ~~**`SUPPORT_ADMIN_USER_ID`**~~ names a real jovi-mall user acting as the system actor for
   auto-created tickets (`ticket.service.ts`, `earnings-release.worker.ts`). Under D3 that referent
   breaks. Not in this phase's slice; it blocks the ticket domain at Phase 5.
+
+  ✅ **DECIDED 2026-08-20** (Phase 4 step 22). The decision, not the implementation — this is a
+  line in an ADR, and the work belongs to whichever phase next opens the ticket domain.
+
+  **The system actor stops being a `users` row and becomes a constant in code, marked with the
+  machinery that already exists.** The answer comes from `core/types/actor-source.types.ts`
+  rather than from anything new, because that file already solved this exact problem once: *an
+  actor id need not resolve anywhere, provided the row says which identity space it belongs to
+  and snapshots the name, since a cross-database join cannot exist.* Applied here, a
+  system-raised ticket carries `source: 'admin'` — which means precisely "this id resolves in no
+  `users` collection" — a fixed sentinel id, and a snapshot name for the platform's automation.
+  `Ticket` already stores the wi-admin snapshot block (`created_by_admin`), so the shape is
+  present; what changes is where the actor comes from.
+
+  **Two things this closes, and both are live today:**
+
+  - **An unset variable is currently a silent no-op on two paths.** `createSystemTicket` returns
+    `null` and logs — so a chargeback is processed and **nobody is told**, which the
+    `.env.example` comment states plainly. `autoTriggerPayoutsOverThreshold` returns early — so
+    the auto-payout threshold sweep simply does not run. A code constant cannot be unset.
+  - **Re-pointing it at a wi-admin administrator is the wrong fix**, and it is the move the
+    referent problem invites. It would name a *person* as the author of an automated act, put an
+    id in `created_by_user_id` that resolves nowhere with no discriminator beside it, and make
+    the record wrong the day that administrator leaves.
+
+  Until then the variable stays and is documented as it is. **Do not delete it as part of a
+  cleanup**: unset, two features stop, quietly.
+
 - **The agency KYC gap** — PHASE-0 found agencies have deactivate/reactivate but no KYC approval at
   all. Ownership is assigned here; the missing capability is Phase 6's.
+
+  ↪ **Pointer confirmed 2026-08-20, unchanged.** It is
+  `PRODUCTION-READINESS/10-IMPLEMENTATION-PLAN.md` **Part 6.C**, and it is a **feature, not
+  hardening** — agencies still have deactivate/reactivate and no KYC approval, unlike vendors
+  (whose `kyc_details` gained a three-valued `status` and a reviewer stamp) and agents (whose
+  `kyc.status` gates dispatch entirely). Deliberately out of Phase 4's scope.

@@ -291,7 +291,20 @@ export interface DiscrepancyDto {
     depositId: string | null;
     note: string | null;
     resolutionNote: string | null;
-    resolvedByUserId: string | null;
+    /**
+     * Who closed the flag — **the full stamp, as `RemittanceDto.resolvedBy` already was.**
+     *
+     * ⚠ This **replaced `resolvedByUserId`** in Phase 4 step 22 (J7). That field was a bare
+     * id string, and resolving a discrepancy is an admin-only act — so since the admin split
+     * it has been a wi-admin id that resolves in neither database, rendered beside a
+     * remittance on the same screen that shows a name. One shape for an actor stamp across
+     * this surface, or the two disagree about what an id means.
+     *
+     * `null` while the flag is still `open`, keyed on the id rather than on the status: a
+     * stamp rendered without checking reads as "resolved by nobody", which is a claim rather
+     * than an absence.
+     */
+    resolvedBy: ActorStampDto | null;
     openedAt: string | null;
     resolvedAt: string | null;
     createdAt: string | null;
@@ -332,7 +345,16 @@ export function toDiscrepancyDto(
         depositId: row.deposit_id ? row.deposit_id.toString() : null,
         note: row.note ?? null,
         resolutionNote: row.resolution_note ?? null,
-        resolvedByUserId: row.resolved_by_user_id ? row.resolved_by_user_id.toString() : null,
+        resolvedBy: row.resolved_by_user_id
+            ? {
+                id: row.resolved_by_user_id.toString(),
+                // Defaults to 'platform' exactly as the schema does, and exactly as the
+                // remittance mapper above. `backfill:actor-source` makes the stored data
+                // agree with this, so the fallback is a redundancy rather than a guess.
+                source: row.resolved_by_source ?? 'platform',
+                name: row.resolved_by_name ?? null,
+            }
+            : null,
         openedAt: toIso(row.opened_at),
         resolvedAt: toIso(row.resolved_at),
         createdAt: toIso(row.created_at),

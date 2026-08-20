@@ -492,7 +492,7 @@ The platform's result, message
       "depositId": null,
       "note": "Cash held 6 days past the remittance window",
       "resolutionNote": null,
-      "resolvedByUserId": null,
+      "resolvedBy": null,
       "openedAt": "2026-08-11T00:05:00.000Z",
       "resolvedAt": null,
       "createdAt": "2026-08-11T00:05:00.000Z",
@@ -508,6 +508,15 @@ The platform's result, message
 | `amount` | **`null` for a non-monetary flag — not zero**, which would mean "nothing at stake" |
 | `raisedBy` | `system` \| `agency` \| `admin` \| `agent`. **The last is how an agent disputes** |
 | `depositId` | The deposit at issue, for `deposit_not_confirmed` and agent disputes |
+| `resolvedBy` | The **actor stamp** of whoever closed it — `{ id, source, name }`, the same shape `RemittanceDto.resolvedBy` uses. `null` while `open` |
+
+> ⚠ **`resolvedBy` replaced `resolvedByUserId` on 2026-08-20** (Phase 4 step 22, J7). It was a
+> bare id string — and resolving a discrepancy is an **admin-only** act, so since the admin split
+> that id has been a wi-admin one, resolving in neither database, rendered next to a remittance on
+> the same screen that shows a name. `source: 'admin'` now says so and `name` carries the snapshot.
+>
+> **Clients:** read `resolvedBy?.id` where you read `resolvedByUserId`, and render `name` when
+> `source === 'admin'` — that id resolves nowhere, so linking it goes to a dead page.
 
 ---
 

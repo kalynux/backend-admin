@@ -164,9 +164,9 @@ the admin notification stack (Phase 7).
 | J4 ✅ | New `requireAdminCaller` middleware — constant-time service-token compare + **synthetic actor** from headers. Shipped Phase 4; the actor is richer than "a userId" — see ADR-004 D-1 | ~130 lines, 2 files |
 | J5 ◐ | **Dual-mount** the admin routers under `/api/internal/admin/*` via a per-router factory — NOT a guard swap, see ADR-004 D-5. COD done (Phase 4); 11 routers remain (Phase 5). `users` is mounted internal-**only**, having no legacy public twin (ADR-007 D-2) | ~35-line factory refactor per router |
 | J11 ✅ | **Enforce `User.status`** at `login`, at `rotateRefreshToken` and in `requireAuth`. The column was written by nothing and read by nothing, so an admin suspension endpoint would have been inert (ADR-007 D-1) | ~15 lines, 3 files |
-| J6 ◐ | Polymorphic actor fields: `actorStampFields()` + `actorStamp()` in `core/types/actor-source.types.ts`. Applied to the 2 COD fields Phase 4 touches; ~8 fields and the backfill remain (Phase 5) | §2.1 |
-| J7 ◐ | Thread the actor through the shared services. Done for `agency-remittance` (`ActorRef`) and `agent-deposit` (additive optional fields); ~14 remain (Phase 5) | ~16 signatures |
-| J8 | Redis pub/sub event transport in `core/events/event-bus.ts` | 1 file + 1 new adapter |
+| J6 ✅ | Polymorphic actor fields: `actorStampFields()` + `actorStamp()` in `core/types/actor-source.types.ts`. **Closed 2026-08-20** (Phase 4 step 22). The estimate here was "~8 fields"; enumerated from the source it is **twelve**, and every one now declares the pair. The backfill is `npm run backfill:actor-source` in jovi-mall — ledgered, idempotent, `--dry-run`, applied on dev. ⚠ It changes no rendered value: every wi-admin read site already defaulted a missing discriminator to `'platform'`, so what the backfill buys is a database that says what the screen says | §2.1 |
+| J7 ✅ | Thread the actor through the shared services. **Closed 2026-08-20** (Phase 4 step 22). The "~14 remain" was written at Phase 4-of-wi-admin and went stale as each later phase threaded its own domain with the endpoint that needed it: a source census found **one** unthreaded actor-stamped write left, `CodDiscrepancyService.resolve`, which took `adminUserId: string` and wrote a bare id on an **admin-only** path. It takes an `ActorRef` now. `agent-deposit` keeps its additive-optional-fields shape — functionally complete, and a refactor for symmetry alone is not worth a money path's diff | ~16 signatures |
+| J8 ⏸ | Redis pub/sub event transport in `core/events/event-bus.ts`. **Deliberately still open** — Phase 4 step 22 / [ADR-013](./ADR-013-NOTIFICATIONS.md) D-2 + Phase 4 D-16. The argument against building it as a bandage stands, and the instruction was "decide J8 with data": jovi-mall now emits `eventBusHandlerFailuresTotal` (Phase 4 step 6), which has **never run against real traffic**. Closing it now would be deciding it with the same absence of data that deferred it. Revisit in 6.K, with that metric's production numbers | 1 file + 1 new adapter |
 | J9 | Move out the admin-only services — **4, not 3, and 746 LOC not 391**: `article.service` is admin-only too (ADR-004 correction 2). `admin-agency.service` **stays**, its cascade being jovi-mall's (ADR-004 D-4) | deletion |
 | J10 | **At cutover:** delete public `/api/admin/*` — 12 routers, 9 controllers, 81 routes, 13 api-doc files | deletion |
 
@@ -239,7 +239,19 @@ and audit is **3.5**; phases 4–8 are unchanged.
    > password, in whatever role that account holds. Committed since 2026-02-11. It outranks the
    > Phase 0.5 escalation: there is no need to self-register as an admin if you can log in as one.
 2. **Admin service port** — proposing `8033`. Confirm or override.
-3. **`wi-admin` placement** — separate `mongod` instance, or another database on the same server?
+3. ~~**`wi-admin` placement** — separate `mongod` instance, or another database on the same server?~~
+   ✅ **ANSWERED 2026-08-20** (Phase 4 step 22), by recording what the code has been enforcing
+   since Phase 3.5. **wi-admin's database must be a replica set** — a shared `rs0` with jovi-mall
+   is what runs today and is correct; a standalone `mongod` is **not an option**, whether separate
+   or shared. The audit subsystem is fail-closed and every audited write is transactional, and
+   MongoDB offers no transactions outside a replica set or a mongos, so
+   `assertAuditStoreTransactional()` ([ADR-006](./ADR-006-AUDIT.md) D-7) **refuses to boot**
+   against one. That gate was written *because* this question was open; it has since decided it in
+   practice, and 2.B.4 of the production-readiness work forced the same answer operationally.
+   ⚠ The separate-instance half is still free and is an **operational** choice, not an
+   architectural one — a second `mongod` works provided it is a replica set of its own. What is
+   closed is the standalone option, and `directConnection=true` on `MONGO_URI_ADMIN` (a habit
+   while debugging) pins single-server topology and will refuse the boot for the same reason.
 4. **Do admins keep a platform login at all?** Under full separation an admin authenticates only
    against `wi-admin`. If a person needs to be both an admin and a vendor, they will hold two
    independent accounts. Confirming that is intended.

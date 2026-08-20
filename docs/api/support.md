@@ -8,8 +8,8 @@ administrative door onto tickets — jovi-mall's own `/api/admin/tickets` mount 
 this one was built.
 
 Design records: [`../PHASE-17-LEGACY-PORT-PLAN.md`](../PHASE-17-LEGACY-PORT-PLAN.md) (the port),
-[`../ADR-004-DATA-ACCESS.md`](../ADR-004-DATA-ACCESS.md) (why the reads are direct and the
-writes are not), [`../ADR-005-ADMIN-API-DESIGN.md`](../ADR-005-ADMIN-API-DESIGN.md) D-4, D-14,
+[`../ADR-004-DOMAIN-OWNERSHIP.md`](../ADR-004-DOMAIN-OWNERSHIP.md) (why the reads are direct
+and the writes are not), [`../ADR-005-API-CONTRACT.md`](../ADR-005-API-CONTRACT.md) D-4, D-14,
 D-17.
 
 | Method | Path | Permission | Transport | Audited |

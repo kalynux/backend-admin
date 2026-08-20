@@ -358,6 +358,20 @@ is the one place with no handler above it.
 
 - **J8 Redis pub/sub** (D-2). Still owed for admin's own direct writes reaching jovi-mall's
   subscribers.
+
+  ⏸ **Re-examined 2026-08-20** (Phase 4 step 22) and left open **deliberately**, with the thing
+  it now waits on named. D-2's argument against building a Redis hop as a bandage stands
+  unchanged, and the standing instruction has been *decide J8 with data*. That data now has a
+  producer and no readings: jovi-mall emits **`eventBusHandlerFailuresTotal`** (Phase 4 step 6,
+  `jovi-mall/src/core/events/event-bus.ts`), which counts exactly the loss D-2 describes — a
+  subscriber that throws, is logged, and is never retried. It has **never run against real
+  traffic**. Closing J8 now, in either direction, would be deciding it with the same absence of
+  evidence that deferred it in the first place.
+
+  What to look at when the numbers exist: **the four user-facing notification stacks are the
+  exposure**, not the two money splits — those have recovery sweeps in `EarningsReleaseWorker`
+  (`recoverMissedCodSplits`, `recoverMissedDeliverySplits`), and the stacks have none, so a
+  handler that throws means the customer is simply never told. Revisit in **6.K**.
 - **`notifications.manage`** — a service-wide alert-configuration surface (D-9).
 - **Email or push delivery.** In-app only. jovi-mall's stacks carry four channels; an
   administrator sits in front of the dashboard, and a second delivery path is a second thing

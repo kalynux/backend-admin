@@ -190,6 +190,14 @@ export interface CodDiscrepancyReadModel extends Document {
     note?: string | null;
     resolution_note?: string | null;
     resolved_by_user_id?: ObjectId | null;
+    /**
+     * Added in Phase 4 step 22 (J7's first domain). Resolving a discrepancy is admin-only,
+     * so this id is a wi-admin one on every write since the split — and until that step it
+     * travelled with no companion at all, which is the one thing an unresolvable id must
+     * never do.
+     */
+    resolved_by_source?: string;
+    resolved_by_name?: string | null;
     opened_at?: Date | null;
     resolved_at?: Date | null;
     created_at: Date;
@@ -210,6 +218,8 @@ const DISCREPANCY_PROJECTION = {
     note: 1,
     resolution_note: 1,
     resolved_by_user_id: 1,
+    resolved_by_source: 1,
+    resolved_by_name: 1,
     opened_at: 1,
     resolved_at: 1,
     created_at: 1,

@@ -49,7 +49,7 @@ import {
     buildHolderFilter,
     buildTrustEventFilter,
 } from '../../src/modules/cod/repositories/cod-cash.read.repository';
-import { toHolderDto, toTrustEventDto } from '../../src/modules/cod/read-models/cod.dto';
+import { toDiscrepancyDto, toHolderDto, toTrustEventDto } from '../../src/modules/cod/read-models/cod.dto';
 import { AUDIT_CATALOG, auditSpec, isAuditAction } from '../../src/modules/audit/domain/audit.catalog';
 import { subjectClassOf } from '../../src/modules/audit/domain/audit-subject';
 import { permissionSpec } from '../../src/modules/authorization/domain/permission.catalog';
@@ -328,6 +328,54 @@ t.assert('...including the deposit’s two names for its creation time', () => {
 t.assert('the direct DTOs add the actor stamps jovi-mall’s own DTOs omit', () => {
     const ours = readCode(...COD_DTO);
     return ours.includes('resolvedBy:') && ours.includes('recordedBy:');
+});
+
+/**
+ * Phase 4 step 22 (J7's first domain).
+ *
+ * A discrepancy is resolved on an **admin-only** path, so its `resolved_by_user_id` is a
+ * wi-admin id that resolves in neither database — and it used to leave here as a bare
+ * `resolvedByUserId` string, rendered beside a remittance on the same screen that shows a
+ * name. One actor-stamp shape across this surface, or the two disagree about what an id
+ * means.
+ */
+const discrepancyRow = {
+    _id: { toString: () => OID },
+    agent_id: { toString: () => OID },
+    agency_id: { toString: () => OID },
+    type: 'late_deposit',
+    status: 'resolved',
+    raised_by: 'system',
+    resolved_by_user_id: { toString: () => OID },
+    resolved_by_source: 'admin',
+    resolved_by_name: 'Eric T.',
+    created_at: new Date('2026-01-01T00:00:00.000Z'),
+    updated_at: new Date('2026-02-01T00:00:00.000Z'),
+} as unknown as Parameters<typeof toDiscrepancyDto>[0];
+
+/** Its own, because `noNames` is declared with §6's fixtures further down. */
+const noDiscrepancyNames = { agents: new Map<string, string | null>(), agencies: new Map<string, string | null>() };
+
+t.assert('a resolved discrepancy carries the FULL actor stamp, not a bare id', () => {
+    const dto = toDiscrepancyDto(discrepancyRow, noDiscrepancyNames);
+    return dto.resolvedBy?.source === 'admin' && dto.resolvedBy?.name === 'Eric T.';
+});
+
+t.assert('...and the bare resolvedByUserId is gone from the wire', () =>
+    !JSON.stringify(toDiscrepancyDto(discrepancyRow, noDiscrepancyNames)).includes('resolvedByUserId'));
+
+/**
+ * The fallback must stay, and must stay `'platform'`. `backfill:actor-source` makes the
+ * stored data agree with it, but a row written between the two deploys has neither field.
+ */
+t.assert('a row with no discriminator reads as platform, exactly as the schema default', () => {
+    const legacy = { ...discrepancyRow, resolved_by_source: undefined, resolved_by_name: undefined };
+    return toDiscrepancyDto(legacy as typeof discrepancyRow, noDiscrepancyNames).resolvedBy?.source === 'platform';
+});
+
+t.assert('an OPEN discrepancy reports null rather than a stamp with no actor', () => {
+    const open = { ...discrepancyRow, status: 'open', resolved_by_user_id: null };
+    return toDiscrepancyDto(open as unknown as typeof discrepancyRow, noDiscrepancyNames).resolvedBy === null;
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
