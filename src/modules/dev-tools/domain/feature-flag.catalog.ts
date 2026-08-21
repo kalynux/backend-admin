@@ -53,16 +53,12 @@ export const FEATURE_FLAG_CATALOG = Object.freeze({
         summary: 'Warn when a route succeeds without recording the action it declares',
     },
 
-    /**
-     * The legacy jovi-mall audit feed (`GET /api/v1/audit/legacy`).
-     *
-     * On by default and deleted at cutover with the surface it reports on.
-     */
-    'audit.legacy_feed': {
-        default: true,
-        consumer: 'modules/legacy-audit/routes/legacy-audit.routes.ts',
-        summary: 'Serve the interim feed of administrative actions still performed on jovi-mall',
-    },
+    // `audit.legacy_feed` was here — the switch that retired `GET /api/v1/audit/legacy` ahead
+    // of deleting the module behind it, so a dashboard could stop calling the route without a
+    // coordinated release. Both are gone (Phase 5 Part D). It had to go in the same change:
+    // its `consumer` named a file that no longer exists, which is exactly the dead config the
+    // header above refuses to carry — a switch an operator flips expecting something to
+    // change, and nothing does.
 
     /**
      * Whether the developer tools may actually trigger anything in jovi-mall.

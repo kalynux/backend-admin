@@ -48,13 +48,16 @@ import {
     resetDenialSink,
     setDenialSink,
 } from '../../src/modules/authorization/domain/denial.recorder';
-import {
-    LEGACY_ENDPOINT_COUNT,
-    LEGACY_ENDPOINT_MAP,
-} from '../../src/modules/authorization/domain/legacy-endpoint-map';
+// `LEGACY_ENDPOINT_COUNT` and `LEGACY_ENDPOINT_MAP` were imported here. Both are DELETED
+// (Phase 5 Part D), so § 9 below asserts their absence rather than their contents — see the
+// section header for why the assertions were restated rather than dropped.
 import { approvalRequestKey, canonicalJson } from '../../src/modules/dual-control/domain/action-key';
 import { dualControlRequired } from '../../src/modules/dual-control/domain/approval.service';
 import { NO_AUDIT_ROUTE_ALLOWLIST, PUBLIC_ROUTE_ALLOWLIST } from '../../src/api/route-manifest';
+// § 9's two "it went with the module" checks. Imported here rather than asserted in
+// `test:devtools` / `test:contract` because the fact being pinned is the DELETION, and it
+// belongs beside the deletion it followed from.
+import { FEATURE_FLAG_CATALOG } from '../../src/modules/dev-tools/domain/feature-flag.catalog';
 
 const t = suite('authorization');
 
@@ -799,67 +802,106 @@ t.assert('deleteAttachment resolves the attachment to its ticket before scoping 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-t.section('9. Legacy endpoint map (Phase 5 checklist)');
-
-t.assert(`the map holds exactly ${LEGACY_ENDPOINT_COUNT} unported endpoints`, () =>
-    LEGACY_ENDPOINT_MAP.length === LEGACY_ENDPOINT_COUNT);
-
-t.assert('every mapped permission exists in the catalog', () =>
-    LEGACY_ENDPOINT_MAP.every((row) => row.permission === null || isPermissionName(row.permission)));
+t.section('9. The legacy surface is GONE (Phase 5 Part D)');
 
 /**
- * ── The cutover tripwire ─────────────────────────────────────────────────────
+ * ── This section used to assert the checklist's CONTENTS; it now asserts its ABSENCE ──
  *
- * The legacy-audit module and the jovi-mall shim behind it exist for ONE reason: the
- * dashboard still calls admin endpoints on jovi-mall. When the last row leaves this map that
- * reason is gone, and both should be deleted rather than quietly maintained forever as a
- * feed of an empty collection.
+ * `legacy-endpoint-map.ts` listed every admin endpoint jovi-mall still served, mapped to the
+ * permission that would guard it here. Phase 5 ported the last of them and Part D deleted the
+ * map, the `legacy-audit` module that fed on the surface, the `audit.legacy_feed` flag and the
+ * `AUDIT_LEGACY_FEED_DISABLED` code.
  *
- * Enforced rather than remembered, because "delete this later" is the instruction nobody
- * ever receives. The failure is loud and the fix is `rm -r`.
+ * Eight assertions lived here. Six of them ("no ticket row survives", "no COD row survives",
+ * "every mapped permission exists", "no row is listed twice", "every mapped permission is
+ * granted", "no row maps to a null permission") had the map itself as their subject, and with
+ * the map gone they would each be a check that passes because there is nothing to check —
+ * green forever, catching nothing. They are RESTATED here as the one fact that replaced all
+ * six and is strictly stronger: **the map does not exist, and nothing imports it.** A row
+ * cannot survive in a file that is not there.
+ *
+ * That is the `PHASE-17-STATUS.md` § 7 rule applied in the direction it is hardest to apply —
+ * an assertion that goes green for the success is as dead as one that goes red for it.
  */
-t.assert('the legacy-audit module is deleted once the legacy surface is', () =>
-    LEGACY_ENDPOINT_COUNT > 0 || !existsSync(join(SRC, 'modules', 'legacy-audit')));
 
-t.assert('no endpoint is listed twice', () => {
-    const keys = LEGACY_ENDPOINT_MAP.map((row) => `${row.method} ${row.path}`);
-    return new Set(keys).size === keys.length;
+const LEGACY_MAP = join(SRC, 'modules', 'authorization', 'domain', 'legacy-endpoint-map.ts');
+
+t.assert('the legacy endpoint map is deleted', () => !existsSync(LEGACY_MAP));
+
+/**
+ * ── The cutover tripwire, now unconditional ──────────────────────────────────
+ *
+ * It used to read `LEGACY_ENDPOINT_COUNT > 0 || !existsSync(…)` — "delete the module once the
+ * surface is gone". The surface IS gone, the module IS deleted, and the escape hatch that made
+ * the assertion conditional is exactly what must not come back: re-adding a row to a
+ * resurrected map would silence it again. Pinned flat.
+ *
+ * `legacy-audit` served `GET /api/v1/audit/legacy`, a read of jovi-mall's `admin_action_log`
+ * from this service. The COLLECTION survives cutover and its historical rows stay in Mongo —
+ * `AuditLogger` still routes `role: 'admin'` entries there and `AdminAgencyService` reaches it
+ * over the internal mount (Phase 5 C-10, D-7). What was deleted is this service's read of it,
+ * because after cutover every new row duplicates a wi-admin audit row for the same operation
+ * (D-8).
+ */
+t.assert('the legacy-audit module is deleted', () =>
+    !existsSync(join(SRC, 'modules', 'legacy-audit')));
+
+/**
+ * The deletion has to be complete, not merely unmounted. A surviving import of either symbol
+ * would not compile — but a surviving *file* under `src/` that reconstructs the checklist
+ * would, and would read as live policy. Scan for the names rather than trusting `tsc`.
+ */
+t.assert('nothing under src/ references the legacy map or its constants', () => {
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+        for (const entry of readdirSync(dir)) {
+            const full = join(dir, entry);
+            if (statSync(full).isDirectory()) { walk(full); continue; }
+            if (!entry.endsWith('.ts')) continue;
+            const code = stripComments(readFileSync(full, 'utf8'));
+            if (/LEGACY_ENDPOINT_(COUNT|MAP)|legacy-endpoint-map|legacy-audit/.test(code)) {
+                offenders.push(full.replace(SRC, 'src'));
+            }
+        }
+    };
+    walk(SRC);
+    if (offenders.length > 0) console.error(`      offenders: ${offenders.join(', ')}`);
+    return offenders.length === 0;
 });
 
 /**
- * The eighteen ticket rows are PORTED (Phase 17) and gone from the checklist.
- *
- * This assertion used to read "the ticket router contributes 18 rows, not 19" — a count
- * pinned against `PHASE-0-DISCOVERY.md:48`, which said 19 while the router declared 18. That
- * was the right check while the rows existed, and it became a check that memorised the
- * pre-port state the moment they were ported: it failed for the success. Restated in the
- * `gone from the checklist` form the COD rows already use, which is the form that stays true.
+ * The feature flag and the error code went with the module, and both would otherwise be dead
+ * config that reads as live policy — `feature-flag.catalog.ts`'s own header refuses to carry a
+ * flag whose consumer file does not exist, and a catalogued error code no route can raise is a
+ * promise to a client that nothing keeps.
  */
-t.assert('the eighteen ticket rows are gone from the checklist', () =>
-    !LEGACY_ENDPOINT_MAP.some((row) => row.path.startsWith('/api/admin/tickets')));
+t.assert('`audit.legacy_feed` is gone from the feature-flag catalog', () =>
+    !Object.keys(FEATURE_FLAG_CATALOG).includes('audit.legacy_feed'));
 
-t.assert('every mapped permission is granted to some tier', () =>
-    LEGACY_ENDPOINT_MAP.every((row) =>
-        row.permission === null || grantedTo(1).has(row.permission as PermissionName)));
-
-t.assert('the five COD rows ported in Phase 4 are gone from the checklist', () =>
-    !LEGACY_ENDPOINT_MAP.some((row) => row.path.startsWith('/api/admin/cod/remittances'))
-    && !LEGACY_ENDPOINT_MAP.some((row) => row.path === '/api/admin/cod/deposits/:id/confirm'));
+t.assert('`AUDIT_LEGACY_FEED_DISABLED` is gone from the error registry', () =>
+    !Object.keys(ERROR_CODES).includes('AUDIT_LEGACY_FEED_DISABLED'));
 
 /**
- * The two self-profile rows were the only `null`-permission entries, and Phase 17 deleted
- * them — their targets (`GET`/`PATCH /administrators/me`) have existed since Phase 2 as
- * `selfService` routes, which is exactly what `permission: null` meant.
+ * ── The `customers` family is gone too (ADR-017 D-1, Part D step D.1) ────────
  *
- * This assertion used to read "only the two self-profile routes map to no permission" and
- * pinned the count at 2, so it FAILED when the stale rows were removed — the check was
- * enforcing the drift rather than catching it. Pinned at 0 now: a `null` reappearing means
- * somebody added an unported self-service row, which is legal (the type keeps `null` for
- * exactly that) but should be a deliberate edit here rather than a silent one there.
+ * `customers.read` and `customers.suspend` were the only pair on the unbuilt list that was
+ * GRANTED while backing no route — tier 2 by `allInFamily('customers')`, tier 3 `customers.read`
+ * by name. A granted permission with no endpoint shows up in an administrator's effective set
+ * and in the dashboard's permission screen, promising a surface that does not exist.
+ *
+ * Asserted here rather than trusted, because re-adding either name is a one-line edit and both
+ * halves matter: the names, and the family that would let `allInFamily` sweep them back in.
  */
-t.assert('no legacy row maps to a null permission', () =>
-    LEGACY_ENDPOINT_MAP.filter((row) => row.permission === null).length === 0);
+t.assert('neither customers.* permission is catalogued', () =>
+    !PERMISSION_NAMES.includes('customers.read' as PermissionName)
+    && !PERMISSION_NAMES.includes('customers.suspend' as PermissionName));
 
+t.assert('`customers` is gone from PERMISSION_FAMILIES', () =>
+    !(PERMISSION_FAMILIES as readonly string[]).includes('customers'));
+
+t.assert('no tier grants anything under `customers.`', () =>
+    ([1, 2, 3] as const).every((tier) =>
+        !TIER_GRANTS[tier].some((name) => String(name).startsWith('customers.'))));
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('10. Error codes');
 

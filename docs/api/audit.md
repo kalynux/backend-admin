@@ -18,7 +18,6 @@ Design records: [`../ADR-006-AUDIT.md`](../ADR-006-AUDIT.md),
 | `GET` | `/audit/exports` | `audit.export` | — |
 | `GET` | `/audit/exports/:exportId` | `audit.export` | — |
 | `GET` | `/audit/exports/:exportId/download` | `audit.export` | — |
-| `GET` | `/audit/legacy` | `audit.read` | — |
 
 Two other endpoints serve the same collection, filtered to one administrator:
 `GET /administrators/:adminId/activity` (what they **did**) and
@@ -437,128 +436,40 @@ These **do** use the JSON envelope.
 
 ---
 
-# `GET /audit/legacy` — the interim platform feed
+# `GET /audit/legacy` — **DELETED at Phase 5 Part D**
 
-Administrative actions still performed **on jovi-mall** rather than through this service.
+This route served the interim feed of administrative actions still performed **on jovi-mall**
+rather than through this service: a second router on the `/audit` prefix, reading
+`admin_action_log` in the platform database with a vocabulary of its own.
 
-A second router on the `/audit` prefix, deliberately: it answers the same question but reads a
-different database with a different vocabulary, and **the whole module is deleted at cutover**.
+It was built to be deleted, and the deletion was **enforced rather than remembered**.
+`test-authz.ts` carried a tripwire reading *"the legacy-audit module is deleted once the legacy
+surface is"* — the moment Phase 5 Part C ported the last legacy endpoint and
+`LEGACY_ENDPOINT_COUNT` reached 0, the suite went red and stayed red until the module was gone.
 
-| | |
-|---|---|
-| **Method / Path** | `GET /api/v1/audit/legacy` |
-| **Permission** | `audit.read` — and the same Support narrowing is reproduced here. Without it this endpoint would be a side door onto exactly what the real feed withholds |
-| **Pagination** | `page`, `limit` |
-| **Sorting** | None offered |
-| **Feature flag** | `audit.legacy_feed`, **on by default**. When off the route answers `404 AUDIT_LEGACY_FEED_DISABLED` so it can be retired ahead of deleting the module |
+## What a client should do
 
-> ### The legacy feed is **list-only, by design**
->
-> There is no `GET /audit/legacy/:id`, and there will not be one. Recorded here because the
-> absence otherwise reads as an omission next to `GET /audit/:auditId`, which does exist.
->
-> Three reasons, and the first is the strongest: **a legacy row already carries everything the
-> writer stored.** Unlike an `AuditEntryDto` — whose detail route adds `payload`, `before`,
-> `after` and `stateTruncated`, four fields the list deliberately omits — the shape below is
-> the whole record. A detail route would return the row you already have.
->
-> What it would add is addressability, which is real but small, against a module that is
-> **deleted at cutover**: `meta.unportedEndpoints` counts down to zero, and when it reaches it
-> this feed and the shim behind it go. A route added now is surface whose only future is that
-> deletion list.
->
-> Clients should expand the row they are holding.
+Nothing calls this any more, and nothing should. It answers **404** like any unknown path — the
+`AUDIT_LEGACY_FEED_DISABLED` code that used to mean *"the feed is switched off by its flag"* is
+deleted too, along with the flag.
 
-### Query parameters
+The dashboard's log screen reads `GET /audit`, which is the compliance record and always was.
+The legacy feed was never that: every page it returned carried `"legacy": true` and
+`"retiresAtCutover": true` precisely so a dashboard could not render it as the audit trail by
+omission.
 
-Narrower than the real feed's on purpose.
+## Where the history went — nowhere
 
-| Parameter | Type | Notes |
-|---|---|---|
-| `actorUserId` | string, exactly 24 characters | A jovi-mall `users` id |
-| `action` | string, 1–100 | **Free text, not an enum** — jovi-mall's verbs (`DELIVERY_AGENCY_DEACTIVATED`) are its own vocabulary |
-| `resourceType` | string, 1–60 | |
-| `source` | `"request"` \| `"service"` | |
-| `from` / `to` | date | Coerced leniently here, unlike the strict instants elsewhere |
-| `page`, `limit` | integer | |
+**The rows are still in Mongo.** `admin_action_log` survives cutover and is still written:
+`AuditLogger` routes any entry whose actor role is `admin` into it, and `AdminAgencyService`
+reaches it over `/api/internal/admin/agencies`. What was deleted is *this service's read* of it.
 
-**There is no `search` parameter**, deliberately — every field worth filtering on is an exact
-match, and not offering a text search removes a query-composition trap rather than defusing it.
+The reason is that after cutover the collection stops being a distinct record. Every new row in
+it duplicates a wi-admin audit row for the same operation, written with a real administrator
+identity, the same correlation id and a catalogued action — so the feed would report the same
+events twice in two vocabularies, one of them worse. If the historical rows are ever needed,
+they are reachable through the developer tools.
 
-### Response (200)
-
-```jsonc
-{
-  "success": true,
-  "data": [
-    {
-      "id": "66b0aabbccddeeff00112233",
-      "occurredAt": "2026-08-10T11:03:52.640Z",
-      "correlationId": "c1d2e3f4-…",
-      "source": "jovi-mall-legacy",
-      "kind": "service",
-      "actor": {
-        "kind": "platform_admin",
-        "label": "Legacy admin session (jovi-mall)",
-        "userId": "6641aabbccddeeff00112233",
-        "role": "admin",
-        "name": "Jean Kamdem",
-        "ip": "41.202.219.90",
-        "userAgent": "Mozilla/5.0 …"
-      },
-      "request": { "method": "POST", "path": "/api/admin/agencies/665c…/deactivate",
-                   "statusCode": 200, "durationMs": 412 },
-      "action": "DELIVERY_AGENCY_DEACTIVATED",
-      "resource": { "type": "delivery_agency", "id": "665c0011223344556677889a" },
-      "params": { "agencyId": "665c0011223344556677889a" },
-      "query": null,
-      "bodyKeys": ["reason"],
-      "changes": { "status": { "from": "active", "to": "inactive" } }
-    }
-  ],
-  "meta": {
-    "total": 218,
-    "page": 1,
-    "limit": 20,
-    "pages": 11,
-    "legacy": true,
-    "sourceService": "jovi-mall",
-    "retiresAtCutover": true,
-    "unportedEndpoints": 37
-  }
-}
-```
-
-### What is different about these rows
-
-- **The shape is not `AuditEntryDto`.** A legacy row has no catalogued action, no
-  `subjectClass` and no `sensitive` flag, because jovi-mall's middleware knows none of this
-  service's vocabulary. Forcing it into the real DTO would mean lying or filling nulls.
-- **`actor.kind: "platform_admin"` is *not* a wi-admin administrator.** Those are two identity
-  spaces: a wi-admin administrator holds no jovi-mall `users` row at all, and no mapping between
-  them exists. `actor.label` is rendered server-side precisely so a client cannot accidentally
-  present the row as a wi-admin administrator's action.
-- **`kind: "request"`** rows are the coarse per-request record — `action`, `resource` and
-  `changes` are `null`, because the middleware records what was called, not what it meant.
-  **`kind: "service"`** rows name a specific action.
-- **`bodyKeys` is key names only.** jovi-mall never stores request-body values.
-- **`params` and `query` come from the URL**, never from a body.
-
-### Extra `meta` fields
-
-Every page says what this feed *is*, so a dashboard cannot render it as the compliance record
-by omission:
-
-| Field | Notes |
-|---|---|
-| `legacy` | Always `true` |
-| `sourceService` | Always `"jovi-mall"` |
-| `retiresAtCutover` | Always `true` |
-| `unportedEndpoints` | How much legacy surface remains. **When it reaches 0, this feed and the shim behind it are deleted** |
-
-### Errors
-
-| Status | Code | When |
-|---|---|---|
-| 400 | `VALIDATION_ERROR` | |
-| 404 | `AUDIT_LEGACY_FEED_DISABLED` | The `audit.legacy_feed` flag is off. A 404 so the route can pretend not to exist |
+Design records: [ADR-017](../ADR-017-PHASE-17-CLOSEOUT.md) D-8 (the deletion) and
+[Phase 5 § C-10](../../../PRODUCTION-READINESS/PHASE-5-LEGACY-CLOSEOUT-PLAN.md) (why the
+collection itself must not be deleted with it).

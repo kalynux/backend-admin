@@ -90,7 +90,7 @@ import { subjectClassOf } from '../../src/modules/audit/domain/audit-subject';
 import { PERMISSION_CATALOG, permissionSpec } from '../../src/modules/authorization/domain/permission.catalog';
 import { isSensitive } from '../../src/modules/authorization/domain/permission.types';
 import { TIER_GRANTS } from '../../src/modules/authorization/domain/tier-grants';
-import { LEGACY_ENDPOINT_MAP } from '../../src/modules/authorization/domain/legacy-endpoint-map';
+// The legacy endpoint map was imported here and is DELETED (Phase 5 Part D).
 import { dualControlHandlerFor } from '../../src/modules/dual-control/domain/dual-control.registry';
 import { routeManifest } from '../../src/api/route-manifest';
 import '../../src/modules/money/routes/money.routes';
@@ -1167,12 +1167,9 @@ t.assert('money.payouts.destination.read is financial, and refused to tier 3', (
     PERMISSION_CATALOG['money.payouts.destination.read'].financial === true
     && !TIER_GRANTS[3].includes('money.payouts.destination.read'));
 
-t.assert('no money row is left in the legacy endpoint map', () =>
-    !LEGACY_ENDPOINT_MAP.some(
-        (row) => String(row.permission ?? '').startsWith('money.')
-            || row.path.includes('/payout-requests')
-            || row.path.includes('/earnings'),
-    ));
+// `no money row is left in the legacy endpoint map` stood here. Phase 5 Part D deleted the
+// map, so the check would now pass by having nothing to read. The surviving fact is asserted
+// once in `test-authz.ts` § 9; § 10 below is what guards this domain, by reading the manifest.
 
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('10. The route manifest');

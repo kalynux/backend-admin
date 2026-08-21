@@ -225,9 +225,15 @@ the same worker in both processes would double-execute sweeps against one databa
 R1 says no admin endpoints remain. Three things need an explicit ruling:
 
 1. `POST /api/internal/agents/*` — service-token API consumed by **geo-tracker**. Not admin; stays.
+   *Stands.*
 2. `POST /api/webhooks/telegram/send` — currently `requireRole(['admin'])`. Moves to `admin`.
+   *Still open — Phase 5 Part C.*
 3. `GET /api/files/orphans`, `DELETE /api/files/:id/permanent` — admin-gated inline. Move to `admin`;
    the rest of `/api/files` stays in jovi-mall for the other roles.
+   ✅ *Done 2026-08-20, Phase 5 Part B.* Both moved onto `/api/internal/admin/files` behind
+   `requireAdminCaller` and are served here at `/api/v1/files/{orphans,:fileId/permanent}`. The
+   handlers did not move — only the door — and the rest of `/api/files` stayed exactly as this
+   ruling said it should.
 
 ---
 
@@ -272,10 +278,23 @@ R1 says no admin endpoints remain. Three things need an explicit ruling:
 | **5** | Port all 82 endpoints | Full parity |
 | **6** | The 9 empty domains | Real admin coverage |
 | **7** | Ops: notifications, system info, worker visibility, outbox inspection, dev tools | — |
-| **8** | `admin/api-doc/` + **cutover**: delete jovi-mall's admin surface | Dashboard runs against `admin` alone |
+| **8** ✅ | `admin/api-doc/` + **cutover**: delete jovi-mall's admin surface | ✅ **DONE 2026-08-20**, pulled forward and executed as **Phase 5 Part E** of `PRODUCTION-READINESS/PHASE-5-LEGACY-CLOSEOUT-PLAN.md` ([ADR-017](./ADR-017-PHASE-17-CLOSEOUT.md) D-2). Zero live `requireRole(['admin'])` sites, zero public `/api/admin/*` mounts |
 
-Big-bang cutover happens at Phase 8. Until then jovi-mall keeps serving its admin endpoints so the
-platform stays operable — the dashboard simply never points at them.
+Big-bang cutover was planned for Phase 8 and **happened at Phase 5 Part E**, once the port reached
+0 unrouted legacy endpoints. Until then jovi-mall kept serving its admin endpoints so the platform
+stayed operable — the dashboard simply never pointed at them.
+
+Two things about how it actually went, worth keeping:
+
+- **It was subtractive, not a migration.** Every admin router had been a factory taking its guard
+  chain as a parameter since Phase 4, mounted once publicly and once internally. The cutover
+  deleted the `'public'` instantiation and its default export from seven files, and nine
+  `router.use` lines from `api/index.ts`. No route handler changed.
+- **The security half was one three-line guard, and it was not in the mounts.**
+  `rotateRefreshToken` in jovi-mall copied the role out of the presented token without filtering
+  it, so a refresh token minted before the cutover kept producing `role: 'admin'` access tokens
+  for 30 days. The mounts were hygiene; that was the hole. A ledgered migration
+  (`migrate:retire-admin-role`) removed the rows it protected against in the same change.
 
 ---
 

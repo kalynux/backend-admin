@@ -70,7 +70,7 @@ export const DEFAULT_MESSAGES: Partial<Record<ErrorCode, string>> = {
         'The wi-admin database does not support transactions, so administrator actions cannot be audited atomically',
     [ERROR_CODES.AUDIT_CATALOG_INVALID]: 'The audit action registry is inconsistent',
     [ERROR_CODES.AUDIT_COVERAGE_INCOMPLETE]: 'An action would go unrecorded, or a recorded action has no producer',
-    [ERROR_CODES.AUDIT_LEGACY_FEED_DISABLED]: 'The legacy admin-action feed is switched off',
+    // `AUDIT_LEGACY_FEED_DISABLED` rendered here. Gone at Phase 5 Part D — see `error-codes.ts`.
     [ERROR_CODES.SYSTEM_CONFIG_EXPOSURE_UNSAFE]: 'The exposed configuration list names a secret',
     [ERROR_CODES.SYSTEM_FEATURE_FLAG_CATALOG_INVALID]: 'The feature flag registry is inconsistent',
     [ERROR_CODES.DEV_TOOLS_DISABLED]: 'Developer tools are switched off',
@@ -132,6 +132,19 @@ export const DEFAULT_MESSAGES: Partial<Record<ErrorCode, string>> = {
     [ERROR_CODES.TICKET_NOT_FOUND]: 'No support ticket with this id',
     [ERROR_CODES.TICKET_ALREADY_ASSIGNED]: 'This ticket is already held by an administrator',
     [ERROR_CODES.FILE_NOT_FOUND]: 'This file no longer exists',
+    [ERROR_CODES.FILE_DELETE_NOT_CONFIRMED]:
+        'Repeat the file id in the request body to confirm this permanent delete',
+    [ERROR_CODES.BLOG_ARTICLE_NOT_FOUND]: 'No article with this id',
+    [ERROR_CODES.BLOG_ARTICLE_KEY_TAKEN]: 'An article already uses this id',
+    [ERROR_CODES.BLOG_ARTICLE_NOT_PUBLISHABLE]: 'This article is not ready to publish',
+    [ERROR_CODES.BLOG_ARTICLE_ALREADY_PUBLISHED]: 'This article is already published',
+    [ERROR_CODES.BLOG_ARTICLE_DELETE_NOT_ALLOWED]:
+        'This article has been published before, so it cannot be deleted — archive it instead',
+    [ERROR_CODES.BLOG_SLUG_TAKEN]: 'Another article already answers to this slug in that language',
+    [ERROR_CODES.BLOG_SLUG_RESERVED]: 'That slug is reserved and would collide with a route',
+    [ERROR_CODES.BLOG_AUTHOR_NOT_FOUND]: 'No article author with this id',
+    [ERROR_CODES.BLOG_AUTHOR_KEY_TAKEN]: 'An article author already uses this id',
+    [ERROR_CODES.BLOG_AUTHOR_IN_USE]: 'Articles still credit this byline, so it cannot be removed',
     [ERROR_CODES.USER_CHANNEL_UNAVAILABLE]: 'This person has no address on that channel',
     [ERROR_CODES.USER_CREDENTIAL_LINK_THROTTLED]: 'Too many links have been sent recently — try again shortly',
     [ERROR_CODES.USER_LOGIN_LINK_ROLE_UNSUPPORTED]: 'A sign-in link is only available for customers',

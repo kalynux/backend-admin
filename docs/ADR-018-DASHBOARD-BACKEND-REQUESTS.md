@@ -216,8 +216,19 @@ logo, banner and delivery proof on the admin surface rendered as a placeholder (
 `files.resolve` is granted to **every tier**, including Support, because it discloses nothing new:
 the caller already holds the id, which means they already passed the guard on the record carrying
 it. What keeps it narrow is the shape, not the tier — **it takes an explicit id set and has no
-listing form, and must not grow one.** `files.orphans.read` is the listing and stays tier-1-only
-and unmounted.
+listing form, and must not grow one.**
+
+> ⚠️ **The last sentence of this paragraph was superseded on 2026-08-20, in both halves.** It read:
+> *"`files.orphans.read` is the listing and stays tier-1-only and unmounted."*
+>
+> Phase 5 Part B **mounted** it (`GET /api/v1/files/orphans`), and it was never tier-1-only —
+> `allInFamily('files')` has always swept it into tier 2, so the grant table disagreed with this
+> sentence on the day it was written. See `ADR-017-PHASE-17-CLOSEOUT.md` § Correction.
+>
+> **What the paragraph above still gets right is the part that matters**, and Part B did not touch
+> it: `files.resolve` takes an explicit id set, has no listing form, and must not grow one. The
+> listing is a *separate permission* on a *separate route* — which is precisely why mounting it
+> costs the every-tier grant nothing.
 
 ### D-6 · The five casing leaks are fixed, and the vendor's terms are projected
 

@@ -56,20 +56,29 @@ import { auditRoutes } from '../modules/audit/routes/audit.routes';
 apiV1.use('/audit', auditRoutes);
 
 /**
- * The interim feed of administrative actions still performed ON jovi-mall (Phase 12).
+ * ── `GET /audit/legacy` was here, and it is GONE (Phase 5 Part D) ────────────
  *
- * A SECOND router on `/audit`, which is the one place this service knowingly breaks its own
- * "one mount per prefix" rule — and it is safe here for the reason that rule exists: neither
- * router attaches a prefix-wide `router.use` guard, so nothing is re-resolved, and the paths
- * cannot collide (`/legacy` is a literal at a depth `/:auditId` does not reach).
+ * A second router on `/audit` served the interim feed of administrative actions still
+ * performed ON jovi-mall — the one place this service knowingly broke its own "one mount per
+ * prefix" rule, and safely, because neither router attached a prefix-wide guard and `/legacy`
+ * is a literal at a depth `/:auditId` never reaches.
  *
- * Separate rather than merged into `auditRoutes` because the whole module is deleted at
- * cutover, and a deletion that is one `rm -r` plus one line beats untangling a shared file.
+ * It was built to be deleted, and `test-authz.ts` enforced that rather than trusting it:
+ * `LEGACY_ENDPOINT_COUNT` reaching 0 turned the suite red until `src/modules/legacy-audit/`
+ * was gone. That is the assertion that fired, and this is the deletion that answered it.
  *
- * ⚠️ Deleted when `LEGACY_ENDPOINT_COUNT` reaches 0 — `test-authz.ts` asserts that.
+ * **The jovi-mall rows it read are still in Mongo and are not orphaned reading.** They live
+ * in `admin_action_log` in the platform database, which survives cutover — `AuditLogger`
+ * still routes any entry whose actor role is `admin` there, and `AdminAgencyService`
+ * reaches it over `/api/internal/admin/agencies` (Phase 5 C-10). What went is this
+ * service's READ of them, because after cutover every new row duplicates a wi-admin audit
+ * row for the same operation, written with a real administrator identity and the same
+ * correlation id (D-8). If the history is ever wanted, dev-tools reaches the collection.
+ *
+ * The `audit.legacy_feed` feature flag and the `AUDIT_LEGACY_FEED_DISABLED` error code went
+ * with it: a flag whose consumer file no longer exists is precisely the dead config
+ * `feature-flag.catalog.ts`'s own header refuses to carry.
  */
-import { legacyAuditRoutes } from '../modules/legacy-audit/routes/legacy-audit.routes';
-apiV1.use('/audit', legacyAuditRoutes);
 
 // ── Platform domains (Phase 4) — the two access paths, one example of each ────
 //
@@ -127,6 +136,22 @@ apiV1.use('/agencies', agencyRoutes);
  */
 import { supportTicketRoutes } from '../modules/support/routes/ticket.routes';
 apiV1.use('/support/tickets', supportTicketRoutes);
+
+/**
+ * Content (Phase 5 Part A) — the editor behind the public blog, and **the one mount on this
+ * service whose writes are not delegated**.
+ *
+ * Ownership of `articles` and `article_authors` moved here (ADR-004 D-4): jovi-mall's blog
+ * services had no non-admin caller and published no in-process events, which is precisely
+ * what tickets lack. Its own `/api/admin/articles` and `/api/admin/article-authors` mounts
+ * are deleted in the same change, and its public reader is untouched.
+ *
+ * ⚠ Ownership did not buy a transaction. `connections.ts` opens two MongoClients, so these
+ * writes are audited `transport: 'external'` — intent → outcome — exactly as a delegated
+ * family is. See `modules/content/gateways/content.audit.ts`.
+ */
+import { contentRoutes } from '../modules/content/routes/content.routes';
+apiV1.use('/content', contentRoutes);
 
 import { agentRoutes } from '../modules/agents/routes/agent.routes';
 apiV1.use('/agents', agentRoutes);
@@ -291,19 +316,40 @@ import notificationRoutes from '../modules/notifications/routes/notification.rou
 apiV1.use('/notifications', notificationRoutes);
 
 /**
- * Files — one operation, and it exists because an id cannot become a picture on this side.
+ * Files — three routes now, answering two different questions.
  *
- * Every DTO here ships `logoFileId` / `avatarFileId` / `bannerFileId` /
+ * `GET /files` and `GET /files/:fileId` exist because an id cannot become a picture on this
+ * side. Every DTO here ships `logoFileId` / `avatarFileId` / `bannerFileId` /
  * `deliveryProofFileId` as opaque ids, and the contract explains why (ADR-009 D-6: no
- * storage layer here, ever). What it did not provide was anywhere for the dashboard to
- * take one, since the dashboard talks to this service alone. Delegated, so
- * `STORAGE_PROVIDER` stays configured in one place.
+ * storage layer here, ever). What it did not provide was anywhere for the dashboard to take
+ * one, since the dashboard talks to this service alone. Delegated, so `STORAGE_PROVIDER`
+ * stays configured in one place.
  *
- * ⚠ It resolves; it does not enumerate. `files.orphans.read` is the listing and is not
- * mounted here.
+ * ⚠ **`files.resolve` resolves and cannot enumerate — and `/orphans` IS a listing.** Those
+ * two sentences belong together now that the mount carries both shapes, and the distinction
+ * between them is what makes the first safe to grant to every tier. This note used to read
+ * "`files.orphans.read` is the listing and is not mounted here"; Phase 5 Part B mounted it,
+ * along with the hard delete. The sharper rule that replaces it: **a listing on this mount
+ * needs its own permission and its own tier**, and this one has both.
  */
 import { fileRoutes } from '../modules/files/routes/file.routes';
 apiV1.use('/files', fileRoutes);
+
+/**
+ * Messaging (Phase 5 Part C) — one route, and the one that empties the legacy map.
+ *
+ * `POST /api/webhooks/telegram/send` was the last legacy admin endpoint anywhere and the
+ * last of three living outside `/api/admin` on public-looking prefixes. Delegated for the
+ * ordinary reason: sending needs `TELEGRAM_BOT_TOKEN` and the `channel_connections`
+ * collection, both of which are jovi-mall's, and a bot token in a second deployment is the
+ * duplication ADR-009 D-6 keeps this service out of.
+ *
+ * ⚠ The family was `broadcast` and is now `messaging` (Phase 5 D-11). Nothing here fans
+ * out — one message, one recipient, no delivery record — and the old name invited the tier
+ * discussion to be had about a capability that does not exist.
+ */
+import { messagingRoutes } from '../modules/messaging/routes/messaging.routes';
+apiV1.use('/messaging', messagingRoutes);
 
 /**
  * Contracts — one agent↔agency relationship, by its own id.

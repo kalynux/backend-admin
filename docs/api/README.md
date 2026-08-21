@@ -21,7 +21,7 @@ the dashboard's behalf and returns the result in its own envelope.
 | [auth.md](auth.md) | `/auth` — login, MFA, refresh, sessions, own password |
 | [administrators.md](administrators.md) | `/administrators` — administrator management, levels, suspension, sessions |
 | [authorization.md](authorization.md) | `/permissions`, `/approvals` — the policy, and the four-eyes queue |
-| [audit.md](audit.md) | `/audit` — the audit trail, exports, and the legacy platform feed |
+| [audit.md](audit.md) | `/audit` — the audit trail and exports |
 | [users.md](users.md) | `/users` — platform user directory, suspension, login identifiers |
 | [vendors.md](vendors.md) | `/vendors` — vendor directory, KYC, catalogue, suspension, settings |
 | [agencies.md](agencies.md) | `/agencies` — delivery agencies, verification, rosters, contracts |
@@ -36,10 +36,17 @@ the dashboard's behalf and returns the result in its own envelope.
 | [accounts.md](accounts.md) | `/accounts` — one party's status, balances, activity, payouts, credits, cash ledger |
 | [system.md](system.md) | `/system` — health, dependencies, workers, queues, metrics, config, error journal |
 | [dev-tools.md](dev-tools.md) | `/dev-tools` — feature flags, worker triggers, outbox replay, maintenance mode |
+| [content.md](content.md) | `/content` — the marketing blog: article drafts, translations, the publish lifecycle, bylines |
 | [notifications.md](notifications.md) | `/notifications` — the administrator inbox and preferences |
-| [files.md](files.md) | `/files` — turning a `*FileId` this service returns into a name, a type and a URL |
+| [files.md](files.md) | `/files` — resolving a `*FileId` into a name, a type and a URL, plus the orphan listing and the permanent delete |
+| [messaging.md](messaging.md) | `/messaging` — one Telegram message to one connected account. Not a broadcast |
 
-**209 versioned endpoints** across 21 route groups, plus 2 unversioned health probes.
+**225 versioned endpoints** across 23 route groups, plus 2 unversioned health probes.
+
+Counted from a live `createApp()` boot, not from this table. It fell by one at Phase 5 Part D:
+`GET /audit/legacy` — the interim feed of administrative actions still performed ON jovi-mall —
+was deleted with the legacy surface it reported on. The route group count is unchanged because
+that feed was a **second** router on `/audit`, beside the real one.
 
 ---
 

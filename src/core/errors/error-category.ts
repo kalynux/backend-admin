@@ -109,10 +109,9 @@ export const CATEGORY_OVERRIDES: Partial<Record<ErrorCode, CategoryOverride>> = 
             'A 409 chosen because the caller HOLDS the permission and the service is refusing right now. '
             + 'Nothing changed underneath them, so conflict would send them looking for a race that is not there',
     },
-    [ERROR_CODES.AUDIT_LEGACY_FEED_DISABLED]: {
-        category: ERROR_CATEGORIES.BUSINESS_RULE,
-        reason: 'A 404 so the route can pretend not to exist, but the feed is switched off by a flag — a decision',
-    },
+    // `AUDIT_LEGACY_FEED_DISABLED` was classified here. Deleted at Phase 5 Part D with the
+    // route that raised it and the flag that turned it on — a catalogued code no route can
+    // ever answer is a promise to a client that nothing keeps.
 
     // ── Config faults raised at boot ─────────────────────────────────────────
     // These never reach a client (the process exits first), but they are journaled, and an

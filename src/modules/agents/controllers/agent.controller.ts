@@ -339,6 +339,21 @@ function toAgentDetailDto(agent: AgentReadModel) {
                   codCleanReturnCount: agent.trust_signals.cod_clean_return_count ?? null,
                   codDiscrepancyCount: agent.trust_signals.cod_discrepancy_count ?? null,
                   codVolumeReturned: agent.trust_signals.cod_volume_returned ?? null,
+                  /**
+                   * ⚠ **The SHADOW score, not the live one.** `trustScore` above is
+                   * `cod.trust_score` — the number that actually sets this agent's COD
+                   * cash limit. This is jovi-mall's nightly composite of the signals
+                   * beside it, computed and stored but acting on nothing (that repo's
+                   * Phase 6 D-2).
+                   *
+                   * It is surfaced *because* it differs: the decision to make the
+                   * composite live is taken by comparing the two across the roster, and
+                   * a number nobody can see cannot be compared. Do not render it as an
+                   * agent's trust score, and do not sort or filter a dispatch view on it.
+                   *
+                   * `null` until the nightly recompute has visited that agent.
+                   */
+                  compositeScore: agent.trust_signals.composite_score ?? null,
                   computedAt: toIso(agent.trust_signals.computed_at),
               }
             : null,

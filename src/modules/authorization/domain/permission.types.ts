@@ -41,11 +41,15 @@ export type PermissionFamily =
     | 'support'
     | 'content'
     | 'files'
-    | 'broadcast'
+    | 'messaging'
     // Domains with no admin surface today (built at Phase 6)
     | 'users'
     | 'vendors'
-    | 'customers'
+    // `customers` was here and is DELETED (Phase 5 Part D, ADR-017 D-1). Its two permissions
+    // were granted and backed no route, and the `users` family already covers customers
+    // role-agnostically. A family must hold at least one permission (`test-authz.ts` § 1), so
+    // the family could not outlive them — and should not: re-declaring it is how a real
+    // customers surface announces itself.
     | 'shipments'
     | 'administrators'
     | 'notifications'
@@ -58,7 +62,7 @@ export type PermissionFamily =
 
 export const PERMISSION_FAMILIES: readonly PermissionFamily[] = [
     'agents', 'agencies', 'billing', 'cod', 'money', 'orders', 'support', 'content',
-    'files', 'broadcast', 'users', 'vendors', 'customers', 'shipments', 'administrators',
+    'files', 'messaging', 'users', 'vendors', 'shipments', 'administrators',
     'notifications', 'system', 'developer_tools', 'permissions', 'approvals', 'audit',
 ] as const;
 

@@ -56,10 +56,7 @@ import { AUDIT_CATALOG, auditSpec, isAuditAction } from '../../src/modules/audit
 import { subjectClassOf } from '../../src/modules/audit/domain/audit-subject';
 import { permissionSpec } from '../../src/modules/authorization/domain/permission.catalog';
 import { TIER_GRANTS } from '../../src/modules/authorization/domain/tier-grants';
-import {
-    LEGACY_ENDPOINT_COUNT,
-    LEGACY_ENDPOINT_MAP,
-} from '../../src/modules/authorization/domain/legacy-endpoint-map';
+// The legacy endpoint map was imported here. It is DELETED (Phase 5 Part D) — see § 8.
 import { routeManifest } from '../../src/api/route-manifest';
 // Importing the routers registers them into the manifest — the same source the boot
 // assertion reads, so §6 checks what Express will actually serve.
@@ -536,78 +533,30 @@ t.assert('every write body is .strict() — an unknown key is a 400, not a silen
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-t.section('8. The legacy checklist');
+t.section('8. The legacy checklist is GONE');
 
 /**
- * Keyed on the PERMISSION family, not the path — and that is the whole point of the
- * assertion. `/api/admin/agents/:agentId/plan` starts with the same eleven characters as
- * the eleven rows this phase ported and is a BILLING endpoint that must survive. A path
- * prefix cannot tell them apart; the permission can.
- */
-t.assert('no row guarded by an agents.* permission remains', () =>
-    !LEGACY_ENDPOINT_MAP.some((e) => e.permission?.startsWith('agents.')));
-
-t.assert('no row guarded by an agencies.* permission remains', () =>
-    !LEGACY_ENDPOINT_MAP.some((e) => e.permission?.startsWith('agencies.')));
-
-t.assert('...and the paths are gone too, not merely re-pointed', () =>
-    !LEGACY_ENDPOINT_MAP.some((e) => e.path.startsWith('/api/admin/delivery-agencies'))
-    && !LEGACY_ENDPOINT_MAP.some((e) => e.path === '/api/admin/agents/transfer'));
-
-/**
- * The constant agrees with the rows — NOT what the number is.
+ * ── Seven assertions lived here and all seven are deleted, deliberately ──────
  *
- * This used to read `=== 61` and stopped compiling the moment Phase 10 ported orders and
- * shipments, so the whole agents suite was dead for a phase and a half without anyone
- * noticing. Two suites pinning the same absolute number is what made that possible:
- * `test-authz.ts` owns the count (it is the suite about the migration surface), and this
- * one only needs the constant and the table not to disagree.
+ * They read the migration checklist (`legacy-endpoint-map.ts`) and asserted that this
+ * domain's rows had left it: no `agents.*` row, no `agencies.*` row, no `/delivery-agencies`
+ * path, no row in an already-ported family, no agent-shaped path, no duplicates, and the
+ * constant agreeing with the table.
  *
- * Keep it that way. A domain suite asserting a global total is a suite that breaks for
- * reasons that have nothing to do with its domain.
- */
-t.assert('LEGACY_ENDPOINT_COUNT matches the table it counts', () =>
-    LEGACY_ENDPOINT_COUNT === LEGACY_ENDPOINT_MAP.length);
-
-/**
- * The rows that LOOK like this domain's and are not — keyed on PERMISSION FAMILY, which
- * is the whole point.
+ * **Phase 5 Part D deleted the checklist itself.** A row cannot survive in a file that does
+ * not exist, so each of those seven would now pass by having nothing to read — green forever,
+ * catching nothing. That is the `PHASE-17-STATUS.md` § 7 failure in its harder direction: an
+ * assertion that goes vacuously green for the success is as dead as one that goes red for it.
  *
- * `/api/admin/agents/:agentId/plan` and `/api/admin/cod/agents` both match "agents" on
- * their path and belong to billing and cod respectively. Phase 9 had to not delete them;
- * these two assertions were what stopped it, spelled as "these rows still exist".
+ * The surviving fact — **the map is gone and nothing reconstructs it** — is asserted ONCE, in
+ * `test-authz.ts` § 9, which is the suite that owns the migration surface. That division of
+ * labour is this file's own rule, written at the assertion the plan singled out: *"a domain
+ * suite asserting a global total is a suite that breaks for reasons that have nothing to do
+ * with its domain."* The same applies to a global deletion.
  *
- * **Phase 11 has now ported them, so that spelling is spent** — it asserted a fact that
- * was only ever true between two phases, and it failed the moment the right thing
- * happened. Rewritten as the invariant underneath it, which does not expire: a path
- * prefix cannot tell these domains apart, so the sweep must be keyed on the family, and
- * once a family is ported no row may carry it. Re-add a `cod.*` row and this fires.
+ * What still guards this domain is § 6, which reads the route manifest: the agent and agency
+ * routes exist here, declared, permissioned and audited. That was always the assertion that
+ * mattered — the checklist only ever said the work had been *scheduled*.
  */
-const PORTED_FAMILIES = ['agents', 'agencies', 'billing', 'cod', 'money', 'orders', 'shipments'];
-
-t.assert('no row survives in a family that has already been ported', () => {
-    const stragglers = LEGACY_ENDPOINT_MAP.filter((e) =>
-        e.permission !== null && PORTED_FAMILIES.includes(e.permission.split('.')[0]));
-    if (stragglers.length > 0) {
-        console.error(`      stragglers: ${stragglers.map((e) => `${e.method} ${e.path}`).join(', ')}`);
-    }
-    return stragglers.length === 0;
-});
-
-/**
- * The converse, and the half that still catches a real mistake: a path matching this
- * domain must not be left behind under somebody else's permission. Nothing under
- * `/api/admin/agents` or `/api/admin/cod` should remain at all now.
- */
-t.assert('no agent-shaped or COD-shaped path is left in the table', () =>
-    !LEGACY_ENDPOINT_MAP.some((e) =>
-        e.path.startsWith('/api/admin/agents')
-        || e.path.startsWith('/api/admin/cod')
-        || e.path.endsWith('/plan')));
-
-t.assert('no duplicate rows were introduced', () => {
-    const keys = LEGACY_ENDPOINT_MAP.map((e) => `${e.method} ${e.path}`);
-    return new Set(keys).size === keys.length;
-});
 
 process.exit(t.finish());

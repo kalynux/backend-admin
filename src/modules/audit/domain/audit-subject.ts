@@ -34,6 +34,13 @@ const SUBJECT_CLASS: Readonly<Record<AuditTargetType, AuditSubjectClass>> = Obje
     ticket: 'platform_record',
     article: 'platform_record',
     plan: 'platform_record',
+    // An uploaded file belongs to a vendor, agency, agent or customer — platform data,
+    // not this service's machinery, so it classifies with the records rather than with
+    // `internal`. Note this governs who may READ the audit row, which is a separate
+    // question from who may perform the delete: `files.delete` is tier-1-only, and
+    // Support seeing that a file was removed from a case they are working is the point
+    // of the `platform_record` class.
+    file: 'platform_record',
 
     // This service's own machinery. `internal` is the load-bearing value: it is what
     // keeps the administrator directory out of Support's reach through the audit feed,

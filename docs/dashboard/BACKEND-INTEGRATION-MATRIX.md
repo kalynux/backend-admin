@@ -592,11 +592,17 @@ retention is exported-AND-aged).
 `X-Content-SHA256` to verify against. Its errors *do* use the envelope: `409 AUDIT_EXPORT_INCOMPLETE`,
 **`410 AUDIT_EXPORT_FILE_MISSING`** (gap D9 — multi-instance deployment).
 
-**`/audit/legacy` is a different shape entirely** — `LegacyAuditRow`, no catalogued action, no
-`subjectClass`, no `sensitive`. **`actor.kind: "platform_admin"` is *not* a wi-admin
-administrator** — two identity spaces with no mapping. `meta` carries `legacy: true`,
-`sourceService`, `retiresAtCutover`, `unportedEndpoints` — render them so the feed is never mistaken
-for the compliance record. Behind the `audit.legacy_feed` flag; off → `404 AUDIT_LEGACY_FEED_DISABLED`.
+⚠️ **`GET /audit/legacy` IS GONE** — deleted at Phase 5 Part D with the legacy surface it
+reported on, along with its `audit.legacy_feed` flag and the `AUDIT_LEGACY_FEED_DISABLED` code.
+It now 404s like any unknown path. **Remove the call and the `LegacyAuditRow` type**; there is
+no replacement and none is needed — `GET /audit` is the compliance record and always was, which
+is exactly what `meta.legacy: true` and `meta.retiresAtCutover: true` existed to say on every
+page that feed ever returned.
+
+The rows themselves are not lost: `admin_action_log` survives in the platform database. What
+went is this service's read of it, because after cutover every new row there duplicates a
+wi-admin audit row for the same operation, written with a real administrator identity and a
+catalogued action. See [`audit.md`](../../admin/api/audit.md) § `GET /audit/legacy`.
 
 ---
 

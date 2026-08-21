@@ -57,15 +57,22 @@ function union(...sources: readonly (readonly PermissionName[])[]): PermissionNa
 // ─────────────────────────────────────────────────────────────────────────────
 // Tier 3 — Support
 //
-// Ticket work, plus the read-only lookups needed to answer a ticket: who is this
-// customer, what happened to their order, which agent has the shipment. Nothing
-// financial, nothing destructive, no sight of the administrator directory.
+// Ticket work, plus the lookups needed to answer a ticket: who is this customer, what
+// happened to their order, which agent has the shipment. Nothing financial, nothing
+// destructive, no sight of the administrator directory.
+//
+// Those lookups were the whole of it until Phase 5 A.6, which added editorial write on
+// articles and bylines — the one write surface here that is not a ticket. It is still
+// nothing financial and nothing destructive: what it adds is prose, and the decision of
+// what the public sees stays a tier above (`content.articles.publish`).
 // ─────────────────────────────────────────────────────────────────────────────
 const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
 
     // The lookups a support conversation needs. Read-only, every one of them.
+    // `customers.read` sat between these two until Phase 5 Part D deleted it (ADR-017 D-1).
+    // Nothing was lost here: `users.read` answers the same question with `?role=customer`,
+    // and it is the permission the route actually checks.
     'users.read',
-    'customers.read',
     'vendors.read',
     'agents.read',
     'agencies.read',
@@ -120,6 +127,35 @@ const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
      * export is the precondition for deletion, and the boot check refuses it to tier 3.
      */
     'audit.read',
+
+    /**
+     * Editorial work — the one WRITE surface at this tier (Phase 17 D-2, Phase 5 A.6).
+     *
+     * Support may write prose and may not decide what the public sees. Reading and editing
+     * an article or a byline is copy work; `content.articles.publish` is an editorial
+     * decision and `content.articles.delete` / `content.authors.delete` remove a record.
+     * None of those three is here.
+     *
+     * ── Why these are typed out rather than `allInFamily('content')` ──────────
+     * The instinct is that the family form would be safe because `allInFamily()` refuses to
+     * expand anything sensitive, and the two `delete` names are `destructive: true`. It
+     * refuses those two — and it does NOT refuse `content.articles.publish`, which carries
+     * no flag at all. `allInFamily('content')` expands to five names, publish among them,
+     * so the family form would hand Support the one permission D-2 exists to withhold.
+     *
+     * The flag is not the mechanism here. Typing four names is.
+     *
+     * ── Support may edit a PUBLISHED article (O-1) ────────────────────────────
+     * `content.articles.write` is not narrowed to drafts, deliberately. A "write" that
+     * stops at a state boundary is a rule nobody can infer from the permission's name, and
+     * the boundary defends nothing that is not already defended: pulling a live article
+     * down requires `publish`, which Support does not hold. What is left is a Support
+     * administrator fixing a typo in live prose, which is the reason to grant this at all.
+     */
+    'content.articles.read',
+    'content.articles.write',
+    'content.authors.read',
+    'content.authors.write',
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -146,10 +182,11 @@ const ADMIN: readonly PermissionName[] = union(
     allInFamily('orders'),
     allInFamily('content'),
     allInFamily('files'),
-    allInFamily('broadcast'),
+    allInFamily('messaging'),
     allInFamily('users'),
     allInFamily('vendors'),
-    allInFamily('customers'),
+    // `allInFamily('customers')` was here. Deleted with the family at Phase 5 Part D
+    // (ADR-017 D-1) — it was the tier-2 half of a grant that backed no route.
     allInFamily('shipments'),
     allInFamily('notifications'),
     allInFamily('system'),

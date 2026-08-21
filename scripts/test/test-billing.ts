@@ -50,7 +50,7 @@ import { subjectClassOf } from '../../src/modules/audit/domain/audit-subject';
 import { isPermissionName, permissionSpec } from '../../src/modules/authorization/domain/permission.catalog';
 import { TIER_GRANTS } from '../../src/modules/authorization/domain/tier-grants';
 import { isSensitive } from '../../src/modules/authorization/domain/permission.types';
-import { LEGACY_ENDPOINT_MAP } from '../../src/modules/authorization/domain/legacy-endpoint-map';
+// The legacy endpoint map was imported here and is DELETED (Phase 5 Part D).
 import { routeManifest } from '../../src/api/route-manifest';
 import '../../src/modules/billing/routes/billing.routes';
 
@@ -697,9 +697,9 @@ t.assert('the three plan actions target a plan, which is a platform record', () 
 t.assert('create and update are two actions, so a feed distinguishes them', () =>
     auditSpec('billing.plans.create').summary !== auditSpec('billing.plans.update').summary);
 
-t.assert('no billing row is left in the legacy endpoint map', () =>
-    !LEGACY_ENDPOINT_MAP.some(
-        (row) => row.path.includes('/plans') || String(row.permission ?? '').startsWith('billing.'),
-    ));
+// `no billing row is left in the legacy endpoint map` stood here. Phase 5 Part D deleted the
+// map, so the check would now pass by having nothing to read. The surviving fact — the map is
+// gone and nothing reconstructs it — is asserted once in `test-authz.ts` § 9, the suite that
+// owns the migration surface. What guards THIS domain is the route-manifest section above.
 
 process.exit(t.finish());

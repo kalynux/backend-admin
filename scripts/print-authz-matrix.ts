@@ -18,7 +18,8 @@ import { PERMISSION_NAMES, permissionSpec } from '../src/modules/authorization/d
 import { PERMISSION_FAMILIES } from '../src/modules/authorization/domain/permission.types';
 import { grantedTo } from '../src/modules/authorization/domain/permission.resolver';
 import { assertGrantTableValid } from '../src/modules/authorization/domain/tier-grants';
-import { LEGACY_ENDPOINT_MAP } from '../src/modules/authorization/domain/legacy-endpoint-map';
+// `LEGACY_ENDPOINT_MAP` was imported here, to print how much legacy surface was left. It is
+// deleted (Phase 5 Part D) — the answer is permanently none.
 
 function flagsOf(name: (typeof PERMISSION_NAMES)[number]): string {
     const spec = permissionSpec(name);
@@ -40,7 +41,7 @@ function main(): void {
 
     console.log('\n━━━ Authorization matrix ━━━\n');
     console.log(`  ${PERMISSION_NAMES.length} permissions across ${PERMISSION_FAMILIES.length} families`);
-    console.log(`  ${LEGACY_ENDPOINT_MAP.length} legacy endpoints still to port (Phase 5)\n`);
+    console.log('  0 legacy endpoints left to port — the surface was cut over at Phase 5\n');
 
     for (const tier of ADMIN_TIERS) {
         console.log(`  Tier ${tier} — ${ADMIN_TIER_LABELS[tier]}: ${grantedTo(tier).size} permissions`);

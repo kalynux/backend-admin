@@ -5,13 +5,14 @@ import { ERROR_CODES } from '../../../core/errors/error-codes';
 import { sendSuccess } from '../../../core/http/responses';
 import { actorContextOf } from '../../audit/domain/audit-context';
 import * as gateway from '../gateways/file.gateway';
-import { ResolveFilesQuery } from '../validators/file.validator';
+import { HardDeleteFileBody, OrphansQuery, ResolveFilesQuery } from '../validators/file.validator';
 
 /**
- * `/api/v1/files` — turning the ids this service hands out into something renderable.
+ * `/api/v1/files` — turning the ids this service hands out into something renderable, and
+ * the two housekeeping routes that came with Phase 5 Part B.
  *
- * Two routes, one operation. See `gateways/file.gateway.ts` for why the resolution is
- * delegated rather than performed here.
+ * See `gateways/file.gateway.ts` for why every one of them is delegated rather than
+ * performed here.
  */
 export class FileController {
     /**
@@ -53,5 +54,63 @@ export class FileController {
         }
 
         sendSuccess(res, file);
+    });
+
+    /**
+     * GET /api/v1/files/orphans — files no record refers to.
+     *
+     * The one listing on this mount, behind `files.orphans.read` and tier 1 only. It exists
+     * so an operator can judge a file before the unrecoverable delete below, which is why
+     * the row carries the filename and not the storage key (D-10) — see the gateway.
+     *
+     * `meta` is jovi-mall's own count and the cutoff it actually applied, forwarded rather
+     * than recomputed: the default cutoff lives there, so recomputing it here would be a
+     * second copy that can disagree with the rows it describes.
+     */
+    static listOrphans = asyncHandler(async (req: Request, res: Response) => {
+        const { olderThan } = req.query as unknown as OrphansQuery;
+
+        const { files, meta } = await gateway.listOrphans({ olderThan }, actorContextOf(req));
+
+        sendSuccess(res, { files }, { meta: meta ?? undefined });
+    });
+
+    /**
+     * DELETE /api/v1/files/:fileId/permanent — the unrecoverable one.
+     *
+     * ⚠ **The body must repeat the id in the path** (D-9, the `outbox.prune` precedent):
+     * make the operator restate the value that decides the blast radius. A mismatch is a
+     * `400 FILE_DELETE_NOT_CONFIRMED` and nothing is deleted.
+     *
+     * The comparison is here rather than in a schema because `validate` runs `params` and
+     * `body` as two independent schemas — neither can see the other, so no `superRefine`
+     * could express it. Shape in the validator, cross-field rule here.
+     *
+     * The listing is re-read first so the audit row can carry what the file WAS. That is one
+     * extra hop on a rare operation, and it buys the only description of the record that will
+     * exist afterwards; without it the trail holds an id pointing at nothing. It is
+     * deliberately not fatal on its own: a file absent from the orphan listing — because the
+     * window moved, or because it is no longer an orphan — still deletes, and jovi-mall is
+     * the authority on whether it may. The audit payload is simply `null` in that case.
+     */
+    static hardDelete = asyncHandler(async (req: Request, res: Response) => {
+        const { fileId } = req.params;
+        const { confirmFileId } = req.body as HardDeleteFileBody;
+
+        if (confirmFileId !== fileId) {
+            throw createAppError(
+                ERROR_CODES.FILE_DELETE_NOT_CONFIRMED,
+                400,
+                'Repeat the file id from the path in `confirmFileId` to confirm this permanent delete',
+            );
+        }
+
+        const context = actorContextOf(req);
+        const { files } = await gateway.listOrphans({}, context);
+        const before = files.find((file) => file.id === fileId) ?? null;
+
+        await gateway.hardDelete(fileId, before, context);
+
+        sendSuccess(res, { id: fileId, deleted: true });
     });
 }

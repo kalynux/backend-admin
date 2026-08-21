@@ -109,6 +109,7 @@ export interface AgentReadModel extends Document {
         cod_clean_return_count?: number | null;
         cod_discrepancy_count?: number | null;
         cod_volume_returned?: number | null;
+        composite_score?: number | null;
         computed_at?: Date | null;
     };
     vehicle_info?: {
@@ -247,6 +248,7 @@ const AGENT_DETAIL_EXTRAS = {
     'trust_signals.cod_clean_return_count': 1,
     'trust_signals.cod_discrepancy_count': 1,
     'trust_signals.cod_volume_returned': 1,
+    'trust_signals.composite_score': 1,
     'trust_signals.computed_at': 1,
     'home_base.label': 1,
     'home_base.service_radius_km': 1,

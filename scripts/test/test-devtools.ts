@@ -117,9 +117,16 @@ t.assert('the catalog is frozen — a flag cannot be added at runtime', () => {
 t.assert('dev_tools.enabled defaults to OFF', () =>
     featureFlagSpec('dev_tools.enabled').default === false);
 
-t.assert('the audit probe and legacy feed default to ON', () =>
-    featureFlagSpec('audit.route_probe').default === true
-    && featureFlagSpec('audit.legacy_feed').default === true);
+/**
+ * `audit.legacy_feed` was asserted here too, until Phase 5 Part D deleted it with the module
+ * it switched (`GET /api/v1/audit/legacy`). It could not outlive that module: a flag whose
+ * `consumer` names a file that no longer exists is the dead config the catalog's own header
+ * refuses to carry, and § 1's "every consumer looks like a real path" check is what would have
+ * caught it drifting rather than being removed. Its absence is asserted in `test-authz.ts` § 9,
+ * beside the deletion it followed from.
+ */
+t.assert('the audit route probe defaults to ON', () =>
+    featureFlagSpec('audit.route_probe').default === true);
 
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('2. Exposed config — the whitelist, and the assertion behind it');

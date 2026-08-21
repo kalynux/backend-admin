@@ -91,13 +91,20 @@ Rules, in the order they get broken:
 | `/auth` `/administrators` `/permissions` `/approvals` | this service's own identity surface |
 | `/agents` `/agencies` `/users` | the platform's people |
 | `/cod` `/money` `/billing` `/orders` | cash, earnings, payouts, plans, disputes |
-| `/support` `/content` `/files` `/broadcast` | tickets, articles + authors, file admin, Telegram |
+| `/support` `/content` `/files` `/messaging` | tickets, articles + authors, file admin, Telegram |
 | `/system` `/dev-tools` | Phase 7 operations |
 
 Note what this reshapes: jovi-mall's `POST /api/webhooks/telegram/send` is an admin capability living
 on a webhook path, and `GET /api/files/orphans` is an admin route guarded inline in a shared router.
 Both land under their domain here. **Porting is not transcription** — the legacy path is the source,
 the table above is the destination.
+
+> **Amended 2026-08-20 (Phase 5 Part C).** The last row forecast the mount as `/broadcast`;
+> it shipped as **`/messaging`**, and the permission as `messaging.telegram.send`. The
+> forecast named a capability that does not exist — one message to one connected account, no
+> audience and no delivery record — so the name was corrected as part of the port rather than
+> inherited (ADR-017 D-11). Both endpoints this paragraph names are now ported and the legacy
+> map is empty.
 
 ---
 

@@ -438,9 +438,23 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'content', action: 'write', phase: 5,
         summary: 'Publish, unpublish and archive articles — this is what the public sees',
     },
+    /**
+     * ⚠ **A SOFT delete, and only of an article that was never published.**
+     *
+     * The summary said "permanently delete" until Phase 5 Part A, and it was wrong on both
+     * counts: the implementation stamps `deletedAt` and refuses outright once `published_at`
+     * is set (`409 BLOG_ARTICLE_DELETE_NOT_ALLOWED`), because an address that has been live
+     * may have inbound links and a 404 wastes them. The remedy for a published mistake is
+     * `archive`, which keeps the URL answering `410 Gone` with its category hub.
+     *
+     * `destructive: true` stays, and not because the delete is destructive. The flag's
+     * mechanical effect is to keep the name out of `allInFamily()` — which is what withholds
+     * it from Support (Phase 17 D-2), the tier that may write prose and may not decide what
+     * the public sees.
+     */
     'content.articles.delete': {
         family: 'content', action: 'write', phase: 5, destructive: true,
-        summary: 'Permanently delete an article',
+        summary: 'Delete an unpublished article draft — refused once it has ever been published',
     },
     'content.authors.read': {
         family: 'content', action: 'read', phase: 5,
@@ -450,9 +464,16 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'content', action: 'write', phase: 5,
         summary: 'Create and edit article authors',
     },
+    /**
+     * Also a soft delete, and **refused while any article credits the byline**
+     * (`409 BLOG_AUTHOR_IN_USE`, with the count). That refusal is what keeps `author`
+     * non-null on every published article: the public DTO resolves the byline by key, and a
+     * dangling reference would put an article carrying `BlogPosting` structured data on the
+     * site with no author node at all.
+     */
     'content.authors.delete': {
         family: 'content', action: 'write', phase: 5, destructive: true,
-        summary: 'Permanently delete an article author',
+        summary: 'Delete an article byline no article credits',
     },
 
     // ═══ FILES ═══ 2 legacy endpoints, currently guarded inline ═══════════════
@@ -475,26 +496,77 @@ export const PERMISSION_CATALOG = Object.freeze({
      * six would have been a permission nobody could name.
      *
      * ⚠️ What keeps that safe is that it RESOLVES and never ENUMERATES. It takes an
-     * explicit id set and answers about those; there is no listing form and there must
-     * not be one. `files.orphans.read` below is the listing, and it is tier-1-only.
+     * explicit id set and answers about those; there is no listing form on THIS name and
+     * there must not be one. `files.orphans.read` below is the listing, and the point is
+     * that it is a separate name — never that the two are interchangeable.
      */
     'files.resolve': {
         family: 'files', action: 'read', phase: 5,
         summary: 'Resolve file ids returned by this service into names, types and URLs',
     },
+
+    /**
+     * The listing, and the complement of the resolver above: it answers which files
+     * nothing refers to, which is a question no id set can express.
+     *
+     * ⚠️ **Tiers 1 and 2**, not tier 1 alone — this sentence used to say otherwise and the
+     * grant table has always disagreed with it. No flag keeps a read out of
+     * `allInFamily('files')`, and `destructive: true` on `files.delete` is what makes the
+     * DELETE the tier-1-only half. That split is right rather than accidental: an Admin
+     * who can see an orphan and report it, while only a Developer can destroy it, is the
+     * ordinary shape of every other destructive name here.
+     *
+     * Routed at Phase 5 Part B (`GET /api/v1/files/orphans`). The row deliberately
+     * withholds the storage key — D-10; the filename is what makes a file judgeable before
+     * an unrecoverable delete, and the key is an internal locator that adds nothing to that
+     * judgement.
+     */
     'files.orphans.read': {
         family: 'files', action: 'read', phase: 5,
         summary: 'List uploaded files no record refers to',
     },
+
+    /**
+     * The only UNRECOVERABLE operation on this service's whole surface, and the reason the
+     * listing above exists.
+     *
+     * `destructive: true` is doing real work: it is what excludes this from
+     * `allInFamily('files')` and therefore from tier 2, and it is why the route requires
+     * the file id repeated in the body (D-9, the `outbox.prune` precedent).
+     */
     'files.delete': {
         family: 'files', action: 'write', phase: 5, destructive: true,
         summary: 'Permanently delete a file from storage — unrecoverable',
     },
 
-    // ═══ BROADCAST ═══ 1 legacy endpoint, currently on a webhook path ═════════
-    'broadcast.send': {
-        family: 'broadcast', action: 'write', phase: 5,
-        summary: 'Send a broadcast message to platform users',
+    // ═══ MESSAGING ═══ 1 route, ported at Phase 5 Part C ══════════════════════
+    //
+    // Renamed from `broadcast` (Phase 5 D-11), and the rename IS the substance. The family
+    // has exactly one member, and the old name promised a capability that has never existed
+    // anywhere on this platform.
+
+    /**
+     * One Telegram message, to one account that has already connected Telegram.
+     *
+     * ⚠ **The summary is deliberately narrower than the one it replaces.** That read "Send
+     * a broadcast message to platform users" and was wrong three times over: there is no
+     * audience, no segmentation and no scheduling; jovi-mall's `sendMessage` returns a
+     * boolean and keeps no delivery record, so there is nothing to report on afterwards;
+     * and the reachable set is not "platform users" but the accounts that linked Telegram
+     * through `/connect`. An operator has to be able to tell what a permission does before
+     * they are given it, and a name that overstates its blast radius is worse than a vague
+     * one — it invites the tier discussion to be had about the wrong capability.
+     *
+     * Neither `destructive` nor `sensitive`, so `allInFamily('messaging')` sweeps it into
+     * tier 2. That is the right grantability: it changes no record and there is nothing to
+     * recover. What it IS is un-undoable — the message is read the moment it lands — and
+     * that is answered by the audit rather than by a flag: the row carries the recipient
+     * and the full body (Phase 5 O-2), because the only useful question about a send
+     * nobody can retract is what was said to whom.
+     */
+    'messaging.telegram.send': {
+        family: 'messaging', action: 'write', phase: 5,
+        summary: 'Send one Telegram message to one connected account',
     },
 
     // ═══ USERS ═══ no admin surface today (PHASE-0 §6) ════════════════════════
@@ -638,15 +710,26 @@ export const PERMISSION_CATALOG = Object.freeze({
         summary: 'Change a vendor’s platform-governed order settings — not their commission',
     },
 
-    // ═══ CUSTOMERS ═══ no admin surface today ═════════════════════════════════
-    'customers.read': {
-        family: 'customers', action: 'read', phase: 6,
-        summary: 'Search customers and view their detail and order history',
-    },
-    'customers.suspend': {
-        family: 'customers', action: 'write', phase: 6,
-        summary: 'Suspend or reinstate a customer',
-    },
+    // ═══ CUSTOMERS ═══ DELETED at Phase 5 Part D — ADR-017 D-1 ═══════════════
+    // `customers.read` and `customers.suspend` lived here, catalogued at `phase: 6` under a
+    // header that already conceded the point (`no admin surface today`) and GRANTED anyway —
+    // tier 2 by `allInFamily('customers')`, tier 3 `customers.read` by name. That is what
+    // separated them from the four names on the unbuilt list, which are grants NOBODY HOLDS:
+    // a granted permission with no endpoint appears in an administrator's effective list and
+    // in the dashboard's permission screen, promising a customers surface that does not exist.
+    // Leaving it catalogued with a rationale would have documented the promise rather than
+    // withdrawn it.
+    //
+    // No capability was lost, because the `users` family already covers customers
+    // role-agnostically: `GET /users?role=customer` is the directory, `GET /users/:userId`
+    // composes the `customer` role-profile, `POST /users/:userId/{suspend,restore}` is the
+    // suspension (audited `users.suspend` / `users.reinstate`), and order history is
+    // `orders.read?customerId=`. What went is a second name for all of it.
+    //
+    // The `customers` FAMILY went with them — `permission.types.ts` no longer declares it,
+    // because `test-authz.ts` requires every family to hold at least one permission. Building
+    // a real customers surface later means re-declaring the family, which is the deliberate
+    // edit this deletion exists to force.
 
     // ═══ SHIPMENTS ═══ no admin surface today ═════════════════════════════════
     'shipments.read': {

@@ -495,6 +495,171 @@ export const AUDIT_CATALOG = Object.freeze({
         summary: 'Deleted a ticket attachment',
     },
 
+    // ═══ CONTENT — written DIRECTLY, and still not transactional ══════════════
+    //
+    // The only family on this service whose writes land in `jovi_mall` through this
+    // service's own connection rather than over HTTP. Ownership of `articles` and
+    // `article_authors` moved here at Phase 5 Part A (ADR-004 D-4), because jovi-mall's
+    // blog had no in-process subscribers and no non-admin writer — the two properties
+    // tickets lack, which is why tickets stayed delegated.
+    //
+    // ⚠ **`external`, not `wi_admin_txn`, and the distinction is the whole point.**
+    // Owning a collection in another database is not the same as owning a collection.
+    // `connections.ts` opens TWO MongoClients, so a write to `jovi_mall` is outside any
+    // `wi-admin` session and cannot join the transaction an audit row commits in. These go
+    // through `auditedAttempt` — intent first, outcome after — exactly as a delegated
+    // family does, and a crash between the two leaves the same resolvable dangling intent.
+    // The only thing ownership bought was the absence of an HTTP hop.
+    //
+    // `target: 'article'` for the authors too, matching the way every `support.tickets.*`
+    // action targets `ticket` whether it touched a note, a follower or an attachment: the
+    // target is the thing an operator would search for, not the row that changed.
+
+    'content.articles.create': {
+        permission: 'content.articles.write',
+        target: 'article',
+        transport: 'external',
+        summary: 'Created an article draft',
+    },
+    'content.articles.update': {
+        permission: 'content.articles.write',
+        target: 'article',
+        transport: 'external',
+        summary: 'Edited an article',
+    },
+    /**
+     * Publish, unpublish and archive are **three actions on one permission**, and they are
+     * three rows rather than one for the reason `agencies.deactivate` / `.reactivate` are:
+     * they are opposite acts with different consequences, and a feed that cannot tell them
+     * apart cannot answer "when did this go live".
+     *
+     * Archive is not a stronger unpublish. An archived URL answers `410 Gone` with its
+     * category hub; a drafted one simply 404s. Losing that distinction in the trail loses
+     * the only record of which one an operator chose.
+     */
+    'content.articles.publish': {
+        permission: 'content.articles.publish',
+        target: 'article',
+        transport: 'external',
+        summary: 'Published an article — this is what the public sees',
+    },
+    'content.articles.unpublish': {
+        permission: 'content.articles.publish',
+        target: 'article',
+        transport: 'external',
+        summary: 'Pulled a published article back to draft',
+    },
+    'content.articles.archive': {
+        permission: 'content.articles.publish',
+        target: 'article',
+        transport: 'external',
+        summary: 'Retired an article — its URL now answers 410 with its category',
+    },
+    /**
+     * A **soft** delete, and only of an article that was never published.
+     *
+     * The permission is flagged `destructive` and its catalogued summary used to promise a
+     * permanent removal. It is neither permanent nor reachable for a live article: the
+     * service refuses outright once `published_at` is set, because an address that has been
+     * live may have inbound links and the remedy for those is `archive`.
+     */
+    'content.articles.delete': {
+        permission: 'content.articles.delete',
+        target: 'article',
+        transport: 'external',
+        summary: 'Deleted an unpublished article draft',
+    },
+    'content.authors.create': {
+        permission: 'content.authors.write',
+        target: 'article',
+        transport: 'external',
+        summary: 'Created an article byline',
+    },
+    'content.authors.update': {
+        permission: 'content.authors.write',
+        target: 'article',
+        transport: 'external',
+        summary: 'Edited an article byline',
+    },
+    /**
+     * Refused while any article credits the byline, so this row only ever appears for one
+     * nothing points at — which is what keeps every published article's `author` node whole.
+     */
+    'content.authors.delete': {
+        permission: 'content.authors.delete',
+        target: 'article',
+        transport: 'external',
+        summary: 'Deleted an unused article byline',
+    },
+
+    // ═══ FILES — delegated to jovi-mall ══════════════════════════════════════
+    //
+    // One action for three routes, and that is not an omission. Both reads on that mount
+    // are unaudited (ADR-006 D-5) — including `/orphans`, which enumerates but discloses nothing
+    // a file listing does not already say. The delete is the only thing there that changes
+    // state, and it is the only UNRECOVERABLE operation on this service's whole surface.
+
+    /**
+     * A hard delete: the row goes, then the object goes from storage.
+     *
+     * jovi-mall performs the storage half BEST-EFFORT and treats its own database as the
+     * source of truth, so a storage failure leaves the row deleted and logs rather than
+     * rolling back. Worth knowing when reading this row back: a succeeded outcome means the
+     * record is gone, not that the bytes are.
+     *
+     * `target: 'file'` rather than `none` because this addresses exactly one record and the id
+     * is the only handle anybody has on it afterwards — see `audit.types.ts` at that entry. The
+     * payload carries the projection the operator was shown before they confirmed
+     * (`originalName`, `mimeType`, `size`, `ownerType`), because after the delete there is
+     * nothing left to look the file up in.
+     */
+    'files.delete': {
+        permission: 'files.delete',
+        target: 'file',
+        transport: 'delegated',
+        summary: 'Permanently deleted an uploaded file — unrecoverable',
+    },
+
+    // ═══ MESSAGING — delegated to jovi-mall ══════════════════════════════════
+    //
+    // One action, one route. Renamed from the `broadcast` family at Phase 5 Part C, and
+    // the rename is the substance: nothing here fans out.
+
+    /**
+     * One Telegram message to one connected account.
+     *
+     * ⚠ **The only action on this service that is un-undoable in the strongest sense.**
+     * `files.delete` is unrecoverable — the record is gone and nobody was told anything.
+     * This one has already been READ by the time an operator reconsiders it, and there is
+     * no delivery record anywhere to reconstruct it from: jovi-mall's `sendMessage` returns
+     * a boolean and keeps nothing. So this row IS the record of the send, which is why it
+     * carries the full message body alongside the recipient (Phase 5 O-2). The credential
+     * redaction and the payload size cap still apply; `message` is not a redacted field
+     * name, so what the operator typed is what the trail keeps.
+     *
+     * `target: 'user'` in both addressing forms. When the operator named a `userId` that is
+     * the target id; when they named a raw Telegram `chatId` the id is null and the label
+     * carries `telegram:<chat>` — a chat id addresses a person, so the type is honest
+     * either way and only the searchable column differs. `none` was the alternative and is
+     * worse for the same reason it was rejected at `files.delete`: it moves the only handle
+     * on the recipient into the payload.
+     *
+     * That classifies as `platform_actor`, so Support can READ this row while holding no
+     * permission to perform the send (tiers 1-2). Deliberate, and the same trade-off the
+     * file delete carries: seeing that an administrator messaged a customer whose ticket
+     * they are working is the point of the class.
+     *
+     * `transport: 'external'` — the send happens in jovi-mall's process, which no `wi-admin`
+     * ClientSession can join. Intent → outcome, with the resolved chat stamped on the way
+     * out.
+     */
+    'messaging.telegram.send': {
+        permission: 'messaging.telegram.send',
+        target: 'user',
+        transport: 'external',
+        summary: 'Sent a Telegram message to a connected account',
+    },
+
     // ═══ AGENCIES — delegated to jovi-mall ════════════════════════════════════
     // Three mutations. Deactivation is the one whose delegation is least optional: it
     // suspends every vendor product defaulting to that agency and holds their order items,

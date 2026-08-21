@@ -55,7 +55,7 @@ import { subjectClassOf } from '../../src/modules/audit/domain/audit-subject';
 import { permissionSpec } from '../../src/modules/authorization/domain/permission.catalog';
 import { TIER_GRANTS } from '../../src/modules/authorization/domain/tier-grants';
 import { isSensitive } from '../../src/modules/authorization/domain/permission.types';
-import { LEGACY_ENDPOINT_MAP } from '../../src/modules/authorization/domain/legacy-endpoint-map';
+// The legacy endpoint map was imported here and is DELETED (Phase 5 Part D).
 import { routeManifest } from '../../src/api/route-manifest';
 import '../../src/modules/cod/routes/cod.routes';
 
@@ -668,8 +668,9 @@ t.assert('a discrepancy is a platform RECORD, so Support cannot read its rows', 
     auditSpec('cod.discrepancies.resolve').target === 'discrepancy'
     && subjectClassOf('discrepancy') === 'platform_record');
 
-t.assert('no COD row is left in the legacy endpoint map', () =>
-    !LEGACY_ENDPOINT_MAP.some((row) => row.path.includes('/cod')));
+// `no COD row is left in the legacy endpoint map` stood here. Phase 5 Part D deleted the map,
+// so the check would now pass by having nothing to read. The surviving fact is asserted once
+// in `test-authz.ts` § 9; this domain is guarded by its route-manifest section.
 
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('8. The write bodies');

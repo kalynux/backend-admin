@@ -275,7 +275,7 @@ logs.
 | `AUDIT_EXPORT_TOO_LARGE` | 422 | `business_rule` | The range exceeds `ADMIN_AUDIT_EXPORT_API_MAX_ROWS` (default 50 000). Narrow it, or use the CLI. |
 | `AUDIT_EXPORT_INCOMPLETE` | 409 | `conflict` | The export did not finish, so its file is not available. |
 | `AUDIT_EXPORT_FILE_MISSING` | 410 | `not_found` | The export record exists; the file is no longer on disk. |
-| `AUDIT_LEGACY_FEED_DISABLED` | 404 | `business_rule` | The legacy platform-action feed is switched off by a feature flag. 404 so the route can pretend not to exist. |
+
 | `AUDIT_STORE_NOT_TRANSACTIONAL` | 500 | `internal` | **Boot-time.** The wi-admin database is not a replica set, so audited writes cannot be atomic. Fails closed. |
 | `AUDIT_CATALOG_INVALID` | 500 | `internal` | **Boot-time.** The action registry names an unknown permission/target/family. |
 | `AUDIT_COVERAGE_INCOMPLETE` | 500 | `internal` | **Boot-time.** A mutation records nothing, or a catalogued action has no producer. |
@@ -375,7 +375,6 @@ client behaviour:
 | `ADMIN_AUTH_CSRF_INVALID` | 403 | `authentication` | Nothing about the caller's grants is wrong — the request could not be attributed to them. |
 | `ADMIN_AUTH_ACCOUNT_LOCKED` | 423 | `authentication` | A credential outcome, not a business rule. |
 | `DEV_TOOLS_DISABLED` | 409 | `business_rule` | Nothing changed underneath the caller, so `conflict` would send them hunting a race that is not there. |
-| `AUDIT_LEGACY_FEED_DISABLED` | 404 | `business_rule` | A decision, not an absence. |
 
 ---
 

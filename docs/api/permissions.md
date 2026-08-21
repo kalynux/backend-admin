@@ -15,9 +15,9 @@ Design records: [`../ADR-003-GRANULAR-PERMISSIONS.md`](../ADR-003-GRANULAR-PERMI
 
 | Level (`tier`) | Label | Holds | Shape of the job |
 |---|---|---|---|
-| **1** | Developer | 113 of 113 | Everything, including the developer tools and every escalation-flagged action |
-| **2** | Admin | 96 of 113 | The operational tier — runs the platform day to day, including the money |
-| **3** | Support | 24 of 113 | Ticket work plus the read-only lookups needed to answer a ticket. Nothing financial, nothing destructive, no sight of the administrator directory |
+| **1** | Developer | 111 of 111 | Everything, including the developer tools and every escalation-flagged action |
+| **2** | Admin | 94 of 111 | The operational tier — runs the platform day to day, including the money |
+| **3** | Support | 27 of 111 | Ticket work, the lookups needed to answer a ticket, and editorial write on articles and bylines. Nothing financial, nothing destructive, and publishing stays a level above |
 
 A level is an administrator's **entire** authorization state. `tier` appears on the profile
 returned by `GET /auth/me`.
@@ -122,7 +122,8 @@ do not reach for `financial` merely because a read concerns money.
 ## The matrix
 
 ● granted  ·  not granted  ·  **†** = catalogued policy with **no endpoint built yet**
-(27 of 113 permissions; the policy is decided ahead of the surface, deliberately)
+(**4** of 111 permissions — down from 27, and the four that remain each have a written reason
+below. The policy is decided ahead of the surface, deliberately.)
 
 ### `agents`
 
@@ -210,31 +211,49 @@ do not reach for `financial` merely because a read concerns money.
 | `support.tickets.attachments.write` | write | ● | ● | ● | scoped:tickets | Attach a file to a ticket, or remove one |
 | `support.reference.read` | read | ● | ● | ● | — | Look up the orders and products a ticket can reference |
 
-### `content`  — *no endpoints yet*
+### `content`
+
+Fourteen routes at `/api/v1/content` since Phase 5 Part A — the one ported family that **moved
+ownership** rather than delegating. This service writes `articles` and `article_authors`
+directly; jovi-mall keeps the Mongoose schema, the indexes and the public reader. Full contract
+in [content.md](content.md).
 
 | Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
 |---|---|:-:|:-:|:-:|---|---|
-| `content.articles.read` † | read | ● | ● | · | — | View and preview articles, published or not |
-| `content.articles.write` † | write | ● | ● | · | — | Create and edit articles |
-| `content.articles.publish` † | write | ● | ● | · | — | Publish, unpublish and archive articles — this is what the public sees |
-| `content.articles.delete` † | write | ● | ● | · | destructive | Permanently delete an article |
-| `content.authors.read` † | read | ● | ● | · | — | View article authors |
-| `content.authors.write` † | write | ● | ● | · | — | Create and edit article authors |
-| `content.authors.delete` † | write | ● | ● | · | destructive | Permanently delete an article author |
+| `content.articles.read` | read | ● | ● | ● | — | View and preview articles, published or not |
+| `content.articles.write` | write | ● | ● | ● | — | Create and edit articles |
+| `content.articles.publish` | write | ● | ● | · | — | Publish, unpublish and archive articles — this is what the public sees |
+| `content.articles.delete` | write | ● | ● | · | destructive | Delete an unpublished article draft — refused once it has ever been published |
+| `content.authors.read` | read | ● | ● | ● | — | View article authors |
+| `content.authors.write` | write | ● | ● | ● | — | Create and edit article authors |
+| `content.authors.delete` | write | ● | ● | · | destructive | Delete an article byline no article credits |
+
+Support holds read and write and **not** publish or delete, so a Support administrator may fix a
+typo in live prose but cannot decide what the public sees. The four names are granted one by one
+rather than by family sweep: `allInFamily('content')` skips the two `destructive` deletes on its
+own but **not** `publish`, which carries no flag (Phase 5 P-1).
 
 ### `files`
 
 | Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
 |---|---|:-:|:-:|:-:|---|---|
 | `files.resolve` | read | ● | ● | ● | — | Resolve file ids returned by this service into names, types and URLs |
-| `files.orphans.read` † | read | ● | ● | · | — | List uploaded files no record refers to |
-| `files.delete` † | write | ● | · | · | destructive | Permanently delete a file from storage — unrecoverable |
+| `files.orphans.read` | read | ● | ● | · | — | List uploaded files no record refers to |
+| `files.delete` | write | ● | · | · | destructive | Permanently delete a file from storage — unrecoverable |
 
-### `broadcast`  — *no endpoints yet*
+### `messaging`
+
+Renamed from `broadcast` at Phase 5 Part C, along with its one permission. Nothing here
+fans out: one message, one recipient, no audience and no delivery record.
 
 | Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
 |---|---|:-:|:-:|:-:|---|---|
-| `broadcast.send` † | write | ● | ● | · | — | Send a broadcast message to platform users |
+| `messaging.telegram.send` | write | ● | ● | · | — | Send one Telegram message to one connected account |
+
+A send cannot be recalled, so the audit row carries **the recipient and the full message
+body** (Phase 5 O-2) — the only useful question about an un-undoable act is what was said
+to whom. The body is operator-authored free text; the standard credential redaction and
+size cap still apply to it.
 
 ### `users`
 
@@ -258,12 +277,16 @@ do not reach for `financial` merely because a read concerns money.
 | `vendors.products.manage` | write | ● | ● | · | — | Take a vendor’s product off sale, or put it back, as platform oversight |
 | `vendors.settings.manage` | write | ● | ● | · | — | Change a vendor’s platform-governed order settings — not their commission |
 
-### `customers`  — *no endpoints yet*
-
-| Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
-|---|---|:-:|:-:|:-:|---|---|
-| `customers.read` † | read | ● | ● | ● | — | Search customers and view their detail and order history |
-| `customers.suspend` † | write | ● | ● | · | — | Suspend or reinstate a customer |
+> **The `customers` family is gone** (Phase 5 Part D, [ADR-017](../ADR-017-PHASE-17-CLOSEOUT.md)
+> D-1). `customers.read` and `customers.suspend` were catalogued, **granted**, and backed no
+> route — the only pair on the unbuilt list in that state, which is why they were deleted rather
+> than left with a rationale: a granted permission with no endpoint appears in an
+> administrator's effective set and promises a surface that does not exist.
+>
+> **No capability was lost.** The `users` family already covers customers role-agnostically:
+> `GET /users?role=customer` is the directory, `GET /users/:userId` composes the `customer`
+> role-profile, `POST /users/:userId/{suspend,restore}` is the suspension (audited
+> `users.suspend` / `users.reinstate`), and order history is `orders.read?customerId=`.
 
 ### `shipments`
 
@@ -341,6 +364,27 @@ do not reach for `financial` merely because a read concerns money.
 | `developer_tools.database.inspect` | read | ● | · | · | — | Inspect the platform database's collections, sizes and index drift |
 | `developer_tools.cache.inspect` | read | ● | · | · | — | List cache key names, types and TTLs in a named Redis database — never their values |
 | `developer_tools.outbox.prune` | write | ● | · | · | destructive | Permanently delete delivered outbound events past a retention age |
+---
+
+## The four `†` permissions, and why each is unbuilt
+
+Every other catalogued name is behind a live route. These four are not, and each has a reason
+that is a **decision** rather than a backlog item — none of them has an implementation anywhere
+to port, so building one is new work with an open design question in front of it.
+
+| Permission | Why there is no endpoint | Record |
+|---|---|---|
+| `users.sessions.revoke` | jovi-mall issues **stateless JWTs with no session store**, so there is nothing to delete from. `users.suspend` covers the need it was catalogued for: a suspended user's next refresh is refused. Building this means giving jovi-mall a session store first | ADR-007 |
+| `users.roles.manage` | Removing a role has **no defined semantics** — it strands the Store a vendor owns, and nothing decides what happens to the catalogue, the orders or the payouts behind it. The question is a domain design, not a route | ADR-007 |
+| `notifications.manage` | Service-wide wording would block a tier-3 administrator configuring **their own** preferences, which they already may. Splitting the name is the prerequisite | ADR-013 D-9 |
+| `developer_tools.webhooks.redeliver` | **Every webhook mount in the platform is inbound.** There is no outbound delivery record to replay — jovi-mall's dispatcher owns its own retry, and geo-tracker's `/webhooks/node` dedups on `eventId` | ADR-012 |
+
+Two names left this list rather than staying on it, and the difference is worth knowing:
+`users.password.reset` was **built** during Phase 17 once the login-link work supplied the
+delivery channel ADR-007 said it was blocked on, and `customers.read` / `customers.suspend` were
+**deleted** at Phase 5 Part D — see the note in the matrix above for why a granted-but-unrouted
+name is not the same kind of thing as an ungranted one.
+
 ---
 
 ## Composite guards

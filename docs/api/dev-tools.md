@@ -86,13 +86,7 @@ The permission and the audit row still apply to all three. Only the flag is drop
         "consumer": "api/route-manifest.ts",
         "summary": "Warn when a route succeeds without recording the action it declares"
       },
-      {
-        "name": "audit.legacy_feed",
-        "enabled": true,
-        "default": true,
-        "consumer": "modules/legacy-audit/routes/legacy-audit.routes.ts",
-        "summary": "Serve the interim feed of administrative actions still performed on jovi-mall"
-      },
+
       {
         "name": "dev_tools.enabled",
         "enabled": false,

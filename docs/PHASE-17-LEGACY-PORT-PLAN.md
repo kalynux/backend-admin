@@ -1,8 +1,25 @@
 # Phase 17 — porting the last 21 permissions
 
+> # ✅ COMPLETE — 2026-08-20. **The register below is closed.**
+>
+> All 21 permissions are routed and all 35 legacy rows are gone. Part A (support) landed at
+> Phase 17 itself; Parts B, C and D landed as Parts A, B and C of
+> [`PHASE-5-LEGACY-CLOSEOUT-PLAN.md`](../../PRODUCTION-READINESS/PHASE-5-LEGACY-CLOSEOUT-PLAN.md),
+> and Part E as its Part D. **`LEGACY_ENDPOINT_COUNT` is 0, and the constant and the map it
+> counted are both deleted** — so the file reference in § 1 below now points at nothing, and is
+> left in place because the count it names is what this plan was measured against.
+>
+> The decision record is [`ADR-017-PHASE-17-CLOSEOUT.md`](./ADR-017-PHASE-17-CLOSEOUT.md), and
+> the progress board with what actually happened per part is
+> [`PHASE-17-STATUS.md`](./PHASE-17-STATUS.md). **Read those first** — this file is the state of
+> the world on 2026-08-17, kept because the *reasoning* it records is still the reasoning, and
+> because three of its predictions were wrong in ways worth being able to look up.
+
 **This is a plan and a decision register, not a decision record.** It says what is settled, what
 is still open, what to read, and what "done" means for each part. The ADR that records what was
-actually decided (`ADR-017-LEGACY-PORT.md`) is written at the end, from what happened.
+actually decided is written at the end, from what happened — it landed as
+[`ADR-017-PHASE-17-CLOSEOUT.md`](./ADR-017-PHASE-17-CLOSEOUT.md), not the
+`ADR-017-LEGACY-PORT.md` this line originally forecast.
 
 Every factual claim carries a file reference and was read out of the source on **2026-08-17**.
 Anything not verified is marked **⟨decide⟩** and must not be guessed at implementation time.
@@ -203,10 +220,19 @@ none is `support.*`, `content.*`, `files.*` or `broadcast.*`.
 
 ---
 
-## 6 · The decision register — what is still open
+## 6 · The decision register — **CLOSED 2026-08-20**
 
 **BLOCKING** — work cannot start. **SHAPING** — work can start, this changes the design.
 **DEFERRABLE** — decide before go-live.
+
+> **Every SHAPING row is answered.** What remains open is **two DEFERRABLE rows**, both
+> genuinely deferred rather than forgotten: T-12 (an upload surface in wi-admin — owner-decided
+> at Phase 4 G-2, the field stays reserved and always null) and T-13 (whether an assigned admin
+> becomes a follower). Each row below carries its outcome.
+>
+> **T-14 answered itself.** It asked whether jovi-mall's `/api/admin/tickets` mount keeps its
+> exclusivity lock "until cutover". Cutover happened — Phase 5 Part E — and the mount is gone,
+> lock and all.
 
 ### Support / tickets
 
@@ -215,47 +241,47 @@ none is `support.*`, `content.*`, `files.*` or `broadcast.*`.
 | T-5 | ✅ **CLOSED** | `assigned_by` added as the second half of `admin_assignment` (D-8), carrying tier |
 | T-6 | ✅ **CLOSED** | D-5. Enforced by `publicAdminSnapshot()` in `core/types/admin-snapshot.types.ts` |
 | T-7 | ✅ **CLOSED** | D-10 — refresh on write. `TicketRepository.refreshAdminSnapshot` is guarded on the assignee id so a refresh racing a reassignment cannot overwrite the new holder |
-| T-8 | **SHAPING** | `tickets` is already directly readable; `ticket_notes`, `ticket_followers`, `ticket_attachments` are **not registered at all**. Register all three as `read`, or delegate those reads? *(Recommend register — they are records, not verdicts; ADR-009 D-1)* |
+| T-8 | ✅ **CLOSED — registered, as recommended** | All four are `access: 'read', owner: 'jovi-mall', writes: 'internal-api'` in `platform-collections.ts`. They are records, not verdicts (ADR-009 D-1 / ADR-011 D-1). The **writes** stay delegated for an unusually concrete reason rather than a precautionary one: jovi-mall creates tickets in-process from the payout, dispute and booking-refund paths, and every ticket write publishes on its in-process event bus — a second writer would move the row and notify nobody |
 | T-9 | ✅ **CLOSED** | Moot — no production data, and the column is deleted (D-9). The snapshot's `source` field is kept anyway; it is what would distinguish a legacy admin if one ever appeared |
 | T-10 | ✅ **CLOSED** | D-6 — no unassign |
 | T-11 | ✅ **CLOSED** | D-6 — any tier may claim from the pool |
 | T-12 | DEFERRABLE | Where an administrator's file **upload** happens — `POST /:ticketId/attachments` attaches an already-uploaded `fileId`, and wi-admin has no upload surface |
 | T-13 | DEFERRABLE | Whether an assigned admin becomes a follower. Admins never count toward the 5-user limit and **cannot be removed** (`ticket-follower.service.ts:17,131`) — one-way |
-| T-14 | DEFERRABLE | Whether the legacy `/api/admin/tickets` mount keeps its exclusivity lock until cutover *(recommend yes — untouched)* |
+| T-14 | ✅ **CLOSED by events** | Yes, untouched — and then **cutover happened** (Phase 5 Part E). The mount is deleted, exclusivity lock and all. The lock was never admin *authorization* anyway: a legacy `admin` is a platform `users` row carrying no tier, so it could not have enforced the matrix that replaced it |
 
 ### Content / blog
 
 | # | Grade | Decision |
 |---|---|---|
-| C-2 | ✅ **CLOSED** | D-7 — jovi-mall's admin blog routes are deleted in the same change. Part B is unblocked. ⚠ Until then the classification is **half true**: `platform-collections.ts` calls both collections `owned`/`direct` — which is what removes the write guard rail — while `api/index.ts:376-377` still serves `POST`/`PATCH`/`DELETE` on them. Harmless only because wi-admin has no content module yet |
-| C-3 | **SHAPING** | Grep-verify **no jovi-mall writer remains** on either collection, `seed:blog` included. The table's own instruction — `owned` is what removes the guard rail |
-| C-4 | **SHAPING** | How the block-type Zod union stays honest across repos (no shared package; the marketing site renders it too). Precedent: assert one side against the other's fixtures, as `test:rich-description` does |
-| C-6 | **SHAPING** | `buildSlugKeys` / the `content_updated_at` fingerprint / `wordCount` move with the service — missing one silently breaks renamed URLs |
-| C-7 | DEFERRABLE | Where jovi-mall's `test:blog` (100) and `verify:blog` (47) end up |
-| C-8 | DEFERRABLE | May Tier 3 edit an article **after** publication, or drafts only? D-2 withholds publish, not editing |
+| C-2 | ✅ **CLOSED** | D-7 executed at Phase 5 Part A, jovi-mall FIRST (Phase 5 D-4) — so the two-writers window this row warned about never existed. The classification is now true in both halves |
+| C-3 | ✅ **CLOSED** | Verified, and the instrument had to change. The planned grep (`ArticleModel\|ArticleAuthorModel` must return 4) returns **6** and correctly — both repositories keep their READ methods. The question C-3 actually asks is *who writes*, so it became a **write census**: `grep` for `Article(Author)?Model.(create\|updateOne\|…)` returns **zero sites in `src/`**. The only writes left are in `scripts/` — `seed-blog.ts` and `verify-blog-live.ts`'s own fixtures, neither a runtime writer (Phase 5 P-2, O-5) |
+| C-4 | ✅ **CLOSED** | The `test:rich-description` precedent, as recommended. A shared fixture list of 17 block documents with their expected verdict lives in **both** repositories — `test:content` § 1 here, `test:blog` § 2b there — and neither imports the other. A change to either union turns both red |
+| C-6 | ✅ **CLOSED** | All three derivations ported. `buildSlugKeys` needed the most care: it lives on the *model* in jovi-mall and the model did not move, so it became `content/domain/slug-keys.ts`. `test:content` § 3 asserts all three, and a mutation dropping retired slugs from `buildSlugKeys` turns it red |
+| C-7 | ✅ **CLOSED** | They **split**, which is the answer neither option in this row offered. jovi-mall keeps a reduced `test:blog` (**91**, the public projection plus the C-4 fixture assertion) and a reduced `verify:blog` (**31**, index build and public queries, lifecycle driven through `ArticleModel` fixtures); wi-admin gained `test:content` (**146**) and `verify:content` (**46**) |
+| C-8 | ✅ **CLOSED** | **Published included** (Phase 5 O-1). A "write" that stops at a state boundary is a rule nobody can infer from the permission's name, and it defends nothing already undefended — pulling a live article down needs `content.articles.publish`, which Support does not hold. What is left is a Support administrator fixing a typo in live prose, which is the reason to grant it at all |
 
 ### Files
 
 | # | Grade | Decision |
 |---|---|---|
-| F-1 | **SHAPING** | Extract a `buildAdminFileRouter` factory, or another internal mount — both routes are guarded **inline** on the user-facing upload router (`file-upload.routes.ts:67,108`) |
-| F-2 | **SHAPING** | Confirmation semantics for the unrecoverable delete. Precedent: `outbox.prune` makes you repeat the value that decides the blast radius |
-| F-3 | DEFERRABLE | What an orphan listing may expose (paths, original filenames, owner ids) |
+| F-1 | ✅ **CLOSED** | **Its premise was stale.** `buildAdminFileRouter` already existed — extracted during the dashboard-request round, mounted at `/api/internal/admin/files` serving `POST /resolve` — so this was *extend the factory*, not extract one. Two routes added inside `attachRoutes`; the two inline `requireRole(['admin'])` routes deleted from the user-facing upload router. ⚠ The internal path is `DELETE /:id/permanent`, **not** `:fileId`: the handler reads `req.params.id`, and it moved unchanged (Phase 5 P-6) |
+| F-2 | ✅ **CLOSED** | The `outbox.prune` precedent, as recommended (Phase 5 D-9). The delete body carries `{ confirmFileId }` and a mismatch is a `400 FILE_DELETE_NOT_CONFIRMED`. The two file id values are compared in wi-admin; jovi-mall's route still takes the id it is given, deliberately — the second lock is `requireAdminCaller`, not a second confirmation |
+| F-3 | ✅ **CLOSED** | id, `originalName`, `mimeType`, `size`, `ownerType`, `createdAt` — and **not** the storage `key` (Phase 5 D-10). The operator must be able to judge a file before an unrecoverable delete and the filename is what makes that judgement possible; the key is an internal locator that adds nothing to it. The projection is a pure exported `toOrphanFile`, so the absence is asserted rather than scanned for |
 
 ### Messaging (ex-broadcast)
 
 | # | Grade | Decision |
 |---|---|---|
-| M-1 | **SHAPING** | Final names: family `messaging`, permission `messaging.telegram.send`, route `POST /api/v1/messaging/telegram` — confirm before the rename lands |
-| M-2 | **SHAPING** | Moving off `/api/webhooks/*` makes it **rate-limited and maintenance-blocked**; it is exempt from both today purely by where it is routed. Intended, and it must be written down — the change is invisible in a diff |
-| M-3 | DEFERRABLE | What the audit row records — recipient, message body, or both. A send is not undoable |
+| M-1 | ✅ **CLOSED** | Confirmed as proposed (Phase 5 D-11) and landed: family `messaging`, permission `messaging.telegram.send`, route `POST /api/v1/messaging/telegram`. The catalog size did not move and no tier's grant count moved — the family sweep is the same sweep under a different name |
+| M-2 | ✅ **CLOSED**, and **this row is wrong in both halves** | Verified against source at Phase 5 C-6. **Not maintenance-blocked, and the inverse**: `/api/internal/admin` is *unconditionally* exempt in every mode, where `/api/webhooks` was exempt only while `blockWebhooks` was unset — the operator **lost** a per-window off switch. **Not rate-limited by jovi-mall** either: wi-admin authenticates as `internal_service`, which is `'exempt'` in both policies. What is genuinely new is **wi-admin's own identity-scoped limiter** |
+| M-3 | ✅ **CLOSED** | **Both** — recipient and full body (Phase 5 O-2, owner-answered). The only useful question about an un-undoable send is what was said to whom, and the body is operator-authored rather than user PII. One dependency is silent and load-bearing: `message` must never become a redacted field name, so `test:messaging` § 2 asserts the payload through the **real** `sanitiseState` rather than a shape check |
 
 ### Cross-cutting
 
 | # | Grade | Decision |
 |---|---|---|
-| X-2 | DEFERRABLE | `LEGACY_ENDPOINT_COUNT` reaching 0 **forces deleting `src/modules/legacy-audit/`** (`test-authz.ts:697`), and decides the fate of the `admin_action_log` read |
-| X-3 | DEFERRABLE | Restamping `phase:` to 17 also means **widening the `phase` union** at `permission.types.ts:166`, which stops at 16 |
+| X-2 | ✅ **CLOSED** | Deleted outright (Phase 5 D-8), and it was forced rather than chosen: the tripwire went red the moment Part C took the count to 0. The `admin_action_log` **collection survives** and its historical rows stay in Mongo — `AuditLogger` still routes `role: 'admin'` entries there and `AdminAgencyService` reaches it over the internal mount. What was deleted is this service's READ of it, because after cutover every new row duplicates a wi-admin audit row for the same operation (Phase 5 C-10) |
+| X-3 | ✅ **CLOSED — do neither** (Phase 5 D-5) | The union stops at 16 because **nothing is stamped 17 and nothing should be**. The field's own docstring says it names *the phase that builds the surface* — written in advance, so a later phase consumes a decided policy. All eleven `support.*` permissions were built at Phase 17 and are still stamped `phase: 5`; `content.*`, `files.*` and `messaging.telegram.send` are stamped 5 for the same reason. Widening without restamping adds an unreachable value; restamping to match reality would mean rewriting a forecast into a history the field was never meant to hold |
 
 ---
 
@@ -335,10 +361,23 @@ never consumed) · `src/modules/agencies/` (the reference shape) · `internal-ad
    do not add a flag that makes the public route serve drafts.
 7. Delete the 14 rows; `LEGACY_ENDPOINT_COUNT -= 14`.
 
-### Part C · Files — 2 permissions, 2 endpoints
+### Part C · Files — 2 permissions, 2 endpoints ✅ **DONE 2026-08-20**
 
 `admin/src/modules/files/` — orphan read, delegated hard delete. Settle F-1 and F-2 first. Audit
 action `files.delete` only (the read is not audited — ADR-006 D-5). Delete 2 rows.
+
+Executed as **Phase 5 Part B**. Three things differed from the sketch above:
+
+- **F-1's premise was stale.** `buildAdminFileRouter` already existed on the jovi-mall side
+  (extracted in the dashboard-request round for `POST /files/resolve`), so this extended one
+  factory rather than creating one — Phase 5 C-4.
+- **F-2 landed as D-9**: the delete takes `{ confirmFileId }` repeating the path id, the
+  `outbox.prune` precedent. **F-3 landed as D-10**: the orphan row withholds the storage key.
+  Both are written up in [`ADR-017-PHASE-17-CLOSEOUT.md`](./ADR-017-PHASE-17-CLOSEOUT.md).
+- **`files.orphans.read` is tiers 1 and 2**, not tier-1-only as several documents said. The grant
+  table has always disagreed with them; the documents were corrected, not the grant. Same ADR.
+
+Covered by the new `npm run test:files` (37, DB-free, mutation-tested).
 
 ### Part D · Messaging — 1 permission, 1 endpoint
 
@@ -381,16 +420,29 @@ in `package.json`. Four things only a live run proves, each of which fails silen
 
 ---
 
-## 9 · Explicitly out of scope
+## 9 · Explicitly out of scope — **4**, not the 7 this section claimed
 
-The other **7** unrouted permissions are not a porting backlog — there is nothing built anywhere
-to port:
+⚠ **The number in this heading was wrong when it was written, and disagreed with § 1 of this
+same file, which said 6.** Corrected at close-out: the true figure is **4**, and the two rows
+that moved are as interesting as the count.
 
 | Permission | Why not |
 |---|---|
 | `users.sessions.revoke` | jovi-mall issues stateless JWTs with no session store. ADR-007 |
-| `users.password.reset` | No administrator-initiated reset exists. ADR-007 |
-| `users.roles.manage` | Removing a role has no implementation and no defined semantics. ADR-007 |
-| `customers.read` · `customers.suspend` | **Not unbuilt — being deleted.** The `users` module is role-agnostic and already covers customers; `orders.read?customerId=` carries the history. These two are *granted* while backing no route, unlike the rest of this list. [ADR-017](./ADR-017-PHASE-17-CLOSEOUT.md) D-1; removed in Part E |
+| `users.roles.manage` | Removing a role has no implementation and no defined semantics — it strands the Store. ADR-007 |
 | `notifications.manage` | ADR-013 D-9 — service-wide wording would block tier 3 configuring their own preferences |
 | `developer_tools.webhooks.redeliver` | ADR-012 — every webhook mount is inbound; nothing to redeliver |
+
+Three names left this list, three different ways:
+
+- **`users.password.reset` was BUILT** during Phase 17. The row above said *"no
+  administrator-initiated reset exists"*, and the login-link work supplied the delivery channel
+  ADR-007 said it was blocked on. It was never part of this plan's 21.
+- **`customers.read` and `customers.suspend` were DELETED**, not documented — Phase 5 Part D,
+  [ADR-017](./ADR-017-PHASE-17-CLOSEOUT.md) D-1. They were the only pair here that was *granted*
+  while backing no route, and a rationale would have documented the promise rather than
+  withdrawn it. The `customers` **family** went with them.
+
+The published version of this table, with the reasons, is
+[`api/permissions.md`](./api/permissions.md) § *The four `†` permissions* — which is where a
+reader looking for "is this permission real" will actually go.

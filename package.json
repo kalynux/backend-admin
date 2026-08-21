@@ -37,6 +37,9 @@
     "test:devtools": "ts-node scripts/test/test-devtools.ts",
     "test:notifications": "ts-node scripts/test/test-notifications.ts",
     "test:support": "ts-node scripts/test/test-support.ts",
+    "test:content": "ts-node scripts/test/test-content.ts",
+    "test:files": "ts-node scripts/test/test-files.ts",
+    "test:messaging": "ts-node scripts/test/test-messaging.ts",
     "//verify": [
       "Every verify:* runs through `node --max-old-space-size=4096 -r ts-node/register`,",
       "never a bare `ts-node` (F-4, fixed 2026-08-20).",
@@ -58,6 +61,8 @@
     "verify:auth": "node --max-old-space-size=4096 -r ts-node/register scripts/test/verify-auth-live.ts",
     "verify:authz": "node --max-old-space-size=4096 -r ts-node/register scripts/test/verify-authz-live.ts",
     "verify:platform": "node --max-old-space-size=4096 -r ts-node/register scripts/test/verify-platform-live.ts",
+    "verify:content": "node --max-old-space-size=4096 -r ts-node/register scripts/test/verify-content-live.ts",
+    "verify:files": "node --max-old-space-size=4096 -r ts-node/register scripts/test/verify-files-live.ts",
     "verify:users": "node --max-old-space-size=4096 -r ts-node/register scripts/test/verify-users-live.ts",
     "verify:vendors": "node --max-old-space-size=4096 -r ts-node/register scripts/test/verify-vendors-live.ts",
     "verify:audit": "node --max-old-space-size=4096 -r ts-node/register scripts/test/verify-audit-live.ts",

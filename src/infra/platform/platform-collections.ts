@@ -294,16 +294,36 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
     },
 
     // ── Editorial — the one place ownership moved (ADR-004 D-4) ──────────────
-    // `ArticleService` and `ArticleAuthorService` have no non-admin caller: the public
-    // site reads through a separate `public-article.service`. Once those move here,
-    // nothing in jovi-mall writes these two collections.
+    //
+    // Executed at Phase 5 Part A. `ArticleService` and `ArticleAuthorService` are DELETED in
+    // jovi-mall, along with the write methods on both its repositories; a source census there
+    // finds zero writes to `ArticleModel`/`ArticleAuthorModel` outside `scripts/` (its blog
+    // seed and its own verify fixtures, neither a runtime writer).
+    //
+    // ⚠ **The SCHEMA and the INDEXES did not move, and that asymmetry is the thing to know
+    // before editing either side** (Phase 5 plan O-3). jovi-mall keeps `ArticleSchema` and
+    // `ArticleAuthorSchema` because its public reader needs them, and `autoIndex` is off in
+    // its production config, so the indexes are created from ITS migration ledger — including
+    // the unique multikey index on `slug_keys`, which is the only thing enforcing per-locale
+    // slug uniqueness. `ensure:indexes` here covers the `wi-admin` database only and must not
+    // grow an entry for these two.
+    //
+    // Two consequences:
+    //   - a duplicate slug written from here is refused by an index THIS repository does not
+    //     define. `verify:content` proves that rather than assuming it — an index that builds
+    //     but does not bind is indistinguishable from one that works.
+    //   - a field added to jovi-mall’s `ArticleSchema` without being added to
+    //     `domain/article.document.ts` produces documents its public DTO renders wrong, and
+    //     no test in either repository would see it. The raw driver applies no defaults.
     [COLLECTIONS.ARTICLE]: {
         access: 'owned', owner: 'admin', writes: 'direct',
-        note: 'Moved to admin — no jovi-mall writer remains; the public reader is read-only',
+        note: 'Writes here (Phase 5 A); SCHEMA + INDEXES stay in jovi-mall for its public reader (O-3)',
     },
     [COLLECTIONS.ARTICLE_AUTHOR]: {
         access: 'owned', owner: 'admin', writes: 'direct',
-        note: 'Moved to admin alongside articles',
+        // The Mongoose `Map` trap: BSON stores a Map as a plain object, so a real Map handed
+        // to the driver stores {} — a byline with no title and no bio, in every language.
+        note: 'Writes here alongside articles; schema stays in jovi-mall. Author translations must be written as a PLAIN OBJECT, never a Map',
     },
 } as const satisfies Record<string, PlatformCollectionSpec>);
 

@@ -67,6 +67,13 @@ and `actor.label` is rendered server-side precisely so a client cannot present t
 
 ### 1. `GET /api/v1/audit/legacy/:id` — or a recorded decision not to
 
+> **ANSWERED, and then overtaken by events.** The decision was *no* — the feed was list-only by
+> design, and `audit.md` said so. **Phase 5 Part D then deleted the feed itself**, along with the
+> `audit.legacy_feed` flag and the `AUDIT_LEGACY_FEED_DISABLED` code, because the legacy surface
+> it reported on was fully ported and every new row in `admin_action_log` duplicates a wi-admin
+> audit row. Neither the list nor a detail route exists. The rest of this section is kept as the
+> record of the ask.
+
 Permission `audit.read`, behind the same `audit.legacy_feed` feature flag, `404
 AUDIT_LEGACY_FEED_DISABLED` when off.
 
