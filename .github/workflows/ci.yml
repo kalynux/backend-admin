@@ -209,10 +209,20 @@ jobs:
         with:
           path: admin
 
+      # ⚠ `ref:` IS LOAD-BEARING. Without it actions/checkout takes the repository's
+      # DEFAULT branch, and `kalynux/jovi-mall@main` is months stale — it does not even
+      # contain `.env.example`, so the "Start jovi-mall" step below died on
+      #     cp: cannot stat '.env.example': No such file or directory
+      # on the first run of this job that ever executed. The failure names a missing
+      # file rather than a wrong branch, which is what makes it expensive to read.
+      #
+      # This is the same trap jovi-mall's taxonomy-contract.yml documents at length;
+      # this job simply predated the note. Move both when the merge to `main` happens.
       - name: Check out jovi-mall
         uses: actions/checkout@v4
         with:
           repository: kalynux/jovi-mall
+          ref: phase-6-unbuilt-scope
           token: ${{ secrets.CROSS_REPO_TOKEN }}
           path: jovi-mall
 
@@ -265,6 +275,12 @@ jobs:
             echo "INTERNAL_ADMIN_SERVICE_TOKEN=${INTERNAL_ADMIN_SERVICE_TOKEN}"
             echo "NODE_ENV=development"
           } >> .env
+          # Reference data, not fixtures. CI gets an empty mongo every run, and the
+          # owner-scoped billing engine resolves every vendor, agency and agent to a
+          # plan — so without `starter` any money path throws from three layers below
+          # whatever assertion trips. Idempotent upsert; jovi-mall's own workflow does
+          # the same thing for the same reason.
+          npm run seed:plans
           npm run dev > /tmp/jovi-dev.log 2>&1 &
           echo $! > /tmp/jovi.pid
           for i in $(seq 1 60); do
