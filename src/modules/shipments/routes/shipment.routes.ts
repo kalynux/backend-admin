@@ -7,6 +7,8 @@ import {
     ReassignShipmentSchema,
     SearchShipmentsQuerySchema,
     ShipmentIdParamSchema,
+    TrackingEventsQuerySchema,
+    TrackingTrailQuerySchema,
 } from '../validators/shipment.validator';
 
 /**
@@ -78,6 +80,53 @@ defineRoute(router, {
     access: permission('shipments.read', 'agents.read'),
     validate: { params: ShipmentIdParamSchema },
     handler: ShipmentController.offers,
+});
+
+/**
+ * ═══ The geo-tracker DATA door, shipment half (Phase 6.I · ADR-020) ════════════
+ *
+ * These are shipment-scoped because geo-tracker's scope model is: there is no endpoint on
+ * that door that takes an agent id and answers with a trail, so "where has this person been
+ * this week" is not a question any permission here can produce. The URL states the bound.
+ *
+ * `shipments.tracking.read`, in the shipments family — NOT the agents-family permission
+ * that governs the live-position read. The two halves of this door are different
+ * exposures: live surveillance of a person, versus a case file about a delivery. Keeping
+ * them apart lets an operator grant one without the other, which is also how geo-tracker's
+ * own scope model separates `agent:position` from `shipment:trail`.
+ *
+ * Deliberately NOT paired with `shipments.read`, unlike `/:shipmentId/offers` which names
+ * `agents.read` beside it — that pattern states a CROSS-FAMILY dependency. Every tier
+ * holding one of these holds the other, so naming both here would be noise.
+ */
+
+/**
+ * ⚠ An audited READ. Every point on this trail is where a person actually was, so the
+ * audit row commits BEFORE the read and its failure is not caught — see
+ * `agents/domain/tracking-disclosure.ts`. `?reason=` is required.
+ *
+ * The row records the SHAPE of what was disclosed (points, sessions, `agentIds`,
+ * `truncated`) and never the coordinates: putting them there would move a person's
+ * movements into the one store readable without the permission gating them.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/:shipmentId/tracking-trail',
+    access: permission('shipments.tracking.read'),
+    validate: { params: ShipmentIdParamSchema, query: TrackingTrailQuerySchema },
+    audit: records('shipments.tracking.trail.read'),
+    handler: ShipmentController.trackingTrail,
+});
+
+/** No coordinates: state transitions and the connection log. No reason, no audit row. */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/:shipmentId/tracking-events',
+    access: permission('shipments.tracking.read'),
+    validate: { params: ShipmentIdParamSchema, query: TrackingEventsQuerySchema },
+    handler: ShipmentController.trackingEvents,
 });
 
 defineRoute(router, {

@@ -12,6 +12,15 @@ import { AuditRepository } from '../../audit/repositories/audit.repository';
 import { ListAuditQuery } from '../../audit/validators/audit.validator';
 import { AgentReadRepository } from '../../agents/repositories/agent.read.repository';
 import { AgencyReadRepository } from '../../agencies/repositories/agency.read.repository';
+import { readShipmentEvents } from '../../../infra/geo/geo-tracker-data.client';
+/**
+ * Both live-tracking helpers come from the AGENTS module, and the direction is deliberate:
+ * one permission (`agents.tracking.read`), one credential and one decision govern all four
+ * reads on that door, so the policy lives in one file rather than half here. A shipment is
+ * a *scope* on an agent's movements, not a separate subject. Same direction
+ * `agent.routes.ts` already imports an agencies validator.
+ */
+import { discloseShipmentTrail, readNonDisclosing } from '../../agents/domain/tracking-disclosure';
 import * as gateway from '../gateways/shipment.gateway';
 import {
     ShipmentReadModel,
@@ -35,6 +44,8 @@ import {
     ListShipmentActivityQuery,
     ReassignShipmentBody,
     ShipmentSearchQuery,
+    TrackingEventsQuery,
+    TrackingTrailQuery,
 } from '../validators/shipment.validator';
 
 const shipments = new ShipmentReadRepository();
@@ -172,6 +183,70 @@ export class ShipmentController {
         const names = await agents.findNamesByIds(agentIds);
 
         sendSuccess(res, rows.map((offer) => toShipmentOfferDto(offer, names)));
+    });
+
+    /**
+     * GET /api/v1/shipments/:shipmentId/tracking-trail?reason=… — this delivery's GPS trail.
+     *
+     * ── The route is shipment-scoped because the SCOPE MODEL is ───────────────
+     * geo-tracker has no endpoint that takes an agent id and answers with a trail, and that
+     * absence is the strongest bound in ADR-020's design: it turns a surveillance
+     * credential into a case-file one. "Where has this person been this week" is not a
+     * question any permission in this service can produce. The URL says so.
+     *
+     * **A reassigned delivery returns MORE THAN ONE session**, one per agent who carried
+     * it, with their checkpoints merged into a single trail newest-first. A session that
+     * ended `shipment_released` with no `terminalStatus` is an agent who left the delivery
+     * rather than finishing it.
+     *
+     * **`truncated` is not cosmetic.** A partial trail that does not announce itself is
+     * indistinguishable from a gap in the record, and the record is what a delivery dispute
+     * is argued from. Never render one as complete.
+     *
+     * Audited, fail-closed, before the read — see `agents/domain/tracking-disclosure.ts`.
+     */
+    static trackingTrail = asyncHandler(async (req: Request, res: Response) => {
+        const query = req.query as unknown as TrackingTrailQuery;
+        const shipment = await loadOr404(req.params.shipmentId);
+
+        sendSuccess(
+            res,
+            await discloseShipmentTrail(
+                req.params.shipmentId,
+                shipment.tracking_number ?? null,
+                { reason: query.reason },
+                actorContextOf(req),
+                query.limit,
+            ),
+        );
+    });
+
+    /**
+     * GET /api/v1/shipments/:shipmentId/tracking-events — the delivery's tracking events.
+     *
+     * State transitions and the connection log: when tracking went online, degraded, lost
+     * the network, reconnected. **No coordinates**, so no reason and no audit row — the
+     * same line the whole door is drawn on.
+     *
+     * Several `connections` rows on one session mean one delivery whose agent's phone
+     * dropped and came back, not several deliveries. Unlike the trail, these rows are
+     * permanent in geo-tracker and are never pruned, so an old delivery still answers.
+     */
+    static trackingEvents = asyncHandler(async (req: Request, res: Response) => {
+        const query = req.query as unknown as TrackingEventsQuery;
+        await loadOr404(req.params.shipmentId);
+        const context = actorContextOf(req);
+
+        sendSuccess(
+            res,
+            readNonDisclosing(
+                await readShipmentEvents(
+                    req.params.shipmentId,
+                    { actor: context.actor.adminId, reason: 'events' },
+                    query.limit,
+                ),
+            ),
+        );
     });
 
     /** GET /api/v1/shipments/:shipmentId/activity — what administrators did to this shipment. */

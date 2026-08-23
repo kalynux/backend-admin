@@ -584,20 +584,63 @@ t.assert('the geo-tracker client cannot throw — every status is a result', () 
  * wi-admin out of rotation. The client cannot throw, which is the structural half; this is the
  * half that stops a tidy-minded reviewer from "improving" the health check by adding it.
  */
-t.assert('neither /health nor SystemController.health references the geo-tracker client', () => {
+t.assert('neither /health nor SystemController.health references EITHER geo-tracker client', () => {
     const health = readFileSync(join(__dirname, '..', '..', 'src', 'api', 'routes', 'health.routes.ts'), 'utf8');
     const controller = readFileSync(
         join(__dirname, '..', '..', 'src', 'modules', 'system', 'controllers', 'system.controller.ts'), 'utf8',
     );
-    if (/geo-tracker\.client/.test(health)) return false;
+    // Widened at Phase 6.I: `geo-tracker-data.client` does NOT contain the literal
+    // `geo-tracker.client`, so the original regex would have let the DATA door into the
+    // readiness path — the one place this pin exists to keep it out of.
+    if (/geo-tracker(-data)?\.client/.test(health)) return false;
 
-    // The controller DOES import it (for /system/geo-tracker) — what must not happen is the
-    // `health` handler itself calling it.
+    // The controller DOES import the ops client (for /system/geo-tracker) — what must not
+    // happen is the `health` handler itself calling either.
     const start = controller.indexOf('static health =');
     if (start === -1) return false;
     const end = controller.indexOf('static ', start + 10);
     const body = controller.slice(start, end === -1 ? undefined : end);
-    return !/probeGeo|readGeoMetrics|isGeoTrackerOpsConfigured/.test(body);
+    return !/probeGeo|readGeoMetrics|isGeoTrackerOpsConfigured|isGeoTrackerDataConfigured|readAgent|readShipment/
+        .test(body);
+});
+
+/**
+ * ── The data door, at Phase 6.I ──────────────────────────────────────────────
+ * ADR-009 D-2 said wi-admin had no geo-tracker DATA door; ADR-020 amended it. These pin
+ * the two properties that keep the new one from becoming what D-2 feared.
+ */
+
+/** Its path set is closed too — four reads, and no listing endpoint on either side. */
+t.assert('the geo-tracker data client exposes exactly four reads', () => {
+    // Comments stripped first, for the reason the sibling scans learned the hard way: this
+    // file's own header names `/internal/*` in backticks while explaining the door, and a
+    // scan that cannot tell prose from code fails on its own documentation.
+    const code = readFileSync(
+        join(__dirname, '..', '..', 'src', 'infra', 'geo', 'geo-tracker-data.client.ts'), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .split('\n')
+        .filter((line) => !line.trim().startsWith('//') && !line.trim().startsWith('*'))
+        .join('\n');
+    const paths = code.match(/`\/internal\/[^`]+`/g) ?? [];
+    return paths.length === 4
+        && paths.filter((p) => p.includes('/internal/agents/')).length === 2
+        && paths.filter((p) => p.includes('/internal/shipments/')).length === 2
+        // The bound that matters most: no agent-scoped trail, ever.
+        && !paths.some((p) => p.includes('/internal/agents/') && /trail|checkpoint/.test(p));
+});
+
+/**
+ * The two doors stay two. Folding them would put a data call one typo away from being made
+ * with no credential, and an ops call one typo away from carrying one.
+ */
+t.assert('the ops client carries no credential and the data client does', () => {
+    const geoDir = join(__dirname, '..', '..', 'src', 'infra', 'geo');
+    const ops = readFileSync(join(geoDir, 'geo-tracker.client.ts'), 'utf8');
+    const data = readFileSync(join(geoDir, 'geo-tracker-data.client.ts'), 'utf8');
+    return !/GEO_TRACKER_ADMIN_TOKEN|Authorization/.test(ops)
+        && data.includes('GEO_TRACKER_ADMIN_TOKEN')
+        && data.includes('GEO_TRACKER_DATA_BASE_URL')
+        && !data.includes('GEO_TRACKER_OPS_BASE_URL');
 });
 
 // ─── The Prometheus text parser ─────────────────────────────────────────────

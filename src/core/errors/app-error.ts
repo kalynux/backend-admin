@@ -126,6 +126,12 @@ export const DEFAULT_MESSAGES: Partial<Record<ErrorCode, string>> = {
     [ERROR_CODES.ADMIN_SESSION_NOT_FOUND]: 'Session not found',
     [ERROR_CODES.ADMIN_ACCOUNT_ALREADY_EXISTS]: 'An administrator with this email already exists',
     [ERROR_CODES.PAYOUT_DESTINATION_ABSENT]: 'This payout request carries no destination on file',
+
+    // Live tracking (Phase 6.I). Three messages, because three different people fix them:
+    // an operator, whoever configures geo-tracker's scopes, and whoever is on call.
+    [ERROR_CODES.TRACKING_DOOR_UNCONFIGURED]: 'Live tracking reads are not configured on this deployment',
+    [ERROR_CODES.TRACKING_DOOR_REFUSED]: 'The tracking service refused this read',
+    [ERROR_CODES.TRACKING_DOOR_UNAVAILABLE]: 'The tracking service is unavailable — please try again',
     [ERROR_CODES.ACCOUNT_OWNER_NOT_FOUND]: 'No vendor, agency or agent with this id',
     [ERROR_CODES.PAYOUT_NOT_PENDING]: 'This payout request has already been resolved',
     [ERROR_CODES.CONTRACT_NOT_FOUND]: 'No agent–agency contract with this id',

@@ -40,6 +40,8 @@ import {
     SHIPMENT_AUDIT_ACTIONS,
     SHIPMENT_SORT,
     SearchShipmentsQuerySchema,
+    TrackingEventsQuerySchema,
+    TrackingTrailQuerySchema,
 } from '../../src/modules/shipments/validators/shipment.validator';
 import { buildFilter } from '../../src/modules/shipments/repositories/shipment.read.repository';
 import { AUDIT_CATALOG } from '../../src/modules/audit/domain/audit.catalog';
@@ -303,9 +305,15 @@ t.assert(
     'there is NO admin status-transition action — driving the lifecycle is not administrative',
     () => Object.keys(auditCatalog).every((name) => !name.startsWith('shipments.status')),
 );
+/**
+ * Two at Phase 6 (`reassign`, `cancel`), three since Phase 6.I added the audited GPS-trail
+ * read. Derived from the catalog rather than typed out, which is why adding the third
+ * action widened the filter with no edit here — the count is what pins that it is derived.
+ */
 t.assert(
     'the activity filter is derived from the catalog',
-    () => SHIPMENT_AUDIT_ACTIONS.length === 2,
+    () => SHIPMENT_AUDIT_ACTIONS.length === 3
+        && SHIPMENT_AUDIT_ACTIONS.includes('shipments.tracking.trail.read'),
 );
 t.assert(
     'the activity feed refuses an action from another family',
@@ -324,7 +332,49 @@ t.section('7. Routes');
 
 const routes = routeManifest().filter((route) => route.fullPath.startsWith('/api/v1/shipments'));
 
-t.assert('six shipment routes are registered', () => routes.length === 6);
+/** Six at Phase 6, plus the two geo-tracker data reads at Phase 6.I (ADR-020). */
+t.assert('eight shipment routes are registered', () => routes.length === 8);
+
+/**
+ * The scope model, asserted where it is actually enforced.
+ *
+ * A delivery's trail is reachable only by naming a SHIPMENT — geo-tracker has no route
+ * that takes an agent id and answers with a trail — and these two routes are this
+ * service's half of that bound. They hold `shipments.tracking.read`, in the shipments
+ * family, NOT the agents-family permission that governs the live-position read: live
+ * surveillance of a person and a case file about a delivery are different exposures, and
+ * an operator can grant them apart.
+ */
+t.assert('the two tracking reads are declared, and both are GETs', () => {
+    const trail = routes.find((r) => r.fullPath.endsWith('/tracking-trail'));
+    const events = routes.find((r) => r.fullPath.endsWith('/tracking-events'));
+    return trail?.method === 'get' && events?.method === 'get'
+        && JSON.stringify(trail.access).includes('shipments.tracking.read')
+        && JSON.stringify(events.access).includes('shipments.tracking.read');
+});
+
+/**
+ * ⚠ The audited READ. Every point on this trail is where a person actually was, so the
+ * audit row commits BEFORE the disclosure and its failure is not caught. Nothing at boot
+ * requires an audit declaration on a `get`, so this assertion is the only thing standing
+ * between an audited disclosure and a read like any other.
+ */
+t.assert('the trail read is audited and the events read is not', () => {
+    const trail = routes.find((r) => r.fullPath.endsWith('/tracking-trail'));
+    const events = routes.find((r) => r.fullPath.endsWith('/tracking-events'));
+    return trail?.audit?.kind === 'records'
+        && trail.audit.actions.includes('shipments.tracking.trail.read')
+        && !events?.audit;
+});
+
+/** The purpose axis: a trail disclosure must say why, and geo-tracker refuses one without. */
+t.assert('the trail read requires a reason; the events read takes none', () =>
+    TrackingTrailQuerySchema.safeParse({ reason: 'dispute 114' }).success
+    && !TrackingTrailQuerySchema.safeParse({}).success
+    && !TrackingTrailQuerySchema.safeParse({ reason: ' ' }).success
+    && !TrackingTrailQuerySchema.safeParse({ reason: 'dispute 114', limit: 50_000 }).success
+    && TrackingEventsQuerySchema.safeParse({}).success
+    && !TrackingEventsQuerySchema.safeParse({ reason: 'why' }).success);
 t.assert('every one carries an access declaration', () => routes.every((route) => route.access !== undefined));
 t.assert(
     'none is public',

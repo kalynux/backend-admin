@@ -76,6 +76,32 @@ const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
     'vendors.read',
     'agents.read',
     'agencies.read',
+
+    /**
+     * Live tracking data from geo-tracker — the sharpest read on this surface, and it is
+     * here on purpose (Phase 6.I).
+     *
+     * "Where is my delivery right now" is one of the commonest things a ticket asks, and
+     * it is the question Support opens the screen for. Withholding it means every such
+     * ticket escalates to a tier that has no more context than the person already holding
+     * it — the same argument that put `money.payments.read` on this list.
+     *
+     * What bounds it is not this grant. It is the record: every read under this permission
+     * that emits coordinates commits an audit row BEFORE the disclosure and does not catch
+     * a failure of that write, so with the audit store down nothing is disclosed. That is
+     * the `money.payouts.destination.read` posture, applied one tier lower because the
+     * question is one tier lower. See `agents/domain/tracking-disclosure.ts`.
+     *
+     * The other bound is on the far side: geo-tracker's own scope model refuses a trail
+     * that is not scoped to one shipment, so no permission here can produce "where has
+     * this person been this week".
+     *
+     * The two halves are separate permissions because they are separate exposures — live
+     * surveillance of a person, versus a case file about a delivery. Support holds both;
+     * an operator can still grant them apart, which is the point of the split.
+     */
+    'agents.tracking.read',
+    'shipments.tracking.read',
     'orders.read',
     'orders.disputes.read',
     'shipments.read',

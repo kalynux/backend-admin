@@ -270,14 +270,44 @@ const EnvSchema = z
          *
          * The `_OPS_` is deliberate and load-bearing as documentation: this is not a general
          * geo-tracker door, it is three unauthenticated service-level paths (`/healthz`,
-         * `/readyz`, `/metrics`). ADR-009 §D-2 — no geo-tracker **data** door — still stands;
-         * see `infra/geo/geo-tracker.client.ts`.
+         * `/readyz`, `/metrics`). See `infra/geo/geo-tracker.client.ts`.
          *
          * No token pairs with it, because those three paths take no credential. Optional, and
          * genuinely inert when unset: the reads answer `configured: false` rather than failing.
+         *
+         * ⚠ **A DATA door now exists too (Phase 6.I), and it is a SEPARATE variable below.**
+         * ADR-009 §D-2 read as "no geo-tracker data door" until ADR-020 amended it. Two base
+         * URLs for what is usually one host is not an oversight: it is the lever that lets a
+         * deployment take the operations reads and open no data door at all, and it keeps a
+         * data call one variable away from ever being made with no credential.
          */
         GEO_TRACKER_OPS_BASE_URL: z.string().url().optional(),
         GEO_TRACKER_OPS_TIMEOUT_MS: positiveInt.default(2_000),
+
+        /**
+         * ── geo-tracker DATA reads (Phase 6.I · ADR-020) ──────────────────────
+         *
+         * The service-caller door: `/internal/*` on geo-tracker, four reads, authenticated by
+         * a shared credential rather than by any user identity — which is the whole point,
+         * because a wi-admin administrator holds no jovi-mall `users` row and geo-tracker's
+         * viewer path therefore cannot resolve them.
+         *
+         * ⚠ `GEO_TRACKER_ADMIN_TOKEN` has **the same name on geo-tracker's side**, and that is
+         * deliberate: it is the fifth secret shared across a service boundary on this platform
+         * and the first whose name does not have to be translated. Three of the other four
+         * differ, which is why rotation needs a runbook. Nothing compares the two values, so a
+         * MISMATCH is still silent — but it surfaces immediately here, as tracking reads
+         * answering "geo-tracker refused the credential".
+         *
+         * Both optional and inert when unset: the tracking reads answer `configured: false`,
+         * exactly as the operations ones do. The refinement below refuses a URL with no token,
+         * because that combination produces calls geo-tracker rejects at its own guard — which
+         * reads as "geo-tracker is broken" rather than "this service is misconfigured", the
+         * same trap `JOVI_MALL_SERVICE_TOKEN` is protected from.
+         */
+        GEO_TRACKER_DATA_BASE_URL: z.string().url().optional(),
+        GEO_TRACKER_ADMIN_TOKEN: z.string().min(1).optional(),
+        GEO_TRACKER_DATA_TIMEOUT_MS: positiveInt.default(4_000),
     })
     .superRefine((env, ctx) => {
         // A base URL without a token would produce calls jovi-mall rejects at the guard,
@@ -287,6 +317,17 @@ const EnvSchema = z
                 code: z.ZodIssueCode.custom,
                 path: ['JOVI_MALL_SERVICE_TOKEN'],
                 message: 'JOVI_MALL_SERVICE_TOKEN is required whenever JOVI_MALL_BASE_URL is set',
+            });
+        }
+
+        // Same shape, same reason — and it matters more here, because the failure would be a
+        // 401 from a service whose whole door is new. An operator debugging that goes looking
+        // at geo-tracker's scope configuration rather than at this file.
+        if (env.GEO_TRACKER_DATA_BASE_URL && !env.GEO_TRACKER_ADMIN_TOKEN) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['GEO_TRACKER_ADMIN_TOKEN'],
+                message: 'GEO_TRACKER_ADMIN_TOKEN is required whenever GEO_TRACKER_DATA_BASE_URL is set',
             });
         }
 

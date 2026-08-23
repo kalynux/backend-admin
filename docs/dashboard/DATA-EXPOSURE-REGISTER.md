@@ -114,6 +114,45 @@ they were last seen. If your reading of the policy differs, say so and we will g
 2. Audit the disclosure, whichever way it is served. We cannot do this from the client — there is no
    endpoint to call.
 
+> ### 📌 Both asks were GRANTED — for a different field, at Phase 6.I (2026-08-22)
+>
+> **Backend note.** See [ADR-020](../ADR-020-ADMIN-DATA-DOOR.md) D-4 … D-6.
+>
+> `tracking.lastKnown` itself is **unchanged**: still `agents.read`, still unaudited, still
+> shipped with `isStale`. The 2026-08-17 answer above stands, and the product reasoning behind
+> it — a last-known position is a historical record, and a denied verdict means *do not track
+> them now* rather than *erase where they were last seen*.
+>
+> What changed is that the sentence *"the live position lives in geo-tracker and this service
+> has no door to it"* is **no longer true**. geo-tracker gained a service-caller authorization
+> path, so `GET /agents/:agentId/live-position` now exists — and it is precisely what asks 1
+> and 2 described:
+>
+> - **Its own permission** (`agents.tracking.read`; the delivery trail is
+>   `shipments.tracking.read`), rather than riding `agents.read`.
+> - **Audited on every call**, `agents.tracking.position.read`, with the row committed
+>   **before** the disclosure and its failure not caught — so with the audit store down,
+>   nothing is disclosed. Same posture as `GET /money/payouts/:payoutId/destination`.
+> - **A `reason` is required**, 3–200 characters, recorded on the row.
+> - **Tracking Allow gates it**, which the stale mirror deliberately is not: an agent who has
+>   not granted it answers `position: null, withheld: "tracking_allow_off"` — and no timestamp
+>   either, because that they are streaming is itself part of what the opt-out withholds.
+>
+> **Support holds both new permissions.** That was decided rather than defaulted — *"where is
+> my delivery right now"* is what a ticket asks — and the audit is the other half of the same
+> decision. Widening the audience and adding the record were one choice.
+>
+> **For the dashboard, the practical consequence is that these are two different fields
+> answering two different questions.** `tracking.lastKnown` is *where were they last seen*
+> (free, unaudited, safe to render on every detail load). `live-position` is *where are they
+> now* (a stated reason, an audit row per call, and a permission not everyone holds). The
+> reveal pattern you already built for `lastKnown` is the right shape for the new one too —
+> but every reveal is now a recorded event, so do not poll it behind the operator's back.
+>
+> `GET /shipments/:shipmentId/tracking-trail` is the third: a delivery's GPS trail, audited on
+> the same terms. Note there is deliberately **no** agent-scoped trail read anywhere — a trail
+> is reachable only by naming a delivery, on both sides of the boundary.
+
 ---
 
 ## 2. Five nested objects ship `snake_case`

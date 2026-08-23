@@ -142,6 +142,42 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'agents', action: 'write', phase: 5,
         summary: 'Override an agent’s live-location tracking permission',
     },
+    /**
+     * Reading geo-tracker's live tracking data — the door ADR-020 opened, and the first
+     * permission in this catalog that reaches a second service's *data*.
+     *
+     * ── Why it is not `agents.read` ───────────────────────────────────────────
+     * `agents.read` already carries `tracking.lastKnown.position`, which the dashboard's
+     * DATA-EXPOSURE-REGISTER §1 flagged and which was answered "it stays" on the grounds
+     * that a last-known position is a historical record. This is categorically sharper:
+     * a LIVE position, and a delivery's minute-by-minute GPS trail. Ask #1 of that
+     * register was "gate the field on a permission of its own"; that ask was declined for
+     * the stale mirror and is granted here, where it is the right answer.
+     *
+     * ── Support HOLDS it, and that was a decision, not an oversight ───────────
+     * "Where is my delivery right now" is one of the commonest tickets, and refusing it to
+     * the tier that answers tickets escalates every one of them. The exposure that buys is
+     * real and is balanced deliberately by the OTHER half of the same decision: every read
+     * under this permission that emits coordinates writes an audit row FIRST, fail-closed,
+     * so the control is "who did, and how often" rather than "who may". See
+     * `agents/domain/tracking-disclosure.ts`.
+     *
+     * ── Unflagged, and each flag is refused for a reason ──────────────────────
+     * Not `financial` (no money), not `destructive` (nothing is written at all — every
+     * route is a GET), not `escalation` (it grants no privilege). Flagging it would drop
+     * it out of `allInFamily('agents')` for tier 2 AND make `assertGrantTableValid()`
+     * refuse it to Support at boot, which is the opposite of what was decided.
+     *
+     * It covers the AGENT-scoped half of that door only — presence and the live position.
+     * The delivery's GPS trail is `shipments.tracking.read`, in its own family: the two are
+     * different exposures (live surveillance of a person, versus a case file about a
+     * delivery) and an operator should be able to grant them apart, which is also how
+     * geo-tracker's own scope model separates them.
+     */
+    'agents.tracking.read': {
+        family: 'agents', action: 'read', phase: 6,
+        summary: 'Read an agent’s live tracking state and live position from geo-tracker — every position read is recorded in the audit trail',
+    },
     'agents.cod_threshold.set': {
         family: 'agents', action: 'write', phase: 5, financial: true,
         summary: 'Set how much cash on delivery an agent may hold before remitting',
@@ -735,6 +771,36 @@ export const PERMISSION_CATALOG = Object.freeze({
     'shipments.read': {
         family: 'shipments', action: 'read', phase: 6,
         summary: 'Search shipments and view their detail and assignment state',
+    },
+    /**
+     * The shipment half of the geo-tracker data door (Phase 6.I · ADR-020): one delivery's
+     * GPS trail, and its tracking events.
+     *
+     * ── Why this is a second permission and not `agents.tracking.read` ────────
+     * It began as one permission covering the whole door, and the audit catalog's
+     * family-consistency assertion refused it — an action named `shipments.*` governed by
+     * an `agents.*` permission. That assertion was right about more than naming. The two
+     * halves are different exposures and an operator should be able to grant them
+     * separately: `agents.tracking.read` is **live surveillance of a person**, this is **a
+     * case file about a delivery**, and it is the second that a dispute investigation
+     * actually needs.
+     *
+     * The split also lines this catalog up with geo-tracker's own scope model, which
+     * already separates `agent:position` from `shipment:trail` for exactly that reason —
+     * so a deployment can hold the trail scope and not the position one, and wi-admin can
+     * now express the same policy rather than flattening it.
+     *
+     * Support holds it, on the same reasoning as `agents.tracking.read`, and the trail read
+     * is likewise audited fail-closed before it runs.
+     *
+     * Deliberately NOT paired with `shipments.read` on its routes, unlike
+     * `/:shipmentId/offers` which names `agents.read` beside it. That pattern states a
+     * CROSS-FAMILY dependency; every tier holding one of these holds the other, so naming
+     * both would be noise rather than a statement.
+     */
+    'shipments.tracking.read': {
+        family: 'shipments', action: 'read', phase: 6,
+        summary: 'Read a delivery’s GPS trail and tracking events from geo-tracker — every trail read is recorded in the audit trail',
     },
     'shipments.reassign': {
         family: 'shipments', action: 'write', phase: 6,

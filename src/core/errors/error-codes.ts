@@ -237,6 +237,37 @@ export const ERROR_CODES = Object.freeze({
     ADMIN_AUTH_CSRF_INVALID: 'ADMIN_AUTH_CSRF_INVALID',
     ADMIN_AUTH_PASSWORD_WEAK: 'ADMIN_AUTH_PASSWORD_WEAK',
 
+    // ── LIVE TRACKING (Phase 6.I · ADR-020) ───────────────────────────────────
+    //
+    // The three ways a live-tracking read fails that are not this service's own 4xx.
+    // They are separate codes rather than one because the remedies are different people:
+    // the first is an operator's deployment, the second is geo-tracker's scope
+    // configuration, and the third is somebody's pager.
+
+    /**
+     * `GEO_TRACKER_DATA_BASE_URL` / `GEO_TRACKER_ADMIN_TOKEN` are unset, so this deployment
+     * has no data door at all — a supported posture, and the default.
+     *
+     * A 503 rather than a 404: the routes exist and the capability is built. Telling a
+     * dashboard "no such endpoint" would send somebody to look for a missing deploy.
+     */
+    TRACKING_DOOR_UNCONFIGURED: 'TRACKING_DOOR_UNCONFIGURED',
+
+    /**
+     * geo-tracker refused the read. `details.upstreamCode` carries its code verbatim —
+     * `SERVICE_SCOPE_FORBIDDEN` (this credential does not hold the scope, with
+     * `details.scope` naming it), `SERVICE_TOKEN_INVALID` (the shared secret has drifted),
+     * `SERVICE_DOOR_NOT_CONFIGURED` (geo-tracker's half is closed).
+     *
+     * Passed through rather than collapsed because each of those is a one-line fix by a
+     * different person, and a generic "tracking unavailable" makes all three look like an
+     * outage.
+     */
+    TRACKING_DOOR_REFUSED: 'TRACKING_DOOR_REFUSED',
+
+    /** geo-tracker could not be reached, or did not answer in time. Retry; report nothing. */
+    TRACKING_DOOR_UNAVAILABLE: 'TRACKING_DOOR_UNAVAILABLE',
+
     // ── MONEY / ACCOUNTS (Phase 11) ───────────────────────────────────────────
 
     /**

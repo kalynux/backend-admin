@@ -14,6 +14,8 @@ Design record: [`../ADR-010-ORDERS-AND-SHIPMENTS.md`](../ADR-010-ORDERS-AND-SHIP
 | `GET` | `/shipments/:shipmentId` | `shipments.read` | direct read | — |
 | `GET` | `/shipments/:shipmentId/offers` | `shipments.read` **+** `agents.read` | direct read | — |
 | `GET` | `/shipments/:shipmentId/activity` | `shipments.read` **+** `audit.read` | direct read | — |
+| `GET` | `/shipments/:shipmentId/tracking-trail` | `shipments.tracking.read` | **geo-tracker** | ✅ |
+| `GET` | `/shipments/:shipmentId/tracking-events` | `shipments.tracking.read` | **geo-tracker** | — |
 | `POST` | `/shipments/:shipmentId/reassign` | `shipments.reassign` | **delegated** | ✅ |
 | `POST` | `/shipments/:shipmentId/cancel` | `shipments.cancel` | **delegated** | ✅ |
 
@@ -290,6 +292,142 @@ What **administrators** did to this shipment.
 | **Sorting** | `occurredAt` only. Default `-occurredAt` |
 | **Filters** | `action` (only `shipments.*`, derived from the catalog), `status`, `from`/`to` (max 366 days) |
 | **Response** | Audit entries — see [audit.md](audit.md#get-audit) |
+
+---
+
+# Live tracking — the geo-tracker data door
+
+**New at Phase 6.I.** Design record: [ADR-020](../ADR-020-ADMIN-DATA-DOOR.md); the wire contract
+on the other side is `geo-tracker/api-doc/service-data-door.md`. The agent-scoped half of the
+same door lives in [agents.md](agents.md#live-tracking--the-geo-tracker-data-door).
+
+**Both reads are shipment-scoped, and that is the design rather than a URL choice.** geo-tracker
+has **no** endpoint that takes an agent id and answers with a trail: a trail is reachable only by
+naming a delivery. That turns the credential into a case-file one rather than a surveillance one,
+and it means *"where has this person been this week"* is not a question any permission on this
+service can produce.
+
+They hold `shipments.tracking.read` — **not** the agents-family permission that governs the live
+position. The two halves are different exposures (live surveillance of a person, versus a case
+file about a completed delivery), so an operator can grant them apart. That mirrors geo-tracker's
+own scope model, which separates `agent:position` from `shipment:trail`.
+
+Both are inert when the door is not configured, answering `503 TRACKING_DOOR_UNCONFIGURED`.
+
+---
+
+## `GET /shipments/:shipmentId/tracking-trail`
+
+The delivery's persisted GPS trail.
+
+| | |
+|---|---|
+| **Permission** | `shipments.tracking.read` |
+| **Transport** | geo-tracker (data door) |
+| **Parameters** | `reason` — **required**, 3–200 characters; `limit` — optional, 1–5000 (default 1000) |
+| **Audited** | **Yes — `shipments.tracking.trail.read`, and the row commits BEFORE the read** |
+
+### Response (200)
+
+```jsonc
+{
+  "shipmentId": "…",
+  "sessions": [
+    { "sessionId": "3f1c8a52-…", "agentId": "…",
+      "startedAt": "2026-08-22T08:02:11.000Z",
+      "endedAt": "2026-08-22T09:58:40.000Z",
+      "endReason": "shipment_terminal",
+      "terminalStatus": "delivered",
+      "terminalAt": "2026-08-22T09:58:40.000Z" },
+    { "sessionId": "a1b2c3d4-…", "agentId": "…",
+      "startedAt": "2026-08-22T06:30:00.000Z",
+      "endedAt": "2026-08-22T07:55:02.000Z",
+      "endReason": "shipment_released",
+      "terminalStatus": "", "terminalAt": null }
+  ],
+  "checkpoints": [
+    { "sessionId": "3f1c8a52-…", "agentId": "…",
+      "lat": 4.0511, "lng": 9.7043, "heading": 118.4, "speed": 7.2,
+      "kind": "movement", "recordedAt": "2026-08-22T09:40:58.000Z" }
+  ],
+  "truncated": false,
+  "limit": 1000
+}
+```
+
+**`sessions` is plural because a reassigned delivery has more than one.** One per agent who
+carried it, newest first, with their checkpoints merged into a single trail. A session that ended
+`shipment_released` with no `terminalStatus` is an agent who *left* the delivery rather than
+finishing it — which is exactly the half an investigation into a reassignment wants, and exactly
+the half a "latest session only" read would have dropped.
+
+**`truncated` is not cosmetic.** A partial trail that does not announce itself is
+indistinguishable from a gap in the record, and the record is what a delivery dispute is argued
+from. Never render one as complete; raise `limit` or say so on the screen.
+
+**Checkpoints are temporary in geo-tracker.** They are pruned once the shipment ends and the
+retention window passes. An old delivery legitimately answers with its `sessions` and an empty
+`checkpoints` array — that is retention working, not a missing trail. The `sessions` themselves
+go too, eventually; an unknown shipment and a fully-pruned one are indistinguishable, and both
+answer `200` with empty arrays rather than `404`.
+
+**`lat`/`lng`, not GeoJSON.** These come from geo-tracker, which is coordinate-native; the
+`[longitude, latitude]` ordering elsewhere in this API is jovi-mall's GeoJSON convention. Do not
+assume one from the other.
+
+### The audit row
+
+Committed first, not caught on failure — with the audit store down, nothing is disclosed. It
+records the shape of what was revealed (`checkpoints`, `sessions`, `agentIds`, `truncated`) and
+the stated reason, and **never the coordinates**. `agentIds` is the one place the row names whose
+movements were actually read, which is why it is there: on a reassigned delivery the shipment id
+alone would not say.
+
+### Errors
+
+Same set as the live-position read — see
+[agents.md](agents.md#get-agentsagentidlive-position). `404 NOT_FOUND` is checked here, against
+this service's shipment record, before anything is audited.
+
+---
+
+## `GET /shipments/:shipmentId/tracking-events`
+
+The delivery's tracking-state history and its connection log.
+
+| | |
+|---|---|
+| **Permission** | `shipments.tracking.read` |
+| **Transport** | geo-tracker (data door) |
+| **Parameters** | `limit` — optional, 1–1000 (default 200). **No `reason`** |
+| **Audited** | No |
+
+```jsonc
+{
+  "shipmentId": "…",
+  "sessions": [ "…as above…" ],
+  "transitions": [
+    { "sessionId": "3f1c8a52-…", "agentId": "…",
+      "from": "network_lost", "to": "online", "trigger": "heartbeat",
+      "reason": "", "occurredAt": "2026-08-22T09:12:44.000Z" }
+  ],
+  "connections": [
+    { "sessionId": "3f1c8a52-…", "connectionId": "8f14e45f-…", "agentId": "…",
+      "connectedAt": "2026-08-22T08:02:12.000Z",
+      "disconnectedAt": null, "endReason": "" }
+  ],
+  "truncated": false,
+  "limit": 200
+}
+```
+
+**No coordinates, so no reason and no audit row** — the same line the whole door is drawn on.
+This is where *"the agent says they were delivering, the customer says the app showed nothing"*
+gets answered: it shows when tracking went online, degraded, lost the network and came back.
+
+Several `connections` rows on one session mean **one** delivery whose agent's phone dropped and
+reconnected — not several deliveries. Unlike the trail, these rows are permanent in geo-tracker
+and are never pruned, so an old delivery still answers with its history.
 
 ---
 

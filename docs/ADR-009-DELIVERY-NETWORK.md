@@ -96,6 +96,18 @@ still the right call.
 > surface across jovi-mall and this service and **did not touch geo-tracker at all** — no door was
 > opened, not even for service-level health. A reader arriving at ADR-014 looking for one should
 > stop here.
+>
+> ⛔ **AMENDED — and the paragraph below is now HISTORY, not the standing answer.** Phase 15
+> opened a narrow **operations** door (ADR-015 D-5: `/healthz`, `/readyz`, `/metrics`, no
+> identity, no agent), and **Phase 6.I opened a scoped DATA door**
+> ([ADR-020](ADR-020-ADMIN-DATA-DOOR.md), 2026-08-22). The second exit named below — *"adding a
+> service-caller identity geo-tracker does not have"* — is the one that was taken; administrators
+> still hold **no** platform `users` row, which is the half of this decision that stands
+> unchanged.
+>
+> Kept rather than rewritten because the reasoning is still the reason the door is shaped the way
+> it is: the whole scope model exists because a caller with no viewer identity has nothing for
+> per-agent visibility to resolve against.
 
 
 The two gates, as implemented: the **live position** is gated on **Tracking Allow alone** —

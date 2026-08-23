@@ -15,9 +15,9 @@ Design records: [`../ADR-003-GRANULAR-PERMISSIONS.md`](../ADR-003-GRANULAR-PERMI
 
 | Level (`tier`) | Label | Holds | Shape of the job |
 |---|---|---|---|
-| **1** | Developer | 111 of 111 | Everything, including the developer tools and every escalation-flagged action |
-| **2** | Admin | 94 of 111 | The operational tier — runs the platform day to day, including the money |
-| **3** | Support | 27 of 111 | Ticket work, the lookups needed to answer a ticket, and editorial write on articles and bylines. Nothing financial, nothing destructive, and publishing stays a level above |
+| **1** | Developer | 113 of 113 | Everything, including the developer tools and every escalation-flagged action |
+| **2** | Admin | 96 of 113 | The operational tier — runs the platform day to day, including the money |
+| **3** | Support | 29 of 113 | Ticket work, the lookups needed to answer a ticket, and editorial write on articles and bylines. Nothing financial, nothing destructive, and publishing stays a level above |
 
 A level is an administrator's **entire** authorization state. `tier` appears on the profile
 returned by `GET /auth/me`.
@@ -117,12 +117,35 @@ carries `financial`, because its *output* is the material a fraudulent payout in
 built from. `money.earnings.read` and `cod.overview.read` are unflagged and belong that way —
 do not reach for `financial` merely because a read concerns money.
 
+### Three reads are audited, and two of them are held by Support
+
+"Reads are not actions" is the rule, and it holds because a read leaves no state behind — so the
+permission gate is the whole control and a row per read would be volume with nothing to say.
+**Three permissions break it**, all for the same reason: their *output* **is** the disclosure.
+
+| Permission | What it discloses | Held by Support |
+|---|---|:-:|
+| `money.payouts.destination.read` | A beneficiary's account number | no (`financial`) |
+| `agents.tracking.read` | Where a person is, right now | **yes** |
+| `shipments.tracking.read` | Where a person went, over one delivery | **yes** |
+
+For a disclosure, "who *may*" is not the interesting question; **"who *did*, and how often"** is.
+An administrator who unmasks forty positions in an afternoon is doing something other than
+answering tickets, and nothing else in this service would ever see it.
+
+The two tracking permissions are **unflagged** and reach Support deliberately — *"where is my
+delivery right now"* is what a ticket asks, and refusing it to the tier that answers tickets
+escalates every one of them. **The audit is the other half of that decision**: on every
+coordinate-emitting read the row commits **before** the disclosure and its failure is not caught,
+so with the audit store unreachable nothing is disclosed. Widening the audience and adding the
+record were one decision, not two. See [ADR-020](../ADR-020-ADMIN-DATA-DOOR.md) D-5.
+
 ---
 
 ## The matrix
 
 ● granted  ·  not granted  ·  **†** = catalogued policy with **no endpoint built yet**
-(**4** of 111 permissions — down from 27, and the four that remain each have a written reason
+(**4** of 113 permissions — down from 27, and the four that remain each have a written reason
 below. The policy is decided ahead of the surface, deliberately.)
 
 ### `agents`
@@ -134,6 +157,7 @@ below. The policy is decided ahead of the surface, deliberately.)
 | `agents.ban` | write | ● | ● | · | destructive | Permanently ban an agent from the platform |
 | `agents.kyc.review` | write | ● | ● | · | — | Approve or reject an agent’s identity documents — this is what lets an agent work |
 | `agents.tracking.set` | write | ● | ● | · | — | Override an agent’s live-location tracking permission |
+| `agents.tracking.read` | read | ● | ● | ● | — | Read an agent’s live tracking state and live position from geo-tracker — every position read is recorded in the audit trail |
 | `agents.cod_threshold.set` | write | ● | ● | · | financial | Set how much cash on delivery an agent may hold before remitting |
 | `agents.transfer` | write | ● | ● | · | — | Move an agent from one delivery agency to another |
 | `agents.contracts.manage` | write | ● | ● | · | — | Suspend, reinstate or terminate one agent↔agency contract (never its terms) |
@@ -293,6 +317,7 @@ size cap still apply to it.
 | Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
 |---|---|:-:|:-:|:-:|---|---|
 | `shipments.read` | read | ● | ● | ● | — | Search shipments and view their detail and assignment state |
+| `shipments.tracking.read` | read | ● | ● | ● | — | Read a delivery’s GPS trail and tracking events from geo-tracker — every trail read is recorded in the audit trail |
 | `shipments.reassign` | write | ● | ● | · | — | Manually move a shipment to a different agent or agency |
 | `shipments.cancel` | write | ● | ● | · | destructive | Cancel a shipment already in progress |
 

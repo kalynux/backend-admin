@@ -352,6 +352,55 @@ export const AUDIT_CATALOG = Object.freeze({
         transport: 'delegated',
         summary: 'Lifted an agent’s platform ban',
     },
+    /**
+     * The two audited READS added at Phase 6.I — and the second and third exceptions in
+     * this catalog to "reads are not actions", argued on the same grounds as the first.
+     *
+     * `money.payouts.destination.read` breaks that rule because its output is the material
+     * a fraudulent payout instruction is built from. These break it because their output is
+     * **a person's location**, read by an administrator that person has no relationship
+     * with. For a disclosure the interesting question is not who MAY but who DID: an
+     * administrator who unmasks forty positions in an afternoon is doing something other
+     * than answering tickets, and nothing else in this service would ever see it.
+     *
+     * `external`, not `observation`, and the difference is the whole design. `observation`
+     * is best-effort and swallows a write failure — right for a login, which happened on
+     * its own terms; wrong here, where **the audit row IS the control**. `auditedAttempt`
+     * commits the intent first and does not catch, so with the audit store unreachable the
+     * disclosure simply never runs. That posture is what makes granting the permission to
+     * Support defensible.
+     *
+     * ── Why two actions, in two families ──────────────────────────────────────
+     * Their TARGETS differ, and the target is the column an operator searches. "Who looked
+     * at where this agent is" and "who pulled this delivery's trail" are different
+     * questions, and one action would make the first unanswerable for any read that went
+     * through the shipment door.
+     *
+     * They also hold two different permissions, and that is `assertAuditCatalogValid()`'s
+     * doing rather than a first draft: it refused a `shipments.*` action governed by an
+     * `agents.*` permission, and the rule was right about more than naming. The split
+     * (`agents.tracking.read` / `shipments.tracking.read`) lines this up with geo-tracker's
+     * own scope model, which separates `agent:position` from `shipment:trail` for the same
+     * reason — live surveillance of a person is not the same exposure as a case file about
+     * a delivery, and an operator should be able to grant them apart.
+     *
+     * Neither row carries coordinates. It records THAT a location was disclosed, the
+     * subject, and the stated reason — putting the values in would move a person's
+     * position into the one store readable without the permission gating it, and the audit
+     * trail would become the leak. Same rule the payout disclosure follows.
+     */
+    'agents.tracking.position.read': {
+        permission: 'agents.tracking.read',
+        target: 'agent',
+        transport: 'external',
+        summary: 'Read an agent’s live position from geo-tracker',
+    },
+    'shipments.tracking.trail.read': {
+        permission: 'shipments.tracking.read',
+        target: 'shipment',
+        transport: 'external',
+        summary: 'Read a delivery’s GPS trail from geo-tracker',
+    },
     'agents.transfer': {
         permission: 'agents.transfer',
         target: 'agent',
@@ -677,6 +726,22 @@ export const AUDIT_CATALOG = Object.freeze({
         target: 'agency',
         transport: 'delegated',
         summary: 'Approved a delivery agency’s business verification',
+    },
+    /**
+     * The refusal, added in Phase 6 Step 4. It shares the `agencies.verify` PERMISSION —
+     * one review capability, two verdicts, the same shape as `vendors.kyc.approve` /
+     * `vendors.kyc.reject` — and gets its own action here because that is what an
+     * administrator later searches the trail by.
+     *
+     * The reason is in this row's payload AND forwarded to jovi-mall, which stores it on
+     * the agency. That is the deliberate exception to `agencies.deactivate` below, whose
+     * reason is audit-only: this one is shown to the agency, who cannot read this database.
+     */
+    'agencies.reject': {
+        permission: 'agencies.verify',
+        target: 'agency',
+        transport: 'delegated',
+        summary: 'Refused a delivery agency’s business verification',
     },
     'agencies.deactivate': {
         permission: 'agencies.deactivate',

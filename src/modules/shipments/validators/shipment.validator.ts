@@ -132,3 +132,29 @@ export type ShipmentSearchQuery = z.infer<typeof SearchShipmentsQuerySchema>;
 export type ListShipmentActivityQuery = z.infer<typeof ListShipmentActivityQuerySchema>;
 export type ReassignShipmentBody = z.infer<typeof ReassignShipmentSchema>;
 export type CancelShipmentBody = z.infer<typeof CancelShipmentSchema>;
+
+/**
+ * The GPS-trail read (Phase 6.I · ADR-020).
+ *
+ * `reason` is the purpose axis of geo-tracker's scope model and is required — see the note
+ * on `TrackingReadQuerySchema` in `agents/validators/agent.validator.ts`, which this
+ * mirrors deliberately rather than sharing: the two live in the modules whose routes carry
+ * them, and a shared schema would put the rule in neither.
+ *
+ * `limit` is bounded here at geo-tracker's own ceiling. It ignores an out-of-range value in
+ * favour of its default, so a 400 from this side is the more useful answer: a caller asking
+ * for 50,000 points wants to know they will not get them, rather than silently receiving
+ * 1,000 and believing it is the whole trail.
+ */
+export const TrackingTrailQuerySchema = z.object({
+    reason: reasonText('Say why this trail is being read — it is recorded in the audit trail', { max: 200 }),
+    limit: z.coerce.number().int().positive().max(5000).optional(),
+}).strict();
+
+/** Tracking events carry no coordinates: no reason, and `limit` at geo-tracker's ceiling. */
+export const TrackingEventsQuerySchema = z.object({
+    limit: z.coerce.number().int().positive().max(1000).optional(),
+}).strict();
+
+export type TrackingTrailQuery = z.infer<typeof TrackingTrailQuerySchema>;
+export type TrackingEventsQuery = z.infer<typeof TrackingEventsQuerySchema>;

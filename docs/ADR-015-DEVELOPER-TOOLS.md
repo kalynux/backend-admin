@@ -221,6 +221,19 @@ what is *in force*.
 **Decision: wi-admin reads geo-tracker's `/healthz`, `/readyz` and `/metrics`. Nothing else.
 geo-tracker source is not modified.**
 
+> ⛔ **AMENDED 2026-08-22 by [ADR-020](ADR-020-ADMIN-DATA-DOOR.md).** *"Nothing else"* held for
+> three phases and no longer does: geo-tracker gained a service-caller authorization path and
+> wi-admin reads four `/internal/*` endpoints through it, gated by a configured scope model and
+> audited fail-closed. **This decision was not used as the precedent** — the paragraph below
+> designed it *not to be one*, and a separate decision was taken instead, which is the outcome
+> that paragraph was aiming for.
+>
+> Three things here survive unchanged and now govern **both** doors: the ops path set stays a
+> closed literal of three, the two clients are **separate files with separate base-URL
+> variables**, and *the hard rule below is the rule for the data door too*. `test:devtools`'s
+> scan was widened in that change — its regex matched `geo-tracker\.client`, which does not match
+> `geo-tracker-data.client`.
+
 ADR-009 §D-2 says wi-admin has no geo-tracker door, because every geo-tracker **data** read needs
 a real jovi-mall user JWT and resolves per-agent visibility by calling `/api/tracking/visible-agents`
 *as the viewer* — which does a `findById` on `users`, and an administrator deliberately has no
