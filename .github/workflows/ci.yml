@@ -23,13 +23,63 @@ jobs:
     name: typecheck · lint · DB-free suites · audit
     runs-on: ubuntu-latest
 
+    # ⚠ THIS JOB NEEDS jovi-mall CHECKED OUT BESIDE IT, and that is not obvious from
+    # its name. Nine of the DB-free suites — accounts, agencies, agents, billing, cod,
+    # money, orders, shipments, users — each declare
+    #     const JOVI = join(__dirname, '..', '..', '..', 'jovi-mall', 'src')
+    # and SOURCE-SCAN the other service. They are the only enforcement of several
+    # cross-service security properties, including that `requireAuth` refuses a vendor
+    # whose role entity is inactive and that the guard is `=== "inactive"` rather than
+    # `!== "active"` (the mass-lockout guard).
+    #
+    # With a plain single checkout every one of those threw ENOENT, which is how the
+    # first CI run that ever executed failed. The tempting fix — skip when the sibling
+    # is missing — would have turned nine real assertions into nothing while the build
+    # went green. Checking the sibling out keeps them enforced.
+    #
+    # The layout mirrors `live-suites` below: both repositories side by side, this one
+    # at `admin/`, so `../jovi-mall` resolves the same way it does on a developer
+    # machine under `backend/`.
+    defaults:
+      run:
+        working-directory: admin
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Require the cross-repo token
+        working-directory: .
+        env:
+          CROSS_REPO_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+        run: |
+          if [ -z "${CROSS_REPO_TOKEN}" ]; then
+            echo "::error::CROSS_REPO_TOKEN is not set, so jovi-mall cannot be checked out."
+            echo "::error::Nine DB-free suites source-scan jovi-mall and would throw ENOENT."
+            echo "::error::Create a fine-grained PAT with contents:read on kalynux/jovi-mall"
+            echo "::error::and store it as the repository secret CROSS_REPO_TOKEN."
+            exit 1
+          fi
+
+      - name: Check out wi-admin
+        uses: actions/checkout@v4
+        with:
+          path: admin
+
+      # Pinned to the branch this workspace's work actually lives on. A stale pin here
+      # compares wi-admin's live copy against a months-old jovi-mall and reports the
+      # difference as drift — the same trap taxonomy-contract.yml documents.
+      - name: Check out jovi-mall
+        uses: actions/checkout@v4
+        with:
+          repository: kalynux/jovi-mall
+          ref: phase-6-unbuilt-scope
+          token: ${{ secrets.CROSS_REPO_TOKEN }}
+          path: jovi-mall
 
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+          # The lockfile is no longer at the workspace root.
+          cache-dependency-path: admin/package-lock.json
 
       - run: npm ci
 
