@@ -1,8 +1,11 @@
 node_modules/
 dist/
+# Every .env variant is a real secret file — a hand-made backup like
+# .env.bak.localhost matches none of the three patterns this used to carry.
+# The example is the one exception; it holds names, never values.
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 *.log
 npm-debug.log*
 .DS_Store
