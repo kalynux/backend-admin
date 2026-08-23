@@ -13,6 +13,8 @@ import {
     SetAgentStatusSchema,
     SetThresholdSchema,
     SetTrackingSchema,
+    TrackingPresenceQuerySchema,
+    TrackingReadQuerySchema,
     TransferAgentSchema,
 } from '../validators/agent.validator';
 
@@ -125,6 +127,60 @@ defineRoute(router, {
     access: permission('agents.read'),
     validate: { params: AgentIdParamSchema },
     handler: AgentController.codAllocation,
+});
+
+/**
+ * ═══ The geo-tracker DATA door (Phase 6.I · ADR-020) ═══════════════════════════
+ *
+ * The two reads that reach a second service's tracking data. Until this phase ADR-009 D-2
+ * recorded that no such door existed, and it did not: every geo-tracker data read resolves
+ * per-agent visibility by asking jovi-mall *as the viewer*, and an administrator has no
+ * `users` row. geo-tracker gained a service-caller path instead of administrators gaining
+ * platform identities.
+ *
+ * `agents.tracking.read` rather than `agents.read`, because a LIVE position is
+ * categorically sharper than the stale `tracking.lastKnown` mirror the detail read already
+ * carries — that is DATA-EXPOSURE-REGISTER §1's ask #1, declined for the mirror and
+ * granted here. Support HOLDS it: "where is my delivery right now" is what a ticket asks,
+ * and refusing it to the tier that answers tickets escalates every one of them. What
+ * balances that is ask #2, which is also granted — every read below that emits coordinates
+ * writes an audit row FIRST, fail-closed.
+ */
+
+/**
+ * No reason, no audit row: presence carries device flags, session states and timestamps,
+ * and no coordinates. `positionKnown` / `positionAgeSeconds` answer "is the phone
+ * reporting" without answering "where".
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/:agentId/tracking-presence',
+    access: permission('agents.tracking.read'),
+    validate: { params: AgentIdParamSchema, query: TrackingPresenceQuerySchema },
+    handler: AgentController.trackingPresence,
+});
+
+/**
+ * ⚠ **An audited READ, and only the third in this service.**
+ *
+ * `audit: records(...)` on a `get` is the exception, not an oversight — `RouteDefinition`
+ * permits it precisely for this shape, and `money.payouts.destination.read` is the
+ * precedent. Here as there, the disclosure IS the action: the interesting question is not
+ * who MAY read a person's position but who DID, and how often.
+ *
+ * `?reason=` is required by the schema AND independently by geo-tracker. Two checks on one
+ * rule, because neither service should be able to make an unattributed disclosure on the
+ * strength of the other's validation.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/:agentId/live-position',
+    access: permission('agents.tracking.read'),
+    validate: { params: AgentIdParamSchema, query: TrackingReadQuerySchema },
+    audit: records('agents.tracking.position.read'),
+    handler: AgentController.livePosition,
 });
 
 defineRoute(router, {

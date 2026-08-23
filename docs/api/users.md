@@ -58,7 +58,7 @@ could request by query string.
 |---|---|---|
 | `search` | string, 1–120 | Matches **email**, **phone**, or — when the term is itself a 24-hex id — the **user id**. That last branch is what makes a support conversation work: an id copied out of an order, a ticket or an audit row finds the person |
 | `role` | `vendor` \| `agency` \| `agent` \| `customer` | **`admin` is deliberately absent** — no `users` row can hold that role, so offering it would advertise a search that can only return nothing |
-| `status` | `active` \| `suspended` | |
+| `status` | `active` \| `suspended` \| `closed` | `closed` is an account its **owner** closed (jovi-mall ADR-A02). Filterable because a closed account still owns orders and tickets, so "why does this order resolve to a customer with no name" is a real support question |
 | `from` / `to` | ISO-8601 instant | Creation range, half-open `[from, to)`. **Maximum span 366 days** |
 | `page`, `limit`, `sort` | | |
 
@@ -81,6 +81,7 @@ GET /api/v1/users?role=agent&status=active&search=+237670112233&sort=-createdAt&
       "roles": ["customer", "agent"],
       "status": "active",
       "suspension": null,
+      "closedAt": null,
       "createdAt": "2026-02-14T10:05:31.220Z",
       "updatedAt": "2026-08-01T08:12:44.907Z"
     }
@@ -93,7 +94,8 @@ GET /api/v1/users?role=agent&status=active&search=+237670112233&sort=-createdAt&
 |---|---|---|
 | `email`, `phone` | string \| null | The **login identifiers**. Either may be absent |
 | `roles` | string[] | Every role the account holds |
-| `status` | `active` \| `suspended` | |
+| `status` | `active` \| `suspended` \| `closed` | |
+| `closedAt` | ISO-8601 \| null | **Present only while closed**, the same pairing rule as `suspension`. A closed account has had its identifiers removed by its owner: `email`, `phone` and the customer's name are gone and are **not recoverable** — the row survives so orders, tickets and bookings still resolve |
 | `suspension` | object \| null | **Present only while suspended.** An active account carrying a stale reason would read as suspended on any screen that renders the block without checking `status` first |
 | `suspension.by` | `{ id, source, name }` | `source` distinguishes a platform actor from an administrator |
 
@@ -343,6 +345,13 @@ Lift a suspension.
 ### Errors
 
 Same as suspend, minus the validation error. `409` when the account is not suspended.
+
+> [!IMPORTANT]
+> **A `closed` account can be neither suspended nor restored, and that is enforced in
+> jovi-mall rather than here.** Both verbs are compare-and-sets — suspend from `active`,
+> restore from `suspended` — so a closed row misses both and answers `409`. There is
+> deliberately **no un-close**: closure removed the identifiers, so there is nothing to
+> restore the account to.
 
 ### Audit
 

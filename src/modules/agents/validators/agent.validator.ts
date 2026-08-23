@@ -242,3 +242,37 @@ export type SetTrackingBody = z.infer<typeof SetTrackingSchema>;
 export type SetThresholdBody = z.infer<typeof SetThresholdSchema>;
 export type BanAgentBody = z.infer<typeof BanAgentSchema>;
 export type TransferAgentBody = z.infer<typeof TransferAgentSchema>;
+
+/**
+ * The stated purpose on a live-tracking read (Phase 6.I · ADR-020).
+ *
+ * ── Why a REQUIRED free-text field, on a GET ──────────────────────────────────
+ * It is the third axis of geo-tracker's scope model — the "for any reason" half of the
+ * sentence *"a credential that reads any agent's trail for any reason"*. Capability and
+ * subject are bounded on the far side (a configured scope set, and routes that cannot be
+ * made to enumerate); purpose is the one an administrator supplies, and it is what makes
+ * the audit row worth having. A row saying somebody looked is a log. A row saying somebody
+ * looked, and why, is a trail.
+ *
+ * geo-tracker independently refuses a coordinate read without one. Two checks on one rule
+ * is not redundancy: this service must not be able to make an unattributed disclosure even
+ * if a route ships without the schema, and geo-tracker must not depend on a peer's
+ * validation to enforce its own policy.
+ *
+ * 200 rather than `reasonText`'s default 500, because geo-tracker clamps at 200 and a
+ * field that silently truncates between two services is a field whose two records
+ * disagree. The floor is 3, matching every other reason on this surface — "" and " " are
+ * the same non-answer.
+ */
+export const TrackingReadQuerySchema = z.object({
+    reason: reasonText('Say why this location is being read — it is recorded in the audit trail', { max: 200 }),
+}).strict();
+
+/**
+ * Presence carries no coordinates, so it needs no reason and takes no query at all.
+ * `.strict()` on an empty object is the point: it refuses a `reason` too, so a client
+ * cannot form the habit of sending one where it would not be recorded.
+ */
+export const TrackingPresenceQuerySchema = z.object({}).strict();
+
+export type TrackingReadQuery = z.infer<typeof TrackingReadQuerySchema>;

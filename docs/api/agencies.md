@@ -15,6 +15,7 @@ Design record: [`../ADR-009-DELIVERY-NETWORK.md`](../ADR-009-DELIVERY-NETWORK.md
 | `GET` | `/agencies/:agencyId/contract-history` | `agencies.read` | direct read | — |
 | `GET` | `/agencies/:agencyId/activity` | `agencies.read` **+** `audit.read` | direct read | — |
 | `POST` | `/agencies/:agencyId/verify` | `agencies.verify` | **delegated** | ✅ |
+| `POST` | `/agencies/:agencyId/reject` | `agencies.verify` | **delegated** | ✅ |
 | `POST` | `/agencies/:agencyId/deactivate` | `agencies.deactivate` | **delegated** | ✅ |
 | `POST` | `/agencies/:agencyId/reactivate` | `agencies.reactivate` | **delegated** | ✅ |
 
@@ -410,6 +411,56 @@ The updated agency, with the message `"Agency verified — it may now operate"`.
 ### Audit
 
 `agencies.verify`
+
+---
+
+## `POST /agencies/:agencyId/reject`
+
+Refuse the business verification, with a reason. The other half of the review.
+
+| | |
+|---|---|
+| **Permission** | `agencies.verify` — see below |
+| **Transport** | Delegated |
+| **Body** | `{ "reason": "Transport licence has expired" }` — required, 3–500 chars |
+
+**It holds `agencies.verify`, not a permission of its own.** That permission is the *review
+capability*, named for its happy path, exactly as `vendors.kyc.review` and `agents.kyc.review`
+each cover both of their outcomes. ADR-005 D-4 attaches the permission and the audit row to the
+action; here the two verdicts are one action with two results, so the **audit action** is what
+separates them.
+
+**The reason is FORWARDED to jovi-mall and stored on the agency**, unlike the deactivation
+reason below, which is audit-only. The distinction is who reads it: a deactivation reason is
+for an administrator reviewing the decision later, and a rejection reason is for the **agency**,
+who has to know what to fix and cannot read this database.
+
+### ⚠ It changes no status
+
+jovi-mall leaves the agency at `pending_verification` — it is not deactivated, and no cascade
+runs. A non-`active` agency is already refused by product activation, pickup resolution, COD
+eligibility and vendor default-agency selection, so this records a verdict rather than adding
+enforcement.
+
+**There is deliberately no un-reject.** The agency is still pending, so `POST /verify` accepts
+them once they fix what the reason named.
+
+### Response (200)
+
+The updated agency, with the message `"Agency verification rejected"`.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Missing, blank, under 3 or over 500 characters |
+| 404 | `NOT_FOUND` | |
+| 409 | `PLATFORM_OPERATION_REJECTED` | Another administrator reached a verdict first — the same compare-and-set as `verify` |
+| 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | |
+
+### Audit
+
+`agencies.reject` — with the reason in the payload as well as on the agency.
 
 ---
 

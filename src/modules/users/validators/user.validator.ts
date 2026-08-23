@@ -26,7 +26,16 @@ export const UserIdParamSchema = idParam('userId', 'user');
 export const USER_ROLES = ['vendor', 'agency', 'agent', 'customer'] as const;
 export type UserRoleName = (typeof USER_ROLES)[number];
 
-export const USER_STATUSES = ['active', 'suspended'] as const;
+/**
+ * `closed` is jovi-mall's account-closure terminal (its ADR-A02 D-1) and is READ-ONLY here.
+ *
+ * It is in the filter list because an administrator has to be able to find these accounts —
+ * a closed account still owns orders and tickets, and "why does this order resolve to a
+ * customer with no name" is a support question. It is NOT in any write path: nothing on this
+ * surface can set it, and jovi-mall refuses both `suspend` and `restore` against a closed
+ * row with a 409, because both compare-and-set from a status a closed account is not in.
+ */
+export const USER_STATUSES = ['active', 'suspended', 'closed'] as const;
 
 /**
  * What this list may be ordered by: **wire name → `jovi_mall` field path**.

@@ -45,6 +45,8 @@ export interface AgencyReadModel extends Document {
         registration_number?: string | null;
         transport_license_id?: string | null;
         legit_verified?: boolean;
+        status?: 'pending' | 'verified' | 'rejected';
+        rejection_reason?: string | null;
         verified_at?: Date | null;
         verified_by_user_id?: ObjectId | null;
         verified_by_source?: 'platform' | 'admin';
@@ -111,6 +113,11 @@ const AGENCY_DETAIL_EXTRAS = {
     phone_verified: 1,
     'kyc_details.registration_number': 1,
     'kyc_details.transport_license_id': 1,
+    // The verdict, added Phase 6 Step 4. Enumerated like everything else here — the
+    // whole point of the dotted-path whitelist is that a field added to that sub-document
+    // next year does NOT arrive automatically.
+    'kyc_details.status': 1,
+    'kyc_details.rejection_reason': 1,
     'kyc_details.verified_at': 1,
     'kyc_details.verified_by_user_id': 1,
     'kyc_details.verified_by_source': 1,

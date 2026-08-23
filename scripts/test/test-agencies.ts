@@ -295,7 +295,7 @@ t.assert('every delegated path exists in jovi-mall’s admin agency router', () 
         .map((m) => m[1].replace('/agencies', '').replace(/\$\{agencyId\}/g, ':id'))
         .filter((p) => p.length > 0);
 
-    return paths.length === 3 && paths.every((p) => router.includes(`'${p}'`));
+    return paths.length === 4 && paths.every((p) => router.includes(`'${p}'`));
 });
 
 t.assert('jovi-mall mounts the agency router internally', () => {
@@ -304,12 +304,27 @@ t.assert('jovi-mall mounts the agency router internally', () => {
 });
 
 /**
- * The router's paths became relative so the same factory could be mounted internally. The
- * public mount had to absorb the segment in the same change, or every dashboard URL moved.
+ * ⚠ **This assertion was inverted on 2026-08-21 (Phase 6 Step 4), and it had been RED
+ * since Phase 5 without anybody noticing.**
+ *
+ * As written for Phase 9 it asserted the opposite: that `api/index.ts` mounts
+ * `router.use('/admin/delivery-agencies', adminAgencyRoutes)`. That was true and load-bearing
+ * at the time — the router's paths had become relative so one factory could serve both
+ * mounts, and the public mount had to absorb the segment or every dashboard URL moved.
+ *
+ * **Phase 5's cutover then deleted every public `/api/admin/*` mount — all eleven of them —
+ * and this assertion with them lost its subject.** It went red on 2026-08-20 and was not
+ * seen, because `test:agencies` was not among the six suites Phase 5's exit criteria ran.
+ *
+ * It is inverted rather than deleted: "there is no public admin mount" is now the invariant
+ * worth holding, and it is one a well-meaning future change could break by re-adding a mount
+ * that would compile, work, and silently reopen the second authorization model Phase 5 closed
+ * (`requireRole(['admin'])` still exists — it guards the four non-admin roles).
  */
-t.assert('the public mount absorbed the /delivery-agencies segment', () => {
+t.assert('jovi-mall serves NO public admin agency mount — Phase 5 deleted it', () => {
     const index = read(JOVI, 'api', 'index.ts');
-    return index.includes("router.use('/admin/delivery-agencies', adminAgencyRoutes)");
+    return !index.includes("router.use('/admin/delivery-agencies'")
+        && !/router\.use\('\/admin\//.test(index);
 });
 
 t.assert('...and the router no longer declares that segment itself', () => {
@@ -322,7 +337,7 @@ t.section('5. Routes, permissions and the audit catalog');
 
 const agencyRoutes = routeManifest().filter((r) => r.fullPath.startsWith('/api/v1/agencies'));
 
-t.assert('eight agency routes are registered', () => agencyRoutes.length === 8);
+t.assert('nine agency routes are registered', () => agencyRoutes.length === 9);
 
 t.assert('every one declares a permission', () =>
     agencyRoutes.every((r) => r.access.kind === 'permission'));
@@ -370,9 +385,9 @@ t.assert('Admin holds all three writes', () => {
         .every((p) => admin.includes(p as never));
 });
 
-t.assert('three agencies.* audit actions exist, all delegated, all targeting an agency', () => {
+t.assert('four agencies.* audit actions exist, all delegated, all targeting an agency', () => {
     const rows = Object.entries(AUDIT_CATALOG).filter(([name]) => name.startsWith('agencies.'));
-    return rows.length === 3
+    return rows.length === 4
         && rows.every(([, spec]) => spec.transport === 'delegated' && spec.target === 'agency');
 });
 

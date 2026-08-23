@@ -2,8 +2,9 @@
 
 Base path: `/api/v1/agents`
 
-Fifteen routes: the directory, the detail, contracts and their history, the administrative
-activity feed, three delegated **verdict** reads, and six writes.
+Seventeen routes: the directory, the detail, contracts and their history, the administrative
+activity feed, three delegated **verdict** reads, **two live-tracking reads** (Phase 6.I), and
+six writes.
 
 Design record: [`../ADR-009-DELIVERY-NETWORK.md`](../ADR-009-DELIVERY-NETWORK.md).
 
@@ -18,6 +19,8 @@ Design record: [`../ADR-009-DELIVERY-NETWORK.md`](../ADR-009-DELIVERY-NETWORK.md
 | `GET` | `/agents/:agentId/tracking-policy` | `agents.read` | **delegated** | — |
 | `GET` | `/agents/:agentId/cod-allocation` | `agents.read` | **delegated** | — |
 | `GET` | `/agents/:agentId/eligibility` | `agents.read` | **delegated** | — |
+| `GET` | `/agents/:agentId/tracking-presence` | `agents.tracking.read` | **geo-tracker** | — |
+| `GET` | `/agents/:agentId/live-position` | `agents.tracking.read` | **geo-tracker** | ✅ |
 | `PUT` | `/agents/:agentId/status` | `agents.status.set` | **delegated** | ✅ |
 | `PUT` | `/agents/:agentId/kyc` | `agents.kyc.review` | **delegated** | ✅ |
 | `PUT` | `/agents/:agentId/tracking` | `agents.tracking.set` | **delegated** | ✅ |
@@ -25,10 +28,17 @@ Design record: [`../ADR-009-DELIVERY-NETWORK.md`](../ADR-009-DELIVERY-NETWORK.md
 | `POST` | `/agents/:agentId/ban` | `agents.ban` | **delegated** | ✅ |
 | `POST` | `/agents/:agentId/unban` | `agents.ban` | **delegated** | ✅ |
 
-`agents.read` covers all six reads including the three verdicts, and Support holds it —
+`agents.read` covers the six business reads including the three verdicts, and Support holds it —
 answering a ticket about a stalled delivery needs to see whether the agent is even dispatchable.
 None of the writes are Support's. Two are sharper than the rest: `agents.ban` is `destructive`
 and `agents.cod_threshold.set` is `financial`, so neither could be granted by family expansion.
+
+**`agents.tracking.read` is separate, and it is the Phase 6.I addition.** It gates the two reads
+that reach geo-tracker's data door rather than jovi-mall. Support holds it too — *"where is my
+delivery right now"* is what a ticket asks — and what balances that is the other half of the same
+decision: the live-position read writes an audit row **before** it discloses anything, and a
+failed audit write means nothing is disclosed. See
+[the live-tracking section](#live-tracking--the-geo-tracker-data-door).
 
 > **`POST /agents/transfer` is declared before `/:agentId`.** Express matches in declaration
 > order; reversed, the literal `transfer` would be read as an agent id.
@@ -37,7 +47,7 @@ and `agents.cod_threshold.set` is `financial`, so neither could be granted by fa
 
 | Missing | Why |
 |---|---|
-| **A live position** | See the tracking block below. wi-admin has no data door into geo-tracker |
+| ~~**A live position**~~ | **No longer true — Phase 6.I built it** ([ADR-020](../ADR-020-ADMIN-DATA-DOOR.md)). `GET /agents/:agentId/live-position`, its own permission, audited on every call. Struck through rather than deleted because "wi-admin has no geo-tracker data door" was the standing answer for three phases and is still what most of this repository says |
 | **Editing contract terms** | A live contract's terms change by proposal between the two parties, never by edit — an administrator imposing a fee split neither party proposed would bind an agent to a number nobody agreed. `transfer` moves a relationship rather than rewriting one |
 | **Approving a pending contract** | Same reasoning, sharper: a contract with `terms.proposedBy: null` exists precisely because nobody has stated terms, so approving it binds an agent to a default that pays **zero** |
 | **Adjusting a contract's `cod.threshold`** | A third reason, not the same one. It is that contract's slice of a pool bounded across every allocating contract, `0` **blocks all COD** rather than meaning "no limit", and the arithmetic is jovi-mall's. `PUT /agents/:agentId/cod-threshold` sets the agent's whole pool and is the lever that exists |
@@ -229,12 +239,21 @@ and serving it as a live position is a bug.
 - `isStale` is computed on read: **`true` when the report is older than 2 minutes**, or absent.
 - **Render this as "last seen", never as a live marker on a map.** A live marker would simply
   stop moving and nobody would be told.
-- The live position lives in geo-tracker, behind Tracking Allow, and **this service has no door
-  to it**. Every geo-tracker data read requires a real platform user JWT and resolves per-agent
-  visibility by looking that user up — and a wi-admin administrator has no platform user row,
-  deliberately.
 
-For the authoritative tracking answer, call
+> **⚠️ This paragraph used to end "and this service has no door to it". That is no longer
+> true, and the distinction still matters.**
+>
+> A door was opened at Phase 6.I ([ADR-020](../ADR-020-ADMIN-DATA-DOOR.md)): geo-tracker gained
+> a **service-caller** authorization path, so administrators reach live tracking data without
+> gaining platform user rows. See
+> [`GET /agents/:agentId/live-position`](#get-agentsagentidlive-position).
+>
+> **`tracking.lastKnown` is still not that.** It remains jovi-mall's stale business mirror,
+> under `agents.read`, unaudited, answering *"where were they last seen"*. The live read is a
+> different permission, is audited on every call, and answers *"where are they now"*. Two
+> questions, two sources, two exposures — do not substitute one for the other.
+
+For the authoritative tracking POLICY, call
 [`GET /agents/:agentId/tracking-policy`](#get-agentsagentidtracking-policy).
 
 #### `lastKnown.place` — a name for the position
@@ -477,6 +496,174 @@ reimplementation loses first, and the reason this read is delegated.
 | 400 | `VALIDATION_ERROR` | Missing `agencyId`, or an extra parameter |
 | 404 | `NOT_FOUND` | No such agent |
 | 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | |
+
+---
+
+# Live tracking — the geo-tracker data door
+
+**New at Phase 6.I.** Design record: [ADR-020](../ADR-020-ADMIN-DATA-DOOR.md); the wire contract
+on the other side is `geo-tracker/api-doc/service-data-door.md`.
+
+For three phases this service had **no** geo-tracker data door, because every geo-tracker read
+resolves per-agent visibility by asking jovi-mall *as the viewer* and an administrator has no
+platform user row. geo-tracker now has a **service-caller** authorization path — a second path,
+separate from the viewer one — so administrators reach tracking data without gaining platform
+identities.
+
+**Both reads below are inert when the door is not configured**, answering
+`503 TRACKING_DOOR_UNCONFIGURED`. That is a supported deployment posture, not a fault.
+
+**Three things bound what an administrator can reach through it**, and only the first is this
+service's:
+
+1. **Permission.** `agents.tracking.read` for the two agent-scoped reads;
+   `shipments.tracking.read` for the delivery's trail (see
+   [shipments.md](./shipments.md)). Support holds both.
+2. **Scope**, on geo-tracker's side: the credential holds a configured set of capabilities, and
+   the sharp ones are granted by name.
+3. **Subject**, structurally: geo-tracker has **no endpoint that takes an agent id and answers
+   with a trail**. "Where has this person been this week" is not a question any permission here
+   can produce. A trail is always scoped to one delivery.
+
+---
+
+## `GET /agents/:agentId/tracking-presence`
+
+Is this agent's device connected, opted in, and how many deliveries are they running?
+
+| | |
+|---|---|
+| **Permission** | `agents.tracking.read` |
+| **Transport** | geo-tracker (data door) |
+| **Parameters** | None — the query is `.strict()` and empty, so a `reason` is refused |
+| **Audited** | No |
+
+### Response (200)
+
+```jsonc
+{
+  "agentId": "…",
+  "connected": true,
+  "connectionId": "8f14e45f-…",
+  "device": { "locationEnabled": true, "locationPermissionGranted": true,
+              "trackingEnabled": true, "lastSeenAt": "2026-08-22T09:41:02.000Z" },
+  "trackingAllow": true,
+  "positionKnown": true,
+  "positionAgeSeconds": 12,
+  "lastHeartbeatAt": "2026-08-22T09:41:00.000Z",
+  "activeShipment": true,
+  "sessions": [
+    { "sessionId": "3f1c8a52-…", "shipmentId": "…", "state": "online",
+      "tracking": true, "connectionCount": 3,
+      "startedAt": "2026-08-22T08:02:11.000Z",
+      "lastHeartbeatAt": "2026-08-22T09:41:00.000Z" }
+  ]
+}
+```
+
+**No coordinates, deliberately.** `positionKnown` and `positionAgeSeconds` answer *is the phone
+reporting* — the operational question — without answering *where*. That is why this read needs no
+reason and writes no audit row; it is also why it is safe to call on every render of an agent
+screen, which the live-position read is not.
+
+**An empty `sessions` array on a connected, opted-in agent is normal.** That is an idle agent:
+locatable but not tracked. A tracking session belongs to a shipment, and this agent has none.
+
+`state` is geo-tracker's lifecycle vocabulary — `online`, `degraded`, `network_lost`,
+`disconnected`, `location_disabled`, `tracking_disabled`, `app_background`, `app_foreground`.
+`connectionCount: 3` means one delivery whose agent's phone dropped twice, not three deliveries.
+
+---
+
+## `GET /agents/:agentId/live-position`
+
+Where the agent is now.
+
+| | |
+|---|---|
+| **Permission** | `agents.tracking.read` |
+| **Transport** | geo-tracker (data door) |
+| **Parameters** | `reason` — **required**, 3–200 characters after trimming |
+| **Audited** | **Yes — `agents.tracking.position.read`, and the row commits BEFORE the read** |
+
+### `reason` is required, and it is recorded
+
+This is the one field that turns *"an administrator looked"* into *"an administrator looked, and
+said why"*. geo-tracker independently refuses this read without one, so a client cannot skip it
+by calling that service directly with the same credential.
+
+Put the ticket, the dispute, or the incident in it. It lands in the audit row's payload and in
+geo-tracker's log, and it is what a later reader has to work with.
+
+### The audit ordering, because it changes what a failure means
+
+The row is committed **first**, and a failure of that write is **not** caught — so with the audit
+store unreachable, **nothing is disclosed**. This is the same fail-closed posture as
+`GET /money/payouts/:payoutId/destination`, and it is the reason this permission can be held by
+Support at all.
+
+A row left at `attempted` means the position **may** have been disclosed. Read it conservatively.
+
+**The row never contains coordinates.** It records that a position was disclosed, whether it
+actually was, the subject and the reason — putting the values in would move a person's location
+into the one store readable without the permission gating it.
+
+### Response (200) — served
+
+```jsonc
+{
+  "agentId": "…",
+  "trackingAllow": true,
+  "position": { "latitude": 4.0511, "longitude": 9.7043 },
+  "recordedAt": "2026-08-22T09:41:00.000Z",
+  "ageSeconds": 12
+}
+```
+
+### Response (200) — withheld
+
+```jsonc
+{
+  "agentId": "…",
+  "trackingAllow": false,
+  "position": null,
+  "recordedAt": null,
+  "ageSeconds": null,
+  "withheld": "tracking_allow_off"
+}
+```
+
+**Tracking Allow gates this read on geo-tracker's side**, and the timestamp is withheld with the
+coordinates: that an agent is currently streaming is itself part of what the opt-out withholds.
+`withheld` is a closed set — absent, or `"tracking_allow_off"`. Treat an unknown value as
+withheld and show nothing.
+
+This is stricter than the stale mirror on the detail read, which ships regardless of the flag. It
+is a different question: *where were they last seen* is a historical record; *where are they now*
+is live tracking, and Tracking Allow is the platform's own gate on that.
+
+### `ageSeconds`, and there is no `stale` flag
+
+geo-tracker reports the **fact** and this service applies its own display threshold — shipping a
+second definition of "stale" on the platform would give the two a way to drift. Use the same
+2-minute line the detail read's `isStale` uses if you want one.
+
+**Render this as a timestamped reading, not as a live marker.** It is a point read, not a stream:
+a marker drawn from it stops moving and tells nobody it has stopped. Polling is the client's
+decision, and every poll is an audit row.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Missing or blank `reason`, or one over 200 characters |
+| 404 | `NOT_FOUND` | No such agent (checked here, before anything is audited) |
+| 502 | `TRACKING_DOOR_REFUSED` | geo-tracker refused. `details.upstreamCode` says which: `SERVICE_SCOPE_FORBIDDEN` (the credential lacks the scope — `details.scope` names it), `SERVICE_TOKEN_INVALID` (the shared secret has drifted), `SERVICE_DOOR_NOT_CONFIGURED` (geo-tracker's half is closed) |
+| 503 | `TRACKING_DOOR_UNCONFIGURED` | This deployment has no data door |
+| 503 | `TRACKING_DOOR_UNAVAILABLE` | geo-tracker unreachable, or too slow |
+
+The three are separate codes because each is fixed by a different person. Do not collapse them
+into "tracking unavailable" on the screen.
 
 ---
 

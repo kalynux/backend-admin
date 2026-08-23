@@ -34,12 +34,14 @@ export interface UserReadModel extends Document {
     login_email?: string;
     login_phone?: string;
     roles: string[];
-    status: 'active' | 'suspended';
+    status: 'active' | 'suspended' | 'closed';
     suspended_at?: Date | null;
     suspended_reason?: string | null;
     suspended_by_user_id?: ObjectId | null;
     suspended_by_source?: 'platform' | 'admin';
     suspended_by_name?: string | null;
+    /** Set only on a closed account — jovi-mall's ADR-A02 stamp. Null everywhere else. */
+    closed_at?: Date | null;
     created_at: Date;
     updated_at: Date;
 }
@@ -62,6 +64,10 @@ const USER_PROJECTION = {
     suspended_by_user_id: 1,
     suspended_by_source: 1,
     suspended_by_name: 1,
+    // ⚠ ENUMERATED, so a new jovi-mall field is invisible here until it is named. That is the
+    // whitelist working as intended and it is also the seam Phase 4 kept finding: `closed_at`
+    // is listed for the same reason `compositeScore` had to be.
+    closed_at: 1,
     created_at: 1,
     updated_at: 1,
 } as const;
@@ -70,7 +76,7 @@ export interface UserSearchQuery extends ListQueryBase {
     /** Substring of email or phone — or, when it is a 24-hex string, the user id. */
     search?: string;
     role?: string;
-    status?: 'active' | 'suspended';
+    status?: 'active' | 'suspended' | 'closed';
     /** Half-open `[from, to)` over `created_at`. */
     from?: Date;
     to?: Date;

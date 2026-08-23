@@ -13,6 +13,8 @@ import { ContractEventReadRepository } from '../../agencies/repositories/contrac
 import { ContractReadRepository } from '../../agencies/repositories/contract.read.repository';
 import { toAgentContractDto, toContractEventDto } from '../../agencies/read-models/contract.dto';
 import { ListContractEventsQuery } from '../../agencies/validators/agency.validator';
+import { readAgentPresence } from '../../../infra/geo/geo-tracker-data.client';
+import { discloseAgentPosition, readNonDisclosing } from '../domain/tracking-disclosure';
 import * as gateway from '../gateways/agent.gateway';
 import { AgentReadModel, AgentReadRepository } from '../repositories/agent.read.repository';
 import {
@@ -25,6 +27,7 @@ import {
     SetAgentStatusBody,
     SetThresholdBody,
     SetTrackingBody,
+    TrackingReadQuery,
     TransferAgentBody,
 } from '../validators/agent.validator';
 
@@ -511,6 +514,74 @@ export class AgentController {
     static trackingPolicy = asyncHandler(async (req: Request, res: Response) => {
         await loadOr404(req.params.agentId);
         sendSuccess(res, await gateway.trackingPolicy(req.params.agentId, actorContextOf(req)));
+    });
+
+    /**
+     * GET /api/v1/agents/:agentId/tracking-presence — geo-tracker's operational answer.
+     *
+     * Is this agent's phone connected, opted in, and how many deliveries are they running?
+     * It carries **no coordinates** — `positionKnown` and `positionAgeSeconds` say whether
+     * a fix exists and how fresh, which is the operational question, without saying where.
+     *
+     * Not audited, deliberately: device flags, session states and timestamps are facts
+     * about a delivery rather than about a person's location, and a row per render would
+     * dilute the trail that the two disclosures below depend on being sparse.
+     *
+     * ⚠ **This is the first read in this service that reaches geo-tracker's DATA door**
+     * (ADR-020). Note what it does NOT replace: `tracking.lastKnown` on the detail read is
+     * jovi-mall's stale business mirror and answers "where were they last seen"; this
+     * answers "is the device reporting right now". Two questions, two sources.
+     */
+    static trackingPresence = asyncHandler(async (req: Request, res: Response) => {
+        await loadOr404(req.params.agentId);
+        const context = actorContextOf(req);
+
+        sendSuccess(
+            res,
+            readNonDisclosing(
+                await readAgentPresence(req.params.agentId, {
+                    actor: context.actor.adminId,
+                    // Sent on every call so the two services' logs line up, not only on the
+                    // audited ones. geo-tracker requires one only where coordinates flow.
+                    reason: 'presence',
+                }),
+            ),
+        );
+    });
+
+    /**
+     * GET /api/v1/agents/:agentId/live-position?reason=… — the sharp one.
+     *
+     * A person's current coordinates, read by an administrator they have no relationship
+     * with. Three things make that defensible and all three are load-bearing:
+     *
+     *  - **`reason` is required**, and it is recorded. The purpose axis of ADR-020's scope
+     *    model, and the difference between a log and a trail.
+     *  - **The audit row commits BEFORE the read**, and a failure of that write is not
+     *    caught — so with the audit store down nothing is disclosed. See
+     *    `domain/tracking-disclosure.ts`, which argues this at length.
+     *  - **Tracking Allow gates it on geo-tracker's side.** An agent who has not granted it
+     *    answers `position: null, withheld: 'tracking_allow_off'` — and no timestamp
+     *    either, because that the agent is streaming is itself part of what the opt-out
+     *    withholds.
+     *
+     * The response carries `ageSeconds`, never a `stale` verdict. Render it as a
+     * timestamped reading, not as a live marker on a map: a marker that stops moving tells
+     * nobody it has stopped.
+     */
+    static livePosition = asyncHandler(async (req: Request, res: Response) => {
+        const query = req.query as unknown as TrackingReadQuery;
+        const agent = await loadOr404(req.params.agentId);
+
+        sendSuccess(
+            res,
+            await discloseAgentPosition(
+                req.params.agentId,
+                typeof agent.name === 'string' ? agent.name : null,
+                { reason: query.reason },
+                actorContextOf(req),
+            ),
+        );
     });
 
     /** GET /api/v1/agents/:agentId/cod-allocation — pool, per-contract slices, headroom. */

@@ -62,6 +62,12 @@ interface UserDto {
         reason: string | null;
         by: { id: string | null; source: string; name: string | null } | null;
     } | null;
+    /**
+     * When the account owner closed it (jovi-mall's ADR-A02). Null unless `status` is
+     * `closed`, and paired with it for the same reason `suspension` is paired with
+     * `suspended`: a date rendered without its status reads as a state the account is not in.
+     */
+    closedAt: string | null;
     createdAt: string;
     updatedAt: string;
 }
@@ -101,6 +107,8 @@ function toUserDto(user: UserReadModel): UserDto {
                       },
                   }
                 : null,
+        // Same pairing rule as `suspension` above: present only in the status it describes.
+        closedAt: user.status === 'closed' ? toIso(user.closed_at) : null,
         createdAt: toIso(user.created_at) ?? String(user.created_at),
         updatedAt: toIso(user.updated_at) ?? String(user.updated_at),
     };

@@ -151,6 +151,48 @@ export async function verify(
 }
 
 /**
+ * Refuse the agency's business verification.
+ *
+ * The same compare-and-set as `verify` above, on the same status, answering the same
+ * `409 DELIVERY_AGENCY_STATUS_CONFLICT` on a miss — one review, two possible verdicts,
+ * and the loser of a race is told rather than allowed to overwrite.
+ *
+ * ⚠ **The reason is FORWARDED, not just audited** — the opposite of `deactivate` below.
+ * jovi-mall stores it on `kyc_details.rejection_reason` because the agency is shown it,
+ * and they cannot read this database. It is in the audit payload as well; the two serve
+ * different readers.
+ *
+ * Note what jovi-mall does *not* do with this: it changes no status. The agency stays
+ * `pending_verification`, which is already refused by product activation, pickup
+ * resolution, COD eligibility and vendor default-agency selection. So there is no
+ * un-reject verb and none is needed — a fixed application goes back through `verify`.
+ */
+export async function reject(
+    agencyId: string,
+    before: AgencySnapshot,
+    context: ActorContext,
+    reason: string,
+): Promise<PlatformAgency> {
+    return auditedDelegation(
+        'agencies.reject',
+        context,
+        { id: agencyId, label: labelOf(before) },
+        { reason },
+        before,
+        async () => {
+            const result = await platformRequest<PlatformAgency>({
+                method: 'POST',
+                path: `/agencies/${agencyId}/reject`,
+                body: { reason },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return result.data;
+        },
+    );
+}
+
+/**
  * Deactivate an agency, and everything riding on it.
  *
  * The `reason` is this service's addition — jovi-mall's endpoint takes none — and it is

@@ -143,6 +143,25 @@ export const ListAgencyActivityQuerySchema = listQuery(AGENCY_ACTIVITY_SORT, '-o
 export const VerifyAgencySchema = z.object({}).strict();
 
 /**
+ * Refusing a verification. The reason is required, and unlike the deactivation reason
+ * below it is **forwarded to jovi-mall and stored there**, on
+ * `kyc_details.rejection_reason`.
+ *
+ * That difference is the whole point of the two-sided rule ADR-006 D-7 draws: a
+ * deactivation reason exists for an *administrator* reviewing the decision later, so the
+ * audit row is the right home. A rejection reason exists for the **agency**, who has to
+ * know what to fix and cannot read this database. Keeping it only in the audit trail
+ * would leave them re-submitting the same unchanged application blind — and cost a
+ * second review of it.
+ *
+ * The bound matches jovi-mall's `AdminRejectAgencyKycSchema` and the vendor's; a limit
+ * only one side enforces is one the other side can violate.
+ */
+export const RejectAgencySchema = z.object({
+    reason: reasonText('A reason is required to reject an agency’s verification'),
+});
+
+/**
  * Deactivation requires a reason, and this is new — jovi-mall's endpoint takes none.
  *
  * The cascade this triggers suspends every vendor product defaulting to the agency and
@@ -173,5 +192,6 @@ export type SearchAgenciesQuery = z.infer<typeof SearchAgenciesQuerySchema>;
 export type ListRosterQuery = z.infer<typeof ListRosterQuerySchema>;
 export type ListContractEventsQuery = z.infer<typeof ListContractEventsQuerySchema>;
 export type ListAgencyActivityQuery = z.infer<typeof ListAgencyActivityQuerySchema>;
+export type RejectAgencyBody = z.infer<typeof RejectAgencySchema>;
 export type DeactivateAgencyBody = z.infer<typeof DeactivateAgencySchema>;
 export type ReactivateAgencyBody = z.infer<typeof ReactivateAgencySchema>;

@@ -9,6 +9,7 @@ import {
     ListRosterQuerySchema,
     ReactivateAgencySchema,
     SearchAgenciesQuerySchema,
+    RejectAgencySchema,
     VerifyAgencySchema,
 } from '../validators/agency.validator';
 
@@ -117,6 +118,27 @@ defineRoute(router, {
     validate: { params: AgencyIdParamSchema, body: VerifyAgencySchema },
     audit: records('agencies.verify'),
     handler: AgencyController.verify,
+});
+
+/**
+ * The other verdict. It holds `agencies.verify` — the review CAPABILITY, named for its
+ * happy path — exactly as `vendors.kyc.review` and `agents.kyc.review` each cover both of
+ * their outcomes. ADR-005 D-4 attaches the permission and the audit row to the action, and
+ * here the two verdicts are one action with two results: the **audit action** is what
+ * separates them, so `agencies.reject` is its own row while the permission is shared.
+ *
+ * Renaming `agencies.verify` to `agencies.kyc.review` would read better and was not done:
+ * Phase 5 closed the permission register at 111 with every entry granted by tier, and a
+ * rename is a migration of those grants for a cosmetic gain.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/:agencyId/reject',
+    access: permission('agencies.verify'),
+    validate: { params: AgencyIdParamSchema, body: RejectAgencySchema },
+    audit: records('agencies.reject'),
+    handler: AgencyController.reject,
 });
 
 defineRoute(router, {

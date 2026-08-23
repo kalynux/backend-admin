@@ -22,6 +22,7 @@ import {
     ListContractEventsQuery,
     ListRosterQuery,
     ReactivateAgencyBody,
+    RejectAgencyBody,
     SearchAgenciesQuery,
 } from '../validators/agency.validator';
 
@@ -94,6 +95,15 @@ interface AgencyDetailDto extends AgencyDto {
     kyc: {
         registrationNumber: string | null;
         transportLicenseId: string | null;
+        /**
+         * The verdict, added Phase 6 Step 4. **Not derivable from the agency's `status`**:
+         * `pending_verification` is where an agency sits both before a review and after a
+         * refused one, which is exactly the ambiguity this removes. A review queue filters
+         * on this; a dispatch decision reads `status`.
+         */
+        status: 'pending' | 'verified' | 'rejected';
+        /** Set on `rejected` — and shown to the agency, who has to know what to fix. */
+        rejectionReason: string | null;
         verifiedAt: string | null;
         verifiedBy: { id: string | null; source: string; name: string | null } | null;
     };
@@ -152,10 +162,21 @@ function toAgencyDetailDto(agency: AgencyReadModel, pausedConnections: number): 
         kyc: {
             registrationNumber: kyc.registration_number ?? null,
             transportLicenseId: kyc.transport_license_id ?? null,
+            // `?? 'pending'` covers rows written before the field existed. That reads as
+            // the truth about them: nobody has reached a verdict.
+            status: kyc.status ?? 'pending',
+            rejectionReason: kyc.rejection_reason ?? null,
             verifiedAt: toIso(kyc.verified_at),
             // Present only once verified. An unverified agency carrying a stale approver
             // would read as approved on any screen rendering the block without checking
             // the flag first — the same rule the user DTO applies to a suspension.
+            //
+            // ⚠ Deliberately NOT widened to cover a rejection, even though the same three
+            // fields now hold the rejecter. This field's NAME is a claim ("verified by"),
+            // and a rejecter surfacing under it is worse than an absent one. Who refused
+            // an application, and when, is the `agencies.reject` audit row — the same
+            // place the vendor lifecycle puts it, and the reason its model docstring
+            // clears `verified_at` on rejection rather than repurposing it.
             verifiedBy:
                 kyc.legit_verified === true
                     ? {
@@ -367,6 +388,33 @@ export class AgencyController {
         );
 
         sendSuccess(res, updated, { message: 'Agency verified — it may now operate' });
+    });
+
+    /**
+     * POST /api/v1/agencies/:agencyId/reject — refuse the business verification.
+     *
+     * The second verdict, added in Phase 6 Step 4. Until it existed,
+     * `kyc_details.legit_verified: false` meant both "never reviewed" and "reviewed and
+     * refused", so this queue could not tell an untouched application from one a colleague
+     * had already turned down, and the agency was never told what to fix.
+     *
+     * It holds `agencies.verify` rather than a permission of its own: that permission is
+     * the *review* capability, named for its happy path, exactly as `vendors.kyc.review`
+     * and `agents.kyc.review` cover both of their outcomes. The **audit action** is what
+     * distinguishes the two verdicts, per ADR-005 D-4.
+     */
+    static reject = asyncHandler(async (req: Request, res: Response) => {
+        const before = await loadOr404(req.params.agencyId);
+        const body = req.body as RejectAgencyBody;
+
+        const updated = await gateway.reject(
+            req.params.agencyId,
+            toAuditState(before),
+            actorContextOf(req),
+            body.reason,
+        );
+
+        sendSuccess(res, updated, { message: 'Agency verification rejected' });
     });
 
     /**

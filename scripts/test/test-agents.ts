@@ -47,6 +47,8 @@ import {
     SetAgentStatusSchema,
     SetThresholdSchema,
     SetTrackingSchema,
+    TrackingPresenceQuerySchema,
+    TrackingReadQuerySchema,
     TransferAgentSchema,
 } from '../../src/modules/agents/validators/agent.validator';
 import { buildAgentFilter } from '../../src/modules/agents/repositories/agent.read.repository';
@@ -344,9 +346,74 @@ t.assert('the contract-event projection omits the Mixed `metadata` field', () =>
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('4. Tracking privacy is structural, not a convention');
 
-t.assert('this module imports no geo-tracker client', () => {
-    const source = readCode(...AGENT_CONTROLLER) + readCode(...AGENT_GATEWAY) + readCode(...AGENT_REPO);
+/**
+ * ⚠ **This assertion was inverted at Phase 6.I, and the history is the point.**
+ *
+ * It read *"this module imports no geo-tracker client"* and pinned ADR-009 D-2: wi-admin
+ * had no geo-tracker data door, because every geo-tracker read resolves per-agent
+ * visibility by asking jovi-mall *as the viewer* and an administrator has no `users` row.
+ * `admin/docs/ADR-020` amended that — geo-tracker gained a service-caller path — so the old
+ * pin now asserts the absence of something deliberately built, and deleting it outright
+ * would leave the module with no structural rule at all.
+ *
+ * What replaces it is narrower and still structural: the **gateway and the repository**
+ * must stay clean. Those are the delegated-write path and the direct `jovi_mall` read, and
+ * a geo-tracker call in either would mean tracking data had leaked into a code path with
+ * no audit ordering and no `reason`. The controller may reach the door — through the
+ * disclosure domain, which is where the fail-closed ordering lives.
+ */
+t.assert('the gateway and the repository still import no geo-tracker client', () => {
+    const source = readCode(...AGENT_GATEWAY) + readCode(...AGENT_REPO);
     return !/GEO_TRACKER|geo-tracker|geotracker/i.test(source);
+});
+
+/**
+ * The ordering that makes granting `agents.tracking.read` to Support defensible: the audit
+ * row commits BEFORE the disclosure, and a failure of that write is not caught.
+ *
+ * Asserted at the source because it is a property of WHICH writer is used —
+ * `auditedAttempt` (commits first, does not catch) rather than `recordEvent` (best-effort,
+ * swallows) — and that is invisible from the exported signature. The same distinction
+ * `payout-disclosure.ts` rests on.
+ */
+t.assert('the position disclosure is audited fail-closed, not best-effort', () => {
+    const source = readCode(SRC, 'modules', 'agents', 'domain', 'tracking-disclosure.ts');
+    return source.includes('auditedAttempt(intent')
+        && !source.includes('recordEvent')
+        && /action: 'agents\.tracking\.position\.read'/.test(source);
+});
+
+/**
+ * No coordinates in the audit row. Putting them there would move a person's position into
+ * the one store readable without the permission gating it, and the trail would become the
+ * leak — the rule the payout disclosure follows for account numbers.
+ */
+t.assert('the audit row records THAT a position was disclosed, never the position', () => {
+    const source = readCode(SRC, 'modules', 'agents', 'domain', 'tracking-disclosure.ts');
+    return source.includes('disclosed: position.position !== null')
+        && !/after:[\s\S]{0,200}latitude/.test(source);
+});
+
+/**
+ * The client cannot throw — the same hard rule the operations client carries, restated for
+ * the data door because ADR-020 D-2 constraint 4 restates it: a data door may fail a
+ * REQUEST (the controller's job), never the SERVICE. A non-throwing client cannot
+ * propagate a geo-tracker outage into anything, however it is wired later.
+ */
+t.assert('the geo-tracker DATA client cannot throw — every status is a result', () => {
+    const raw = readCode(SRC, 'infra', 'geo', 'geo-tracker-data.client.ts');
+    return raw.includes('validateStatus: () => true') && !/\bthrow\b/.test(raw);
+});
+
+/**
+ * `encodeURIComponent` is NOT enough on its own: it leaves `.` untouched, so an id of `..`
+ * survives it and the path resolves somewhere else before the request leaves the process.
+ * The allowlist is what closes that, and it is easy to delete as "redundant validation".
+ */
+t.assert('the data client refuses an id it will not place in a URL', () => {
+    const raw = readCode(SRC, 'infra', 'geo', 'geo-tracker-data.client.ts');
+    return /const SAFE_ID = \/\^\[A-Za-z0-9_-\]/.test(raw)
+        && (raw.match(/SAFE_ID\.test\(/g) ?? []).length === 4;
 });
 
 t.assert('`home_base.location` reaches neither the projection nor the DTO', () => {
@@ -429,7 +496,49 @@ t.section('6. Routes, permissions and the audit catalog');
 
 const agentRoutes = routeManifest().filter((r) => r.fullPath.startsWith('/api/v1/agents'));
 
-t.assert('fifteen agent routes are registered', () => agentRoutes.length === 15);
+/** Fifteen at Phase 5, plus the two geo-tracker data reads at Phase 6.I (ADR-020). */
+t.assert('seventeen agent routes are registered', () => agentRoutes.length === 17);
+
+t.assert('the two tracking reads are declared, and neither is a mutation', () => {
+    const presence = agentRoutes.find((r) => r.fullPath.endsWith('/tracking-presence'));
+    const position = agentRoutes.find((r) => r.fullPath.endsWith('/live-position'));
+    return presence?.method === 'get' && position?.method === 'get'
+        && presence.access.kind === 'permission'
+        && presence.access.permissions[0] === 'agents.tracking.read'
+        && position?.access.kind === 'permission'
+        && position.access.permissions[0] === 'agents.tracking.read';
+});
+
+/**
+ * The audited READ, and the whole reason granting this to Support is defensible.
+ *
+ * `audit` on a `get` is the exception `RouteDefinition` permits for exactly this shape —
+ * `money.payouts.destination.read` is the precedent. Its absence here would not fail any
+ * boot assertion (only MUTATING routes are required to declare one), so this is the only
+ * thing standing between "audited disclosure" and "a read like any other".
+ */
+t.assert('the live-position read declares an audit action; presence does not', () => {
+    const position = agentRoutes.find((r) => r.fullPath.endsWith('/live-position'));
+    const presence = agentRoutes.find((r) => r.fullPath.endsWith('/tracking-presence'));
+    return position?.audit?.kind === 'records'
+        && position.audit.actions.includes('agents.tracking.position.read')
+        && !presence?.audit;
+});
+
+/**
+ * The purpose axis. A disclosure with no stated reason is a log entry rather than a trail,
+ * and geo-tracker refuses one anyway — this is the half that keeps the two consistent.
+ * Presence takes a `.strict()` empty query, so it refuses a `reason` it would not record.
+ */
+t.assert('the position read requires a reason and presence refuses one', () => {
+    const withReason = TrackingReadQuerySchema.safeParse({ reason: 'ticket 8842' });
+    return withReason.success
+        && !TrackingReadQuerySchema.safeParse({}).success
+        && !TrackingReadQuerySchema.safeParse({ reason: '  ' }).success
+        && !TrackingReadQuerySchema.safeParse({ reason: 'x'.repeat(201) }).success
+        && TrackingPresenceQuerySchema.safeParse({}).success
+        && !TrackingPresenceQuerySchema.safeParse({ reason: 'why' }).success;
+});
 
 t.assert('every one declares a permission — none is public or self-service', () =>
     agentRoutes.every((r) => r.access.kind === 'permission'));
@@ -465,10 +574,22 @@ t.assert('agents.unban is governed by agents.ban and targets an agent', () =>
     auditSpec('agents.unban').permission === 'agents.ban'
     && auditSpec('agents.unban').target === 'agent');
 
-t.assert('every agents.* audit action is delegated — nothing is written from here', () =>
+/**
+ * Every agent WRITE is delegated — jovi-mall owns the record, this service owns the row.
+ *
+ * The exception is `agents.tracking.position.read`, which is `external` and must be: a
+ * `delegated` action is one this service asks jovi-mall to perform, and this one asks
+ * geo-tracker to disclose something. More importantly, `external` is what routes it
+ * through `auditedAttempt` — commit the intent, then act, and do not catch a failed commit
+ * — which is the fail-closed ordering the whole disclosure design rests on. Naming it here
+ * rather than widening the filter keeps the exception visible.
+ */
+t.assert('every agents.* audit action is delegated, except the audited disclosure', () =>
     Object.entries(AUDIT_CATALOG)
         .filter(([name]) => name.startsWith('agents.'))
-        .every(([, spec]) => spec.transport === 'delegated'));
+        .every(([name, spec]) => name === 'agents.tracking.position.read'
+            ? spec.transport === 'external'
+            : spec.transport === 'delegated'));
 
 t.assert('an agent classifies as a platform actor, so Support may read the feed', () =>
     subjectClassOf('agent') === 'platform_actor');
