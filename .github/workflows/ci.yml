@@ -190,6 +190,30 @@ jobs:
       INTERNAL_ADMIN_SERVICE_TOKEN: ci-internal-admin-token
       JWT_SECRET: ci-only-secret-not-used-anywhere-else-32b
 
+      # ── wi-admin's OWN required variables ────────────────────────────────────
+      # All fifteen live suites failed on the first run of this job with
+      #   MONGO_URI_PLATFORM / ADMIN_JWT_SECRET / ADMIN_JWT_REFRESH_SECRET /
+      #   ADMIN_DASHBOARD_ORIGINS — Required
+      # because `config/env.ts` validates STRICTLY and these four have no default.
+      # The block above supplied what jovi-mall's process needs and nothing this
+      # service needs for itself — an easy asymmetry to miss, since the DB-free job
+      # runs with no environment at all and is fine.
+      #
+      # ⚠ MONGO_URI vs MONGO_URI_PLATFORM is the confusing pair. jovi-mall reads
+      # MONGO_URI; wi-admin reads the SAME database as MONGO_URI_PLATFORM (it queries
+      # jovi_mall directly for reads — ADR-004) and its own private one as
+      # MONGO_URI_ADMIN. Two names, two readers, one database.
+      MONGO_URI_PLATFORM: mongodb://127.0.0.1:27017/jovi_mall_ci?replicaSet=rs0
+
+      # These two MUST DIFFER — env.ts refuses equal values, because a stolen access
+      # token could otherwise be replayed as a refresh token. The length and
+      # placeholder tightening is production-only, so short CI values are fine.
+      ADMIN_JWT_SECRET: ci-admin-access-secret-not-used-anywhere
+      ADMIN_JWT_REFRESH_SECRET: ci-admin-refresh-secret-different-value
+
+      # Plain http is refused in production only; this is a CI origin that never serves.
+      ADMIN_DASHBOARD_ORIGINS: http://localhost:3000
+
     steps:
       - name: Require the cross-repo token
         env:
