@@ -50,6 +50,8 @@ import { COLLECTIONS } from '../../src/infra/platform/collections';
 const t = suite('wi-admin user management — live');
 
 const PASSWORD = 'verify-users-suite-password-7712';
+/** The jovi-mall fixture user's password. Separate from the ADMIN password above: they authenticate against different services. */
+const PLATFORM_PASSWORD = 'verify-users-platform-password-4419';
 const EMAIL_ADMIN = 'verify-users-admin@example.test';
 const EMAIL_SUPPORT = 'verify-users-support@example.test';
 
@@ -192,11 +194,24 @@ async function main(): Promise<number> {
         const emailB = `verify-users-${stamp}-b@example.test`;
         const userId = new ObjectId();
 
+        // ⚠ A REAL bcrypt hash, not the sentinel string this used to carry.
+        //
+        // The sentinel read `THIS-MUST-NEVER-LEAVE-THE-DATABASE`, which made the leak
+        // assertions vivid and made the suspension assertion below IMPOSSIBLE to pass:
+        // `bcrypt.compare` against a non-hash is always false, so a login attempt could
+        // never get past jovi-mall's credential check to reach the status gate. That did
+        // not show up while the credential check was commented out — which is exactly the
+        // state this suite was written in, as its own comment below recorded.
+        //
+        // A bcrypt hash is just as checkable a needle as the sentinel was, and it is the
+        // real credential rather than a stand-in for one.
+        const platformPasswordHash = await hash(PLATFORM_PASSWORD);
+
         await db.collection(COLLECTIONS.USER).insertOne({
             _id: userId,
             login_email: emailA,
             login_phone: `+23767${String(stamp).slice(-7)}`,
-            password_hash: 'THIS-MUST-NEVER-LEAVE-THE-DATABASE',
+            password_hash: platformPasswordHash,
             roles: ['customer'],
             status: 'active',
             created_at: new Date(),
@@ -227,7 +242,7 @@ async function main(): Promise<number> {
             && paged.body.meta.pages === Math.ceil(paged.body.meta.total / 2));
 
         t.assert('the credential never appears in a list response', () =>
-            !JSON.stringify(byEmail.body).includes('THIS-MUST-NEVER-LEAVE-THE-DATABASE'));
+            !JSON.stringify(byEmail.body).includes(platformPasswordHash));
 
         const badSort = await get(admin, '/api/v1/users?sort=password_hash');
         t.assert('an unsortable field is refused, never silently ignored', () =>
@@ -261,19 +276,43 @@ async function main(): Promise<number> {
          *
          * A login attempt against the suspended account must be refused by jovi-mall with
          * `AUTH_ACCOUNT_SUSPENDED`. Before this phase the column was read by nothing, so
-         * this request would have failed on the password instead — or, given the live
+         * this request would have failed on the password instead — or, given the then
          * commented-out password check, succeeded outright.
+         *
+         * ⚠ IT MUST USE THE CORRECT PASSWORD, and that is not a detail. jovi-mall checks
+         * credentials FIRST and status second (`auth.service.ts` — compare at :331, the
+         * suspension throw at :344). That ordering is deliberate and correct: answering
+         * `AUTH_ACCOUNT_SUSPENDED` to someone who has not proved they own the account
+         * tells an enumerator that the address exists AND that it is suspended.
+         *
+         * So a wrong password can only ever produce 401, and this assertion sent
+         * `password: 'anything'`. It passed review because the credential check was
+         * commented out when it was written; restoring that check in Phase 5 Part E made
+         * it fail — correctly. The suite was wrong, not the service.
          */
         const loginAttempt = await fetch(`${platformBase}/api/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ identifier: emailA, password: 'anything', role: 'customer' }),
+            body: JSON.stringify({ identifier: emailA, password: PLATFORM_PASSWORD, role: 'customer' }),
         });
         const loginBody = await loginAttempt.json().catch(() => ({}));
         t.assert('jovi-mall REFUSES a login to the suspended account', () =>
             loginAttempt.status === 403);
         t.assert('...with the dedicated code, so the person can be told why', () =>
             (loginBody as any)?.error?.code === 'AUTH_ACCOUNT_SUSPENDED');
+
+        // The other half of that ordering, pinned so nobody "fixes" the service to check
+        // status first and turns this endpoint into an account-enumeration oracle.
+        const wrongPassword = await fetch(`${platformBase}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ identifier: emailA, password: 'not-the-password', role: 'customer' }),
+        });
+        const wrongBody = await wrongPassword.json().catch(() => ({}));
+        t.assert('a WRONG password on the same suspended account is 401, never 403', () =>
+            wrongPassword.status === 401);
+        t.assert('...and says only INVALID_CREDENTIALS — suspension is not disclosed to a stranger', () =>
+            (wrongBody as any)?.error?.code === 'AUTH_INVALID_CREDENTIALS');
 
         const reSuspend = await write(admin, 'POST', `/api/v1/users/${id}/suspend`, { reason: 'again' });
         t.assert('a second suspension is refused — the compare-and-set missed', () =>

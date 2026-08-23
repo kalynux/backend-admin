@@ -235,9 +235,22 @@ async function main(): Promise<number> {
          * mechanism working rather than a nuisance.
          */
         t.assert('...with only the whitelisted fields', () => {
+            // `closedAt` joined the DTO with account closure (jovi-mall ADR-A02), which is
+            // this mechanism working: widening the DTO had to be decided here too.
+            const EXPECTED = [
+                'closedAt', 'createdAt', 'email', 'id', 'phone',
+                'profiles', 'roles', 'status', 'suspension', 'updatedAt',
+            ];
             const keys = Object.keys(detail.body?.data ?? {}).sort();
-            return keys.join(',')
-                === 'createdAt,email,id,phone,profiles,roles,status,suspension,updatedAt';
+            if (keys.join(',') === EXPECTED.join(',')) return true;
+            // Printing the diff, because "expected an exact set" without saying WHICH key
+            // moved sends the next reader to diff two sorted lists by eye — and an ADDED
+            // key and a REMOVED key are very different problems. One of them is a leak.
+            const added = keys.filter((k) => !EXPECTED.includes(k));
+            const removed = EXPECTED.filter((k) => !keys.includes(k));
+            console.error(`       added:   ${added.join(', ') || '(none)'}`);
+            console.error(`       removed: ${removed.join(', ') || '(none)'}`);
+            return false;
         });
 
         t.assert('...an active account carries no suspension block', () =>
