@@ -26,7 +26,7 @@ import {
  * ── One mount, two `:id` namespaces ───────────────────────────────────────────
  * jovi-mall served two routers at two prefixes so each kept its own `:id`. Here they are one
  * route group with two literal segments — `/articles/:articleId`, `/authors/:authorId` —
- * which reads the same way in `docs/api/README.md`'s group list and needs no second mount.
+ * which reads the same way in `api-doc/api/README.md`'s group list and needs no second mount.
  *
  * ── Route order ───────────────────────────────────────────────────────────────
  * `/authors` is a literal sibling of nothing (`:articleId` lives under `/articles/`), so

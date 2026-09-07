@@ -10,7 +10,7 @@
 
 The admin dashboard built eleven screens against `docs/api/` and filed nine numbered requests
 for what it could not finish, in
-[`docs/dashboard/backend-requests/`](./dashboard/backend-requests/). Each states the ask, quotes
+[`docs/dashboard/backend-requests/`](../api-doc/dashboard/backend-requests/). Each states the ask, quotes
 the contract line that refuses it, says what the dashboard shipped in the meantime, and proposes
 a contract.
 
@@ -19,7 +19,7 @@ position is the deliverable, and five of the nine acceptance lists contain items
 answer can satisfy. This ADR is that record.
 
 The response to the dashboard team is
-[`docs/dashboard/backend-requests/RESPONSE-2026-08-17.md`](./dashboard/backend-requests/RESPONSE-2026-08-17.md),
+[`docs/dashboard/backend-requests/RESPONSE-2026-08-17.md`](../api-doc/dashboard/backend-requests/RESPONSE-2026-08-17.md),
 which is the acceptance-list view of the same work.
 
 ---
@@ -42,7 +42,7 @@ dropped, so neither side ever raised anything.
 
 **Consequence: `DeliveryAgent.last_known_tracking_state` was the schema default —
 `status: "unknown"`, `last_position: null` — on every agent in the database.** Which means
-[`DATA-EXPOSURE-REGISTER.md` §1](./dashboard/DATA-EXPOSURE-REGISTER.md), "a person's coordinates,
+[`DATA-EXPOSURE-REGISTER.md` §1](../api-doc/dashboard/DATA-EXPOSURE-REGISTER.md), "a person's coordinates,
 ungated and unaudited", described a disclosure that was not occurring: the field it flags has
 never held a coordinate.
 

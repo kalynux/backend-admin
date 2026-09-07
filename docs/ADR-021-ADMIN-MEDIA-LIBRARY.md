@@ -6,7 +6,7 @@
 route) and the standing contract rule *"wi-admin accepts no multipart bodies anywhere"*
 (narrowed to *"wi-admin never **parses** one"*). Both were stated as settled; both are
 amended here in writing rather than left to rot.
-**Answers:** [BR-015](dashboard/backend-requests/BR-015-media-library.md)
+**Answers:** [BR-015](../api-doc/dashboard/backend-requests/BR-015-media-library.md)
 
 ---
 

@@ -1,24 +1,33 @@
-# wi-admin — service documentation
+# wi-admin — internal documentation
 
 **Written 2026-09-06 from source** (DOC-PROGRAM Phase 2 · decision E-4). Every number and claim on
 these pages was read out of `src/` or `scripts/`, or produced by a runnable check named where it is
 used. Where a figure disagreed with an existing document, the measurement won and the disagreement
 is filed in [`../../DOC-PROGRAM/03-FINDINGS.md`](../../DOC-PROGRAM/03-FINDINGS.md).
 
-This folder already held **20 ADRs and two doc trees**; the six pages below join them at the root
-and **replace none of them**.
+⚠ **This folder was split on 2026-09-08, and half of what older notes place here has moved.**
+It used to hold the ADRs *and* the API contract in one directory, which meant a developer opening it
+could not tell which pages described a promise to a client and which recorded an internal decision.
+The contract half — `api/`, `dashboard/` and the two `FRONTEND-CHANGELOG-*` pages — now lives in
+[`../api-doc/`](../api-doc/), so all three backends follow one rule: **`api-doc/` is the contract,
+`docs/` is the reasoning.** A note that names `admin/docs/api/…` is describing the old layout.
+
+**What stays here is everything a client of this service does not need**: the design records, the
+technical set, and the phase plans. If you are building a screen, you want
+[`../api-doc/`](../api-doc/) instead.
 
 | Layer | Where | Answers |
 |---|---|---|
-| **Wire contract** | [`./api/`](./api/) | *How do I call it?* |
+| **Wire contract** | [`../api-doc/api/`](../api-doc/api/) | *How do I call it?* |
 | **Technical record** — how it is built, what must not break | **the six pages below** | *How does it work?* |
 | **Decision records** | the 20 `ADR-*.md` beside this file | *Why is it like this?* |
-| **Dashboard-facing** — requests, integration matrix | [`./dashboard/`](./dashboard/) | *What does the admin-dash need?* |
+| **Dashboard-facing** — requests, integration matrix | [`../api-doc/dashboard/`](../api-doc/dashboard/) | *What does the admin-dash need?* |
 | **Orientation** | [`../README.md`](../README.md), [`./IMPLEMENTATION-BLUEPRINT.md`](./IMPLEMENTATION-BLUEPRINT.md) | *Where do I start?* |
 
-⚠ **The ADRs are cited here, never absorbed, and they must not be moved.**
+⚠ **The ADRs are cited from everywhere, never absorbed, and they must not be moved.**
 [`../../CLAUDE.md`](../../CLAUDE.md), `admin-dash`'s mirror and roughly fifty links point at their
-current paths. They are also long for a reason — almost every one records *why* a decision went the
+current paths — which is exactly why the 2026-09-08 split moved the *other* half and left these
+where they were. They are also long for a reason: almost every one records *why* a decision went the
 way it did, usually with the failure that forced it, and **a summary keeps the rule and loses the
 reason.**
 
@@ -30,7 +39,7 @@ reason.**
 |---|---|---|
 | Architecture | [ARCHITECTURE.md § 1](./ARCHITECTURE.md#1--three-layers-two-databases-one-composition-root) | [ADR-002](./ADR-002-TARGET-ARCHITECTURE.md) |
 | Module layout | [ARCHITECTURE.md § 2](./ARCHITECTURE.md#2--twenty-two-modules) | — |
-| APIs · endpoints · request/response schemas | [ARCHITECTURE.md § 3](./ARCHITECTURE.md#3--the-route-surface--237-routes-and-none-of-them-is-registered-by-hand) | [`./api/`](./api/), [ADR-005](./ADR-005-API-CONTRACT.md) |
+| APIs · endpoints · request/response schemas | [ARCHITECTURE.md § 3](./ARCHITECTURE.md#3--the-route-surface--237-routes-and-none-of-them-is-registered-by-hand) | [`./api/`](../api-doc/api/), [ADR-005](./ADR-005-API-CONTRACT.md) |
 | Authentication and authorization | [CONTRACTS.md § 1](./CONTRACTS.md#1--authentication--a-revocable-server-side-session) · [§ 2](./CONTRACTS.md#2--authorization--116-permissions-granted-by-tier) | [ADR-003](./ADR-003-GRANULAR-PERMISSIONS.md) |
 | Business rules | [CONSTRAINTS.md](./CONSTRAINTS.md) | the ADRs, per domain |
 | Database interactions | [DATA.md § 1](./DATA.md#1--two-connections-and-only-one-of-them-can-be-written) | [ADR-001](./ADR-001-DATA-ACCESS-MODEL.md), [ADR-004](./ADR-004-DOMAIN-OWNERSHIP.md) |

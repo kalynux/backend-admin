@@ -35,7 +35,7 @@ import { AdminSnapshotPayload } from '../validators/ticket.validator';
  *    jovi-mall still promising it to every non-admin reader.
  *
  * What made a permanently-null field a broken promise is that it was **undocumented**. It is
- * now stated here, on `AdminSnapshotDto.avatarUrl`, and in `docs/api/support.md`.
+ * now stated here, on `AdminSnapshotDto.avatarUrl`, and in `api-doc/api/support.md`.
  */
 export function snapshotOf(account: IAdminAccount): AdminSnapshotPayload {
     return {

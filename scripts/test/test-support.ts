@@ -571,7 +571,7 @@ t.assert('the snapshot refresh does NOT ride the assign endpoint', () =>
 /**
  * ── The two wire names jovi-mall does NOT share with us (step 21) ─────────────
  *
- * Both were found writing `docs/api/support.md`, and both were invisible because the
+ * Both were found writing `api-doc/api/support.md`, and both were invisible because the
  * receiving schema is non-strict: the wrong key is stripped, not refused, so the call
  * succeeded and did something other than what it said.
  *

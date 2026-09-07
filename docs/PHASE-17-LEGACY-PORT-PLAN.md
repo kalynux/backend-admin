@@ -447,5 +447,5 @@ Three names left this list, three different ways:
   withdrawn it. The `customers` **family** went with them.
 
 The published version of this table, with the reasons, is
-[`api/permissions.md`](./api/permissions.md) § *The four `†` permissions* — which is where a
+[`api/permissions.md`](../api-doc/api/permissions.md) § *The four `†` permissions* — which is where a
 reader looking for "is this permission real" will actually go.

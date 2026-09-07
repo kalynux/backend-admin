@@ -88,7 +88,7 @@ export type HardDeleteFileBody = z.infer<typeof HardDeleteFileBodySchema>;
  * The BR proposed exactly that, and it stopped being possible the moment the read became
  * direct (L-1): nothing on this request reaches jovi-mall, so nothing validates it there.
  * The shape is mirrored **field for field** so a client written against the BR works, with
- * three deliberate divergences, each stated in `docs/api/files.md` rather than left to be
+ * three deliberate divergences, each stated in `api-doc/api/files.md` rather than left to be
  * discovered:
  *
  *   1. **`limit` is 100, not 50** (L-4). `LIMIT_MAX` is universal on this service and the

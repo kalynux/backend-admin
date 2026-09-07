@@ -37,7 +37,7 @@ export interface AdminSnapshotDto {
      * is shown — which is a worse-shaped promise, not a smaller one.
      *
      * **Clients: render the initials fallback and do not branch on this.** It is documented
-     * as reserved in `docs/api/support.md`; what made a permanently-null field a broken
+     * as reserved in `api-doc/api/support.md`; what made a permanently-null field a broken
      * promise was that it was undocumented.
      */
     avatarUrl: string | null;
@@ -65,7 +65,7 @@ export interface TicketDto {
      * jovi-mall's `EntityType` is a TypeScript enum, its ticket schema declares
      * `enum: ENTITY_TYPE_VALUES` on a required column, and its create and list validators
      * both `z.enum` the same array. So a stored value outside the eleven is not reachable
-     * through any write path. See `docs/api/support.md` for the list.
+     * through any write path. See `api-doc/api/support.md` for the list.
      *
      * ⚠ **This service still validates the token by SHAPE, not membership** (ADR-005 D-17,
      * and `entityType` on the search schema is a bounded string). That is not a

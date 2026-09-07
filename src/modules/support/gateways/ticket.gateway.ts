@@ -362,7 +362,7 @@ export async function removeFollower(
  * *stripped* rather than refused and every note this service created was filed **public**
  * whatever the flag said. A staff note on somebody's support case, shown to them, answered
  * `201`, by a validator whose docstring promised the opposite. Found writing
- * `docs/api/support.md` (Phase 4, step 21).
+ * `api-doc/api/support.md` (Phase 4, step 21).
  *
  * The wire name stays `isPublic`: a boolean is the right shape for the one choice this
  * surface offers, and the translation belongs at the transport boundary, which is the only
@@ -479,7 +479,7 @@ export async function referenceLookup(
         // ⚠ `q`, not `search`. jovi-mall's `TicketReferenceController.parsePagination` reads
         // `req.query.q`; a `search` parameter was accepted here, forwarded, and ignored there
         // — so the lookup always answered the unfiltered first page while looking as though
-        // it had searched. Found writing `docs/api/support.md` (Phase 4, step 21).
+        // it had searched. Found writing `api-doc/api/support.md` (Phase 4, step 21).
         query: search ? { q: search } : undefined,
         actor: context.actor,
         requestId: context.requestId,
