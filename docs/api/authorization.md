@@ -65,22 +65,22 @@ Every permission that exists, with its metadata.
         "phase": 5
       }
     ],
-    "total": 110
+    "total": 116
   }
 }
 ```
 
 | Field | Type | Notes |
 |---|---|---|
-| `families[]` | array | The 21 families in declaration order, each listing its permission names |
-| `permissions[]` | array | All 113 permissions |
+| `families[]` | array | The 20 families in declaration order, each listing its permission names |
+| `permissions[]` | array | All 116 permissions |
 | `permissions[].action` | `"read"` \| `"write"` \| `"approve"` | |
 | `permissions[].summary` | string | Written for an administrator, not an engineer — safe to render in a UI |
 | `permissions[].financial` etc. | boolean | The four sensitivity flags. **The dual-control *predicate* is never exposed** — only whether one exists |
 | `permissions[].scoped` | boolean | Whether reads behind it are additionally narrowed row-by-row |
 | `permissions[].phase` | number | The build phase. Includes permissions whose endpoints are **not built yet**, so the dashboard can be written against the finished vocabulary rather than a moving one |
 
-27 of the 113 have no endpoint yet — see the `†` markers in [permissions.md](permissions.md).
+4 of the 116 have no endpoint yet — see the `†` markers in [permissions.md](permissions.md).
 
 ---
 
@@ -138,9 +138,9 @@ you move someone from Support to Admin.
   "success": true,
   "data": {
     "tiers": [
-      { "tier": 1, "label": "Developer", "permissions": ["administrators.create", "…"], "total": 110 },
-      { "tier": 2, "label": "Admin",     "permissions": ["agencies.read", "…"],          "total": 93  },
-      { "tier": 3, "label": "Support",   "permissions": ["agencies.read", "…"],          "total": 23  }
+      { "tier": 1, "label": "Developer", "permissions": ["administrators.create", "…"], "total": 116 },
+      { "tier": 2, "label": "Admin",     "permissions": ["agencies.read", "…"],          "total": 99  },
+      { "tier": 3, "label": "Support",   "permissions": ["agencies.read", "…"],          "total": 30  }
     ]
   }
 }

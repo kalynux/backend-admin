@@ -2,8 +2,9 @@
 
 Base path: `/api/v1/vendors`
 
-The directory, the detail, the catalogue as oversight sees it, business verification,
-suspension, per-product takedown, and the platform-governed order settings.
+The directory, the detail, the catalogue as oversight sees it, the delivery-agency connections,
+business verification, suspension, per-product takedown, and the platform-governed order
+settings.
 
 Design record: [`../ADR-008-VENDOR-MANAGEMENT.md`](../ADR-008-VENDOR-MANAGEMENT.md).
 
@@ -12,6 +13,7 @@ Design record: [`../ADR-008-VENDOR-MANAGEMENT.md`](../ADR-008-VENDOR-MANAGEMENT.
 | `GET` | `/vendors` | `vendors.read` | direct read | — |
 | `GET` | `/vendors/:vendorId` | `vendors.read` | direct read | — |
 | `GET` | `/vendors/:vendorId/products` | `vendors.read` | direct read | — |
+| `GET` | `/vendors/:vendorId/agencies` | `vendors.read` **+** `agencies.read` | direct read | — |
 | `GET` | `/vendors/:vendorId/activity` | `vendors.read` **+** `audit.read` | direct read | — |
 | `POST` | `/vendors/:vendorId/suspend` | `vendors.suspend` | **delegated** | ✅ |
 | `POST` | `/vendors/:vendorId/restore` | `vendors.suspend` | **delegated** | ✅ |
@@ -248,9 +250,11 @@ operational tally.
     "defaultDeliveryAgencyId": "665c0011223344556677889a",
 
     "counts": {
-      "products": { "active": 128, "draft": 9, "suspended": 2, "archived": 14 },
+      "products": { "total": 153, "draft": 9, "active": 128, "archived": 14,
+                    "pendingReview": 0, "suspended": 2 },
       "orders": { "total": 3401, "lastOrderAt": "2026-08-13T06:41:09.220Z" },
-      "agencyConnections": { "active": 2, "pending": 1, "paused": 0 }
+      "agencyConnections": { "total": 9, "active": 6, "pending": 1, "pausedReapproval": 1,
+                             "rejected": 1, "withdrawn": 0, "terminated": 0 }
     }
   }
 }
@@ -269,7 +273,8 @@ operational tally.
 | `policies` | **Content as well as presence, since the dashboard-request round.** The three booleans remain and are now *derived* from the content; `returns`, `cancellation` and `support` carry the terms themselves, each `null` when the vendor has stored none. See the field tables below |
 | `policies.returns.inspector` | **Administrator-controlled upstream, never vendor input** — it names who adjudicates a claim, not a term the vendor set. The same field, with the same caveat, exists on an agency's `damage` block |
 | `settings` | jovi-mall's schema defaults where no document exists — `vendor_settings` is created lazily, so an untouched vendor shows defaults rather than nulls |
-| `counts.products` | Keyed by status; only non-zero statuses appear |
+| `counts.products` | Keyed by status. ⚠️ **Every key is always present, `0` included** — the block is built from a fixed set, not from the statuses that happened to occur. (This table used to say "only non-zero statuses appear", and the example omitted `total` and `pendingReview`. Both were wrong; corrected with BR-018) |
+| **`counts.agencyConnections`** | The seven integers are a `$group` over **exactly the population** [`GET /vendors/:vendorId/agencies`](#get-vendorsvendoridagencies) returns as rows — one `vendor_agency_connections` document each, same collection, same vendor scope, no status filter on either. So `total` here equals `meta.total` on an unfiltered first page there, and `active` / `pending` / `pausedReapproval` / `rejected` / `withdrawn` / `terminated` each equal `meta.total` with the matching `?status=`. An operator reading both screens is reading one set of documents twice. Every key is always present here too |
 
 Nothing sensitive is ever returned: `payout_details` and `kyc_details.national_id_number` are
 excluded by the read projection **and** by the DTO naming its own fields.
@@ -302,6 +307,7 @@ The catalogue, as platform oversight sees it.
 | `type` | `physical` \| `digital` \| `service` | |
 | `mode` | `simple` \| `advanced` | |
 | `suspensionReason` | see below | Only meaningful alongside `status=suspended`; harmless otherwise |
+| **`deliveryAgencyId`** | 24-hex id | The listings a given agency answers for — matched against the **resolved** agency, so it means the same thing as the `deliveryAgency` column beside it. Added with BR-018 |
 
 #### `suspensionReason` values
 
@@ -312,6 +318,20 @@ The catalogue, as platform oversight sees it.
 This filter earns its place: *"which of this vendor's listings did **we** take down, and which
 did their agency"* is unanswerable without it, and the two have very different remedies.
 `platform_oversight` is the reason set by `POST …/products/:productId/suspend`.
+
+#### `deliveryAgencyId` matches the **resolved** agency, not the stored override
+
+⚠️ Most products carry no override at all, so asking for the **default** agency's listings
+returns every product with no `delivery.agency_id` as well as those naming it explicitly.
+Asking for any other agency returns only its explicit overrides. That is the same precedence
+`deliveryAgency` on the row already uses, and it is deliberate: a filter matching the stored
+column would disagree with the column printed beside it on the common case.
+
+**This is the drill-down from `productCount`.** `meta.total` on this filtered page and
+`productCount` on the matching row of
+[`GET /vendors/:vendorId/agencies`](#get-vendorsvendoridagencies) are the same number,
+computed from one shared rule — so a client may link straight from the count to the listings
+behind it.
 
 ### Response (200)
 
@@ -394,8 +414,9 @@ Every list field, plus:
 {
   "media": {
     "images": [
-      { "id": "6612…", "key": "vendors/665a…/tomatoes-1.jpg",
+      { "id": "6612…", "key": "products/2026/07/tomatoes-1.jpg",
         "url": "https://cdn.example.com/vendors/665a…/tomatoes-1.jpg",
+        "access": "public",
         "mimeType": "image/jpeg", "size": 148213, "originalName": "tomatoes.jpg" }
     ],
     "primaryImage": { /* images[0], or null */ }
@@ -497,6 +518,229 @@ one archived variant look like a product with none. Check `status`.
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | Malformed id |
 | 404 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode` `VENDOR_NOT_FOUND` or `CATALOG_PRODUCT_NOT_FOUND` — no such vendor, or the product is not theirs |
+
+---
+
+## `GET /vendors/:vendorId/agencies`
+
+The vendor's **delivery-agency connections**, as rows rather than as the seven integers on the
+detail. The mirror image of the [agency roster](agencies.md#get-agenciesagencyidagents): that
+one answers *"who works for this agency, and on what terms"*, this one answers *"which agencies
+does this vendor ship through, and on what terms"*.
+
+| | |
+|---|---|
+| **Permission** | `vendors.read` **+** `agencies.read` — composite, `all` mode |
+| **Transport** | direct read |
+| **Audited** | — |
+| **Pagination** | `page`, `limit` (default 20, hard max 100) |
+| **Sorting** | `createdAt`, `status`. Default **`-createdAt`** |
+
+### Why both permissions
+
+The rows name agencies and carry their business names, their contact people and their
+commercial state, so gating on `vendors.read` alone would be a **second door onto the agency
+directory** that bypasses the permission governing it. That is the same rule
+[`/agencies/:agencyId/agents`](agencies.md#get-agenciesagencyidagents),
+[`/agents/:agentId/contracts`](agents.md#get-agentsagentidcontracts) and
+[`/shipments/:shipmentId/offers`](shipments.md) each state from their own side.
+
+Both tiers that hold either permission hold both, so this costs nobody access — it states the
+dependency so a future tier change cannot quietly open a side door. The alternative — withholding
+`agency.businessName` from a caller lacking `agencies.read` — was rejected: that is a
+projection that changes by caller, and `GET /system/errors` is the only endpoint on this
+service that does that.
+
+### ⚠️ Why this is a direct read, when the request asked for a delegated one
+
+BR-018 proposed `Transport: Delegated`. It is **not**, and the rule that decides it is
+ADR-004 D-2 as amended by ADR-009 D-1 / ADR-011 D-1:
+
+> Delegate a read whose answer is a **verdict** the platform acts on.
+> Read directly a read whose answer is a **record**.
+
+A `vendor_agency_connections` document is a record. There is no verdict on this surface —
+nothing here is a decision jovi-mall then acts on, and nothing about listing these rows can
+leave a database inconsistent. The collection has carried `access: 'read'` in the platform
+access table since Phase 6, and two shipped endpoints already read it from there
+(`counts.agencyConnections` on the vendor detail, `policyVersionPausedConnections` on the
+agency detail). Delegating would have meant building this query in jovi-mall behind an endpoint
+whose only caller is this service.
+
+**Every write on the collection stays delegated**, and there the reason is concrete rather than
+precautionary: a status change on one of these rows suspends or restores the vendor's products
+in the same transaction.
+
+### Query parameters
+
+| Parameter | Type | Notes |
+|---|---|---|
+| `status` | string, 1–40 | One of `pending` · `active` · `rejected` · `withdrawn` · `paused_reapproval` · `terminated` |
+
+**Every status is returned by default, terminal rows included.** A live-only default would make
+a relationship's history impossible to fetch, which on an administrative surface is most of what
+the screen is for: a `rejected` row is precisely what an operator opens this panel to explain.
+
+`status` is validated for **shape, not membership** — a bounded string, not a pinned enum.
+ADR-005 D-17: the vocabulary is jovi-mall's, and a copy here would mean a seventh
+`ConnectionStatus` added there is silently unfilterable until somebody remembers this file.
+Render an unrecognised value rather than rejecting it. (The roster this endpoint mirrors makes
+the same call for the same reason; the `status` filter on `/vendors/:vendorId/products` is
+pinned because that one is also rendered as a fixed set of tabs.)
+
+### Response (200)
+
+```jsonc
+{
+  "success": true,
+  "data": [
+    {
+      "id": "6690aabbccddeeff00112233",
+      "agency": {
+        "id": "665c0011223344556677889a",
+        "businessName": "Littoral Express Delivery",
+        "status": "active",
+        "contactName": "Nadege M.",
+        "country": "CM"
+      },
+      "status": "active",
+      "isDefault": true,
+      "productCount": 42,
+
+      "requestedBy": "agency",
+      "requestedAt": "2026-02-11T09:00:00.000Z",
+      "respondedAt": "2026-02-11T14:20:00.000Z",
+
+      "policyVersions": { "vendorAtApproval": 3, "agencyAtApproval": 7 },
+
+      "reapproval": { "requiredFrom": null, "pausedAt": null, "pausedReason": null },
+      "rejection": null,
+      "withdrawal": null,
+      "termination": null,
+
+      "createdAt": "2026-02-11T09:00:00.000Z",
+      "updatedAt": "2026-08-02T10:11:00.000Z"
+    },
+    {
+      "id": "6690aabbccddeeff00112244",
+      "agency": {
+        "id": "665c0011223344556677889b",
+        "businessName": null,
+        "status": "pending_verification",
+        "contactName": "Paul E.",
+        "country": "CM"
+      },
+      "status": "terminated",
+      "isDefault": false,
+      "productCount": 0,
+
+      "requestedBy": "vendor",
+      "requestedAt": "2026-05-02T08:00:00.000Z",
+      "respondedAt": "2026-05-02T11:30:00.000Z",
+
+      "policyVersions": { "vendorAtApproval": 2, "agencyAtApproval": 4 },
+
+      "reapproval": { "requiredFrom": null, "pausedAt": null, "pausedReason": null },
+      "rejection": null,
+      "withdrawal": null,
+      "termination": {
+        "byRole": "agency",
+        "byUserId": "6650aabbccddeeff00119911",
+        "at": "2026-08-01T09:15:00.000Z",
+        "reason": "reapproval_declined",
+        "note": "Coverage no longer includes Bafoussam"
+      },
+
+      "createdAt": "2026-05-02T08:00:00.000Z",
+      "updatedAt": "2026-08-01T09:15:00.000Z"
+    }
+  ],
+  "meta": { "total": 9, "page": 1, "limit": 20, "pages": 1 }
+}
+```
+
+#### Field notes
+
+| Field | Notes |
+|---|---|
+| **`agency`** | The same decoration [`GET /agents/:agentId/contracts`](agents.md#get-agentsagentidcontracts) returns. **`null` when the joined agency row is missing** — a connection pointing at an agency that no longer exists. The row survives rather than being dropped, because that broken state is exactly what an administrator opens this panel to find |
+| `agency.businessName` | ⚠️ **The Magazin's business name, `null` where it has none** — never `""`, and never `contactName` substituted. An agency mid-onboarding legitimately has no business name yet and must still be identifiable by its id. The distinction BR-006 established holds here unchanged |
+| `agency.contactName` | The contact **person** (`display_name` on the agency row). A different thing from the business — see above |
+| `status` | The six-value token, rendered raw. Treat an unknown value as unknown, not as an error |
+| **`isDefault`** | Whether this agency is the vendor's `defaultDeliveryAgencyId`. One boolean, saving the client a comparison against a field on a different payload |
+| **`productCount`** | How many of **this vendor's** products this agency answers for — the product's own override, else the vendor's default. See the section below for what it counts and what it costs |
+| `requestedBy` | `vendor` or `agency`. **On a `pending` row this is the entire question** — it says whose turn it is to answer, exactly as `terms.proposedBy` does on a pending contract |
+| `policyVersions` | Each side's `policy_version` as it stood at the moment of (re)approval. `null` on a connection that was never approved |
+| **`reapproval`** | Always a block, never `null` — it is a **state**, not an event. Populated only while `status === "paused_reapproval"`: `requiredFrom` names the side that must act, and `pausedReason` (`vendor_policy_changed` · `agency_policy_changed`) says whose edit caused it. **This is what makes a paused row actionable** |
+| **`rejection` / `withdrawal` / `termination`** | ⚠️ **`null` when it did not happen, a whole object when it did** — the `dispute` pattern from [`GET /orders/:orderId`](orders.md), never a block of nulls that reads as "unknown". Each carries the actor's role, their user id and the timestamp; `rejection` adds a free-text `reason`, and `termination` adds `reason` (`unilateral` · `reapproval_declined`) and `note` |
+| `*.byUserId` | A `jovi_mall` user id, or `null`. Read the **role** beside it first — an administrative actor's id does not resolve in that database |
+
+> **`status_history` is deliberately not returned.** It is an unbounded array on every
+> document, and a page of twenty connections would carry twenty trails. The dashboard did not
+> ask for it. If a connection *detail* read is ever built, that is where it belongs.
+
+#### The relationship to `counts.agencyConnections`
+
+These rows and the seven integers on [`GET /vendors/:vendorId`](#get-vendorsvendorid) are the
+**same population**, read from the same collection with the same vendor scope. `total` there
+equals `meta.total` on an unfiltered first page here; each of the other six equals
+`meta.total` with the matching `?status=`. An operator reading both screens is reading one
+set of documents twice — the counts summarise, these rows enumerate.
+
+### `productCount` — what it counts, and what it costs
+
+**Definition.** Every **non-deleted** product of this vendor whose *resolved* delivery agency is
+this one: the product's own `delivery.agency_id` override, else the vendor's
+`defaultDeliveryAgencyId`. That is jovi-mall's own `resolveEffectiveAgencyId` precedence, and
+it is the identical rule behind `deliveryAgency` on a catalogue row — one function, three call
+sites, so this panel and the catalogue tab cannot disagree about the same products.
+
+**Every status, not just `active`.** A draft or suspended listing still occupies the agency's
+shelf, so the number relates to `counts.products.total` rather than to the active subset.
+
+Two consequences worth stating, because both look like bugs:
+
+- **The counts do not have to sum to `counts.products.total`.** A product naming no agency,
+  belonging to a vendor with no default, resolves to nothing and is counted on no row. That is a
+  real and diagnostic state — a physical product in that condition cannot be activated.
+- **A `pending`, `rejected` or `withdrawn` connection reports `0`**, and that is the truth
+  rather than a gap: only an `active` connection lets a vendor point a product at that agency.
+  A `terminated` or `paused_reapproval` row may still report a non-zero count, because the
+  products keep the override they were given.
+
+#### It is cheap, and here is the measurement
+
+BR-018 asked whether to drop the column rather than ship a slow endpoint. It is kept, because
+the expensive shape is not the one that was built:
+
+| | |
+|---|---|
+| **Rejected** | A `countDocuments` per row — nine connections, nine scans of the same catalogue to answer one question, and nine numbers that can disagree with each other if a product moves while they run |
+| **Built** | **One** `$group` over the vendor's catalogue for the whole page, keyed on `delivery.agency_id`, folded onto the vendor's default afterwards |
+
+The cost is therefore **one query per request regardless of page size**, and its plan is
+`$match: { vendorId, deletedAt: null }` — served by the `vendorId` prefix of the existing
+`{ vendorId, slug }` unique index — then a fetch-and-group bounded by **one vendor's**
+listings. That is the same index, the same range and the same plan as the `counts.products`
+breakdown that `GET /vendors/:vendorId` has computed on every call since Phase 6. This
+endpoint adds a cost the vendor detail was already paying, not a new class of one.
+
+No dedicated index is proposed. `products` carries a single-key
+`{ 'delivery.agency_id': 1 }` for the cross-vendor agency cascade, which a vendor-scoped group
+cannot use, and a `{ vendorId, 'delivery.agency_id' }` compound would exist to serve one
+grouped count on one screen.
+
+**The drill-down was built as well as the count**, because it makes the number verifiable rather
+than merely displayed: `GET /vendors/:vendorId/products?deliveryAgencyId=…` returns the
+listings behind it, and its `meta.total` is the same number by construction.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | "Not a valid vendor id"; `limit` above 100; a `sort` key outside `createdAt` / `status`; a blank `status` |
+| 403 | `AUTHZ_PERMISSION_DENIED` | The caller holds one of the two permissions and not the other. `details.required` names the **missing** ones and `details.mode` is `"all"` — so a client can say which permission is short rather than "forbidden" |
+| 404 | `NOT_FOUND` | "Vendor not found" — checked **first**, so an empty list reads as "they ship through nobody" only when that is true |
 
 ---
 

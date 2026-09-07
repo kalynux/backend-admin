@@ -17,7 +17,7 @@ import { ArticleBody } from '../validators/article-body.validator';
  * The article shape a logged-out reader gets — reproduced here for **one endpoint**.
  *
  * ── Why a public projection lives in the admin service at all ─────────────────
- * `GET /content/articles/:articleKey/preview` returns the PUBLIC shape, at any status,
+ * `GET /content/articles/:articleId/preview` returns the PUBLIC shape, at any status,
  * behind the admin guard. That is the design jovi-mall's requirements asked for and the
  * reason it works: previewing never becomes an argument for relaxing the public endpoints.
  * The alternative — a `?includeDrafts=` flag on jovi-mall's public route — would put every
@@ -41,6 +41,20 @@ import { ArticleBody } from '../validators/article-body.validator';
  * (generated cover art) rather than a field it skips.
  */
 
+/**
+ * The cover as a **reader** receives it: the shared image, plus the alt text for the one
+ * language being served.
+ *
+ * ⚠ **This shape is unchanged on the wire, and that is the point.** The stored `ArticleCover`
+ * lost its `alt` when alt text became per-locale, but a public consumer still gets exactly
+ * `{ url, alt, width, height }` — the projection reassembles it from the resolved
+ * translation. So the marketing frontend needed no change for that migration, and neither did
+ * jovi-mall's public response shape.
+ */
+export interface PublicArticleCover extends ArticleCover {
+    alt: string;
+}
+
 export interface PublicAuthorDto {
     id: string;
     name: string;
@@ -63,7 +77,7 @@ export interface PublicArticleSummaryDto {
     publishedAt: string;
     updatedAt?: string;
     featured: boolean;
-    cover: ArticleCover | null;
+    cover: PublicArticleCover | null;
     wordCount: number;
     /**
      * Exactly the locales this article is **published** in — what the frontend turns into
@@ -127,10 +141,29 @@ function baseSummary(
         publishedAt: (article.published_at ?? article.createdAt).toISOString(),
         ...(article.content_updated_at ? { updatedAt: article.content_updated_at.toISOString() } : {}),
         featured: article.featured,
-        cover: article.cover ?? null,
+        cover: coverFor(article, translation),
         wordCount: translation.word_count,
         availableLocales: availableLocalesOf(article),
     };
+}
+
+/**
+ * The shared cover image, described in the language being served.
+ *
+ * ── Why `title` stands in when `cover_alt` is unset ───────────────────────────
+ * On the PUBLIC route it cannot be: `collectPublishBlockers` refuses to publish a translation
+ * that is going live with a cover and no alt text for it, so every published locale has one.
+ * This branch exists for `/preview`, which renders unpublished work on purpose and would
+ * otherwise emit `alt: ""` — and an empty alt is not "missing", it is the HTML for *this
+ * image is decorative, skip it*, which is a lie about a cover.
+ *
+ * So the fallback is the article's own title in that same language. It is never blank, it is
+ * never the wrong language, and it is never seen by a reader — which is why it is a stand-in
+ * here rather than the kind of cross-locale fallback the header rules out.
+ */
+function coverFor(article: ArticleDocument, translation: ArticleTranslationDoc): PublicArticleCover | null {
+    if (!article.cover) return null;
+    return { ...article.cover, alt: translation.cover_alt ?? translation.title };
 }
 
 export function toPublicArticleSummaryDto(

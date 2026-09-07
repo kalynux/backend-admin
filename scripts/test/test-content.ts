@@ -245,6 +245,16 @@ t.assert('per-translation published is carried', () => doc.translations[0].publi
 t.assert('both admin stamps are written on create', () =>
     doc.created_by_admin?.id === 'a1' && doc.updated_by_admin?.id === 'a1');
 
+/**
+ * `source_locale` — the one default with no jovi-mall counterpart (BR-019 § 1).
+ *
+ * Derived inside `newArticleDocument` rather than passed in, so the create body's first
+ * translation is the only definition of it. A `null` here would not be a crash either: it
+ * would be a document the DTO cannot distinguish from one written before the field existed.
+ */
+t.assert('source_locale is the FIRST translation of the create body', () =>
+    doc.source_locale === 'en');
+
 // No field may be `undefined`: BSON omits an undefined path, so the document would be
 // stored missing it and jovi-mall's reader would see exactly the absent-default failure
 // this section exists to prevent.
@@ -373,11 +383,60 @@ t.assert('adding a language IS a revision (the hreflang set changed)', () => {
 t.assert('a cover change IS a revision', () =>
     contentChanged(before, {
         translations: [...translations],
-        cover: { url: '/c.jpg', alt: 'Cover', width: 1600, height: 900 },
+        cover: { url: '/c.jpg', width: 1600, height: 900 },
     }));
 t.assert('translation ORDER does not make a revision', () => {
     const two = [...translations, { ...translations[0], locale: 'fr' as const, slug: 'se-faire-payer' }];
     return !contentChanged({ translations: two, cover: null }, { translations: [...two].reverse(), cover: null });
+});
+
+/**
+ * ⚠ **What `translations[]` order actually is — BR-019 § 1, measured rather than assumed.**
+ *
+ * The dashboard shipped `translations[0]` as the "component driver": the language a new
+ * translation inherits its blocks from. These four assertions are why that is not safe and
+ * why `sourceLocale` exists.
+ *
+ * `mergeTranslations` returns `incoming.map(…)`. The stored array is therefore the array the
+ * last write sent — its order, its membership, all of it — and `existing` is consulted for
+ * slug history alone. Nothing downstream reorders it: both projections read the array
+ * whole or field-by-field in place, and the DTO `map`s it. So a client that sorts the array
+ * for display and PATCHes it back has repointed a positional driver with a request that
+ * cannot fail.
+ *
+ * These must go red if anybody makes the order server-controlled, because at that point
+ * `content.md` says something false and (a) became the honest answer after all.
+ */
+const enInput = {
+    locale: 'en' as const,
+    slug: 'getting-paid',
+    title: 'Getting paid',
+    excerpt: 'How the money reaches you.',
+    body: ArticleBodySchema.parse([paragraph('Commission is taken at payment.')]),
+    published: true,
+};
+const frInput = {
+    ...enInput,
+    locale: 'fr' as const,
+    slug: 'se-faire-payer',
+    title: 'Se faire payer',
+};
+
+const enThenFr = mergeTranslations([], [enInput, frInput]);
+
+t.assert('mergeTranslations preserves the order it was GIVEN', () =>
+    enThenFr[0].locale === 'en' && enThenFr[1].locale === 'fr');
+t.assert('a reordered write is STORED reordered — the array is not canonicalised', () => {
+    const frThenEn = mergeTranslations(enThenFr, [frInput, enInput]);
+    return frThenEn[0].locale === 'fr' && frThenEn[1].locale === 'en';
+});
+t.assert('a write omitting a language DROPS it (full-array replace, never a merge)', () =>
+    mergeTranslations(enThenFr, [frInput]).length === 1);
+t.assert('the stored order is the INCOMING order, not the existing one', () => {
+    // The existing array leads with `en`; the incoming one leads with `fr`. If the result
+    // led with `en`, order would be server-controlled and BR-019 § 1 answer (a) would hold.
+    const merged = mergeTranslations(enThenFr, [frInput, enInput]);
+    return merged[0].locale !== enThenFr[0].locale;
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -418,8 +477,8 @@ t.assert('no content param schema uses the shared objectId validator', () => {
     // own route scan. Strip comments first, exactly as it does.
     const src = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
     return !/\bobjectId\b/.test(src)
-        && /ArticleKeyParamSchema[\s\S]{0,120}ArticleKeySchema/.test(src)
-        && /AuthorKeyParamSchema[\s\S]{0,120}ArticleKeySchema/.test(src);
+        && /ArticleIdParamSchema[\s\S]{0,120}ArticleKeySchema/.test(src)
+        && /AuthorIdParamSchema[\s\S]{0,120}ArticleKeySchema/.test(src);
 });
 
 t.assert('"category" is reserved (collides with the hub route)', () => isReservedSlug('category'));
@@ -472,23 +531,86 @@ t.assert('findFeaturedSharingLocales uses $elemMatch, not two dotted predicates'
     /translations:\s*\{\s*\$elemMatch:/.test(REPO_SRC));
 t.assert('every repository read filters deletedAt', () => REPO_SRC.includes('deletedAt: null'));
 
+/**
+ * ⚠ **The projection has to be widened whenever a field is added, and it failed silently
+ * once already.**
+ *
+ * `ARTICLE_LIST_PROJECTION` names the translation subfields one by one, because Mongo
+ * refuses `{ translations: 1, 'translations.body': 0 }`. That makes it a whitelist a new
+ * field is absent from by default — and the symptom is not an error but a plausible value:
+ * `cover_alt` was added to `ArticleTranslationDoc` and to the summary DTO without being
+ * added here, so every row of the editor's inbox reported `coverAlt: null`, which reads as
+ * "nobody has written it" on the one field whose purpose is to warn the inbox that a
+ * publish will be refused.
+ *
+ * The DTO reads both, so both projections are pinned.
+ */
+t.assert('the LIST projection carries translations.cover_alt (the summary DTO reads it)', () =>
+    REPO_SRC.includes("'translations.cover_alt': 1"));
+t.assert('both projections carry source_locale (the DTO reads it on list AND detail)', () =>
+    (REPO_SRC.match(/^\s*source_locale: 1,$/gm) ?? []).length === 2);
+
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('5. The lifecycle — what is legal, and the one refusal that matters');
 // ─────────────────────────────────────────────────────────────────────────────
 
 t.assert('an article with no translations cannot be published', () =>
-    collectPublishBlockers({ translations: [], authorExists: true }).length === 1);
+    collectPublishBlockers({ translations: [], cover: null, authorExists: true }).length === 1);
 t.assert('an article whose byline does not exist cannot be published', () =>
-    collectPublishBlockers({ translations, authorExists: false }).length === 1);
+    collectPublishBlockers({ translations, cover: null, authorExists: false }).length === 1);
 t.assert('an article with every language drafted cannot be published', () =>
     collectPublishBlockers({
         translations: translations.map((tr) => ({ ...tr, published: false })),
+        cover: null,
         authorExists: true,
     }).length === 1);
 t.assert('blockers are a CHECKLIST, not a first failure', () =>
-    collectPublishBlockers({ translations: [], authorExists: false }).length === 2);
+    collectPublishBlockers({ translations: [], cover: null, authorExists: false }).length === 2);
 t.assert('a complete article has no blockers', () =>
-    collectPublishBlockers({ translations, authorExists: true }).length === 0);
+    collectPublishBlockers({ translations, cover: null, authorExists: true }).length === 0);
+
+/**
+ * The cover's alt text is PER-LOCALE, and publishing is where a missing one is caught.
+ *
+ * An article publishes in up to five languages off one shared image. A single `alt` on the
+ * cover put English words into a French screen reader and onto the French page's `og:image`,
+ * so the string moved onto the translation — and this is the rule that stops a language going
+ * live without one. Deliberately not a write-time refusal: `PATCH` can add a cover without
+ * sending `translations`, so requiring it there would block an editor mid-draft.
+ */
+const COVER = { url: '/c.jpg', width: 1600, height: 900 };
+const withAlt = translations.map((tr) => ({ ...tr, cover_alt: 'A market stall taking a mobile payment' }));
+
+t.assert('a cover with no alt text in a PUBLISHED language blocks publishing', () =>
+    collectPublishBlockers({ translations, cover: COVER, authorExists: true }).length === 1);
+t.assert('the same article with alt text publishes', () =>
+    collectPublishBlockers({ translations: withAlt, cover: COVER, authorExists: true }).length === 0);
+t.assert('no cover means no alt-text blocker', () =>
+    collectPublishBlockers({ translations, cover: null, authorExists: true }).length === 0);
+t.assert('a DRAFTED language missing alt text does NOT block the languages beside it', () => {
+    const mixed = [
+        ...withAlt,
+        { ...translations[0], locale: 'fr' as const, slug: 'se-faire-payer', published: false },
+    ];
+    return collectPublishBlockers({ translations: mixed, cover: COVER, authorExists: true }).length === 0;
+});
+t.assert('one blocker PER language, so the editor knows which to open', () => {
+    const two = [
+        ...translations,
+        { ...translations[0], locale: 'fr' as const, slug: 'se-faire-payer', published: true },
+    ];
+    return collectPublishBlockers({ translations: two, cover: COVER, authorExists: true }).length === 2;
+});
+t.assert('the alt-text blocker names the locale it is missing from', () =>
+    collectPublishBlockers({ translations, cover: COVER, authorExists: true })[0].includes('"en"'));
+
+// `cover_alt` is reader-facing prose, so rewriting it is a revision — the same reasoning
+// that puts `title` and `excerpt` in the fingerprint and keeps `published` out of it.
+t.assert('rewriting the cover alt text IS a revision', () =>
+    contentChanged(
+        { translations: withAlt, cover: COVER },
+        { translations: withAlt.map((tr) => ({ ...tr, cover_alt: 'Different words' })), cover: COVER },
+    ));
 
 /**
  * The delete refusal, by source scan.
@@ -539,18 +661,18 @@ t.assert('fourteen content routes are declared — one per legacy row', () =>
 const EXPECTED_ROUTES: ReadonlyArray<[string, string, string]> = [
     ['get', '/api/v1/content/articles', 'content.articles.read'],
     ['post', '/api/v1/content/articles', 'content.articles.write'],
-    ['get', '/api/v1/content/articles/:articleKey', 'content.articles.read'],
-    ['get', '/api/v1/content/articles/:articleKey/preview', 'content.articles.read'],
-    ['patch', '/api/v1/content/articles/:articleKey', 'content.articles.write'],
-    ['post', '/api/v1/content/articles/:articleKey/publish', 'content.articles.publish'],
-    ['post', '/api/v1/content/articles/:articleKey/unpublish', 'content.articles.publish'],
-    ['post', '/api/v1/content/articles/:articleKey/archive', 'content.articles.publish'],
-    ['delete', '/api/v1/content/articles/:articleKey', 'content.articles.delete'],
+    ['get', '/api/v1/content/articles/:articleId', 'content.articles.read'],
+    ['get', '/api/v1/content/articles/:articleId/preview', 'content.articles.read'],
+    ['patch', '/api/v1/content/articles/:articleId', 'content.articles.write'],
+    ['post', '/api/v1/content/articles/:articleId/publish', 'content.articles.publish'],
+    ['post', '/api/v1/content/articles/:articleId/unpublish', 'content.articles.publish'],
+    ['post', '/api/v1/content/articles/:articleId/archive', 'content.articles.publish'],
+    ['delete', '/api/v1/content/articles/:articleId', 'content.articles.delete'],
     ['get', '/api/v1/content/authors', 'content.authors.read'],
     ['post', '/api/v1/content/authors', 'content.authors.write'],
-    ['get', '/api/v1/content/authors/:authorKey', 'content.authors.read'],
-    ['patch', '/api/v1/content/authors/:authorKey', 'content.authors.write'],
-    ['delete', '/api/v1/content/authors/:authorKey', 'content.authors.delete'],
+    ['get', '/api/v1/content/authors/:authorId', 'content.authors.read'],
+    ['patch', '/api/v1/content/authors/:authorId', 'content.authors.write'],
+    ['delete', '/api/v1/content/authors/:authorId', 'content.authors.delete'],
 ];
 
 for (const [method, path, expected] of EXPECTED_ROUTES) {
@@ -565,8 +687,23 @@ for (const [method, path, expected] of EXPECTED_ROUTES) {
 t.assert('every content route is mounted under ONE prefix (D-12)', () =>
     contentRoutes.every((r) => r.fullPath.startsWith('/api/v1/content/')));
 
-t.assert('the paths key on the stable string key, never an ObjectId param', () =>
-    contentRoutes.every((r) => !r.fullPath.includes(':id') && !r.fullPath.includes(':articleId')));
+/**
+ * ⚠ This assertion used to ban `:articleId` outright, on the reasoning that a param called
+ * `id` means an ObjectId. That reasoning is now reversed, deliberately (BR-014): the payload
+ * has always called this string `id`, the path called it `key`, and the documentation
+ * disagreeing with itself is what cost the dashboard its entire `/content` module.
+ *
+ * The name was never the guarantee. **The SCHEMA is** — and it is pinned by
+ * "no content param schema uses the shared objectId validator" above, which is the assertion
+ * that would actually catch an ObjectId creeping onto this surface. What is left to pin here
+ * is that the two param names are the ones the docs promise, and that no route falls back to
+ * a bare `:id` that names neither resource.
+ */
+t.assert('every parameterised content path uses :articleId or :authorId, never a bare :id', () =>
+    contentRoutes.every((r) => {
+        const params = r.fullPath.match(/:[A-Za-z]+/g) ?? [];
+        return params.every((p) => p === ':articleId' || p === ':authorId');
+    }));
 
 const CONTENT_ACTIONS = [
     'content.articles.create',
@@ -673,6 +810,40 @@ t.assert('no public DTO carries updated_by_admin', () => !serialisedPublic.inclu
 t.assert('no public DTO carries an administrator name', () => !serialisedPublic.includes('Dev One'));
 t.assert('no public DTO carries an administrator tier', () => !/"tier"/.test(serialisedPublic));
 
+/**
+ * The cover reaches a reader as `{ url, alt, width, height }` — **the shape it always had**.
+ *
+ * `alt` left the stored cover and became per-translation, but the public projection
+ * reassembles it from whichever language is being served. That is what made the change
+ * invisible to the marketing frontend and to jovi-mall's public response shape, so these
+ * assertions are pinning a wire contract, not an implementation detail.
+ */
+const covered = { ...publishedDoc, cover: { url: '/c.jpg', width: 1600, height: 900 } };
+const enTranslation = { ...covered.translations[0], cover_alt: 'A market stall taking a payment' };
+const frTranslation = { ...covered.translations[1], cover_alt: 'Un étal acceptant un paiement' };
+const enCover = toPublicArticleSummaryDto(
+    { ...covered, translations: [enTranslation, frTranslation] }, enTranslation, author).cover;
+const frCover = toPublicArticleSummaryDto(
+    { ...covered, translations: [enTranslation, frTranslation] }, frTranslation, author).cover;
+
+t.assert('the public cover still carries url, alt, width and height', () =>
+    JSON.stringify(Object.keys(enCover ?? {}).sort()) === JSON.stringify(['alt', 'height', 'url', 'width']));
+t.assert('the cover alt is the one written for the language being served', () =>
+    enCover?.alt === 'A market stall taking a payment' && frCover?.alt === 'Un étal acceptant un paiement');
+t.assert('both languages share the one image', () => enCover?.url === frCover?.url);
+t.assert('an article with no cover still emits an explicit null', () =>
+    toPublicArticleSummaryDto(publishedDoc, publishedDoc.translations[0], author).cover === null);
+/**
+ * Only reachable through `/preview`, because publish refuses a live language with a cover and
+ * no alt. The stand-in is the title in that SAME language — never blank (an empty `alt` is the
+ * HTML for "decorative, skip me", which is a lie about a cover) and never the wrong language.
+ */
+t.assert('an unwritten alt falls back to the title in that same language, never to blank', () => {
+    const bare = { ...covered.translations[0], cover_alt: null };
+    return toPublicArticleSummaryDto({ ...covered, translations: [bare] }, bare, author).cover?.alt
+        === bare.title;
+});
+
 t.assert('the public author DTO resolves the requested locale', () =>
     toPublicAuthorDto(author, 'en').title === 'Editorial');
 t.assert('a missing author locale falls back to English (a blank byline is worse)', () =>
@@ -695,6 +866,135 @@ t.assert('the preview handler builds a PUBLIC dto, not the admin one', () =>
 const adminDto = toAdminArticleDto(publishedDoc, author);
 t.assert('the ADMIN dto does carry the administrator stamp', () =>
     JSON.stringify(adminDto).includes('Dev One'));
+
+/**
+ * ⚠ **`sourceLocale` — the field BR-019 § 1 asked for, and the four cases it has to survive.**
+ *
+ * The dashboard derives its "component driver" (the language a new translation inherits its
+ * blocks from) from this. § 3 above measured why `translations[0]` cannot serve: the array's
+ * order is whatever the last `PATCH` sent. So this field is stored at create and never
+ * mutated, and these pin the read side of that — including the two states no write produces
+ * and every read must still answer.
+ */
+t.assert('the admin DTO carries sourceLocale', () => adminDto.sourceLocale === 'en');
+t.assert('reordering the translations does NOT move sourceLocale', () =>
+    toAdminArticleDto(
+        { ...publishedDoc, translations: [...publishedDoc.translations].reverse() },
+        author,
+    ).sourceLocale === 'en');
+
+/**
+ * A document written before the field existed. BSON omits an absent key, so it reads back as
+ * `undefined` — modelled exactly here rather than as `null`, because the two must behave
+ * identically and only one of them is what the driver actually returns.
+ *
+ * The answer is `translations[0].locale`: the value `source_locale` WOULD hold, since nothing
+ * seeds articles and every such document was created through this editor in the order its
+ * create body listed. Not a backfill (D-5 — this codebase writes no data migrations) and not
+ * a crash.
+ */
+const legacyDoc = { ...publishedDoc, source_locale: undefined } as unknown as typeof publishedDoc;
+t.assert('a document with NO source_locale answers the first translation, not null', () =>
+    toAdminArticleDto(legacyDoc, author).sourceLocale === 'en');
+
+/**
+ * The case the stored value alone cannot answer: a full-array replace may drop the source
+ * language. `source_locale` is still not rewritten — it is a record of what happened — but a
+ * DTO naming an absent locale hands the editor a `find()` that returns `undefined`, so the
+ * read falls back and the field's promise holds.
+ */
+t.assert('sourceLocale ALWAYS names a locale present in translations', () => {
+    const frOnly = toAdminArticleDto(
+        { ...publishedDoc, translations: [publishedDoc.translations[1]] },
+        author,
+    );
+    return frOnly.sourceLocale === 'fr'
+        && frOnly.translations.some((tr) => tr.locale === frOnly.sourceLocale);
+});
+t.assert('an article with no translations answers null rather than throwing', () =>
+    toAdminArticleDto({ ...publishedDoc, translations: [] }, author).sourceLocale === null);
+
+// Never mutated. `updateByKey` only `$set`s the keys `update()` assembles, so the guarantee
+// is that this one is never assembled — which is what the scan checks.
+t.assert('PATCH never writes source_locale', () => !/set\.source_locale/.test(SERVICE_SRC));
+
+// It is an EDITOR concern. A reader resolves one locale from the URL and never asks which
+// came first, so this must not appear in the shape `/preview` hands out.
+t.assert('no public DTO carries sourceLocale', () => !serialisedPublic.includes('sourceLocale'));
+
+/**
+ * ⚠ **The public shape, against jovi-mall's own copy of it — BR-019 § 3.**
+ *
+ * `/preview` returns `PublicArticleDetailDto` from THIS repository's
+ * `read-models/public-article.dto.ts`, and its whole value rests on being the same shape
+ * jovi-mall's `GET /api/public/articles/{slug}` serves. There is no shared package and
+ * neither file imports the other, so "the same" is a claim nothing checked until now — the
+ * class of claim this module has already been wrong about for months.
+ *
+ * Field names by source scan rather than by running jovi-mall's mapper, which would drag
+ * Mongoose and a connection into a suite that deliberately needs neither. The house
+ * precedent is § 1's cross-repo fixture list and `test:data-access`'s re-read of jovi-mall's
+ * `collections.ts`.
+ */
+const JOVI = join(__dirname, '..', '..', '..', 'jovi-mall', 'src');
+const ADMIN_PUBLIC_DTO = readFileSync(
+    join(__dirname, '..', '..', 'src', 'modules', 'content', 'read-models', 'public-article.dto.ts'),
+    'utf8',
+);
+const JOVI_PUBLIC_DTO = readFileSync(
+    join(JOVI, 'modules', 'blog', 'dto', 'public-article.dto.ts'),
+    'utf8',
+);
+
+/**
+ * The property names declared directly in `interface Name { … }`, sorted.
+ *
+ * Bracketed by index rather than by a regex built from `name`: the two files declare their
+ * interfaces at different indents and with different `extends` clauses, and a pattern
+ * interpolating a name is one escaping mistake away from silently matching nothing — which
+ * on a parity assertion reads as "both sides agree" rather than as a broken scan. Comparing
+ * a non-empty list is the other half of that guard.
+ */
+function interfaceFields(source: string, name: string): string[] {
+    const start = source.indexOf(`export interface ${name} `);
+    if (start < 0) return [];
+    const open = source.indexOf('{', start);
+    const close = source.indexOf('\n}', open);
+    if (open < 0 || close < 0) return [];
+
+    const body = source.slice(open + 1, close).replace(/\/\*[\s\S]*?\*\//g, '');
+    return (body.match(/^\s*\w+\??:/gm) ?? [])
+        .map((line) => line.trim().replace(/\??:$/, ''))
+        .sort();
+}
+
+const sameFields = (name: string, joviName = name) => () => {
+    const here = interfaceFields(ADMIN_PUBLIC_DTO, name);
+    return here.length > 0
+        && JSON.stringify(here) === JSON.stringify(interfaceFields(JOVI_PUBLIC_DTO, joviName));
+};
+
+t.assert('PublicArticleSummaryDto matches jovi-mall field for field', sameFields('PublicArticleSummaryDto'));
+t.assert('PublicArticleDetailDto matches jovi-mall field for field', sameFields('PublicArticleDetailDto'));
+t.assert('PublicAuthorDto matches jovi-mall field for field', sameFields('PublicAuthorDto'));
+t.assert('PublicArticleCover adds the same key on both sides', sameFields('PublicArticleCover'));
+// The base each cover extends — `ArticleCover` here, `IArticleCover` there. Different name,
+// and it must stay the same three fields, or the reassembled cover differs on the wire.
+t.assert('the cover base carries the same three fields on both sides', () => {
+    const here = interfaceFields(
+        readFileSync(
+            join(__dirname, '..', '..', 'src', 'modules', 'content', 'domain', 'article.document.ts'),
+            'utf8',
+        ),
+        'ArticleCover',
+    );
+    const there = interfaceFields(
+        readFileSync(join(JOVI, 'modules', 'blog', 'models', 'article.model.ts'), 'utf8'),
+        'IArticleCover',
+    );
+    return JSON.stringify(here) === JSON.stringify(['height', 'url', 'width'])
+        && JSON.stringify(here) === JSON.stringify(there);
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('8. Tier grants — A.6 and O-1');

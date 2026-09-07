@@ -19,6 +19,8 @@ export interface TranslationInput {
     metaTitle?: string;
     excerpt: string;
     body: ArticleBody;
+    /** Per-locale alt text for the shared cover. Absent is legal; publish refuses it. */
+    coverAlt?: string;
     published: boolean;
 }
 
@@ -62,6 +64,7 @@ export function mergeTranslations(
             meta_title: translation.metaTitle ?? null,
             excerpt: translation.excerpt,
             body: translation.body,
+            cover_alt: translation.coverAlt ?? null,
             word_count: countWords(translation.body),
             published: translation.published,
             previous_slugs: [...history],
@@ -101,6 +104,9 @@ function fingerprint(article: {
             meta_title: translation.meta_title,
             excerpt: translation.excerpt,
             body: translation.body,
+            // Reader-facing prose like the rest of this list: it is what a screen reader
+            // announces and what the `og:image` alt carries, so rewriting it IS a revision.
+            cover_alt: translation.cover_alt,
         }));
 
     return JSON.stringify({ translations, cover: article.cover ?? null });
@@ -115,6 +121,7 @@ function fingerprint(article: {
  */
 export function collectPublishBlockers(article: {
     translations: ArticleTranslationDoc[];
+    cover: ArticleCover | null;
     authorExists: boolean;
 }): string[] {
     const blockers: string[] = [];
@@ -127,6 +134,28 @@ export function collectPublishBlockers(article: {
     }
     if (article.translations.length > 0 && !article.translations.some((t) => t.published)) {
         blockers.push('Every translation is marked unpublished — at least one language must be live');
+    }
+
+    /**
+     * A cover with no alt text in a language that is going live.
+     *
+     * Checked against the **published** translations only — a drafted language is not on the
+     * site, so an unwritten alt there is work in progress rather than a defect, and blocking
+     * on it would stop an editor shipping English because the Arabic draft is unfinished.
+     *
+     * One blocker per language rather than one summary line: the editor has to open a
+     * specific translation to fix it, and "some translations are missing alt text" makes
+     * them check all five.
+     */
+    if (article.cover) {
+        for (const translation of article.translations) {
+            if (translation.published && !translation.cover_alt) {
+                blockers.push(
+                    `The cover image has no alt text in "${translation.locale}" — describe it in that language, `
+                        + 'or the page ships an image no screen reader and no search engine can read',
+                );
+            }
+        }
     }
 
     return blockers;

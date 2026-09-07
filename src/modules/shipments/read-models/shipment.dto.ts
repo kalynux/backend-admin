@@ -1,6 +1,9 @@
+import { FileDetail } from '../../../infra/storage/file-detail';
+import { productImageKey } from '../../vendors/repositories/product-media.read.repository';
 import { ShipmentReadModel } from '../repositories/shipment.read.repository';
 import {
     CashCollectionReadModel,
+    OrderItemSnapshot,
     OrderRef,
     OutboxHealth,
     ShipmentOfferReadModel,
@@ -42,8 +45,54 @@ export interface ShipmentListItemDto {
     updatedAt: string | null;
 }
 
+/**
+ * The order card on a shipment detail — every field of `OrderRef`, named, plus the vendor's
+ * business name (BR-016 § 6).
+ *
+ * ⚠ **`vendorName` here is the STORE's name, and `GET /orders`'s `vendorName` is NOT.**
+ * That one reads `vendors.display_name`, which `vendor.model.ts` documents as the vendor's
+ * *personal* name — "the public BUSINESS name … live on the vendor's Store". So the two
+ * fields share a name and a shape and answer different questions. This one is the business,
+ * which is what the card is asking for and what an operator recognises the shop by; the
+ * discrepancy on the order list is reported rather than silently mirrored here, because
+ * copying the wrong source to be consistent is how BR-006's `contactName` column happened.
+ *
+ * `null` where the vendor has no Store row (a vendor mid-onboarding) or none was resolved.
+ * `null`, never `''`, and never `display_name` substituted in.
+ */
+export interface ShipmentOrderRefDto extends OrderRef {
+    vendorName: string | null;
+}
+
+export interface ShipmentItemDto {
+    orderItemId: string | null;
+    productId: string | null;
+    variantId: string | null;
+    quantity: number;
+    /**
+     * The line's title, price and currency, joined from the ORDER's item snapshot on
+     * `orderItemId` (BR-017 B).
+     *
+     * These are the terms of the SALE and are snapshotted upstream precisely so they cannot
+     * drift — which is why they are read from the order line rather than from the product,
+     * and why they are `null` when the order line is gone rather than refreshed from the
+     * catalogue.
+     */
+    title: string | null;
+    price: number | null;
+    currency: string | null;
+    /**
+     * The primary image, variant-preferred — the same resolution the order detail uses, so
+     * the two screens cannot show different pictures of one parcel.
+     *
+     * Live rather than snapshotted, and `null` is ordinary. Render gated on all three of
+     * `access === 'public'`, `url !== null` and `mimeType.startsWith('image/')`.
+     */
+    image: FileDetail | null;
+}
+
 export interface ShipmentDetailDto extends ShipmentListItemDto {
-    order: OrderRef | null;
+    order: ShipmentOrderRefDto | null;
     assignment: {
         state: string | null;
         currentOfferId: string | null;
@@ -117,7 +166,7 @@ export interface ShipmentDetailDto extends ShipmentListItemDto {
         settledAt: string | null;
     } | null;
     offers: ShipmentOfferDto[];
-    items: { orderItemId: string | null; productId: string | null; variantId: string | null; quantity: number }[];
+    items: ShipmentItemDto[];
     deliveryProofFileId: string | null;
     /**
      * Outbox HEALTH, not a trackability verdict.
@@ -176,21 +225,52 @@ export function toShipmentListItemDto(
     };
 }
 
+/** Everything the DETAIL resolves beyond the list's three name maps. */
+export interface ShipmentDetailContext {
+    offers: ShipmentOfferReadModel[];
+    cod: CashCollectionReadModel | null;
+    outbox: OutboxHealth;
+    /** The order's vendor, by BUSINESS name — see `ShipmentOrderRefDto`. */
+    vendorName: string | null;
+    /** `order_item_id` → the sale's terms for that line. */
+    itemSnapshots: Map<string, OrderItemSnapshot>;
+    /** `productImageKey(productId, variantId)` → the primary image. */
+    images: Map<string, FileDetail>;
+}
+
+/**
+ * The order card, mapped field by field.
+ *
+ * A named mapping rather than handing the repository's `OrderRef` straight out: it now
+ * carries a field that comes from a different collection, and a pass-through would make the
+ * next field added to `OrderRefReadModel`'s projection reach the wire on its own — the very
+ * thing this file's header says the mappers exist to prevent.
+ */
+function toShipmentOrderRefDto(ref: OrderRef, vendorName: string | null): ShipmentOrderRefDto {
+    return {
+        id: ref.id,
+        orderNumber: ref.orderNumber,
+        paymentMethod: ref.paymentMethod,
+        paymentStatus: ref.paymentStatus,
+        fulfillmentStatus: ref.fulfillmentStatus,
+        customerId: ref.customerId,
+        vendorId: ref.vendorId,
+        vendorName,
+    };
+}
+
 export function toShipmentDetailDto(
     shipment: ShipmentReadModel,
     names: ShipmentNames,
-    context: {
-        offers: ShipmentOfferReadModel[];
-        cod: CashCollectionReadModel | null;
-        outbox: OutboxHealth;
-    },
+    context: ShipmentDetailContext,
 ): ShipmentDetailDto {
     const handover = shipment.handover;
     const rejection = shipment.rejection;
+    const orderRef = names.order.get(shipment.order_id.toString()) ?? null;
 
     return {
         ...toShipmentListItemDto(shipment, names),
-        order: names.order.get(shipment.order_id.toString()) ?? null,
+        order: orderRef ? toShipmentOrderRefDto(orderRef, context.vendorName) : null,
         assignment: {
             state: shipment.assignment?.state ?? null,
             currentOfferId: shipment.assignment?.current_offer_id?.toString() ?? null,
@@ -268,12 +348,23 @@ export function toShipmentDetailDto(
             : null,
         cod: context.cod ? toCodDto(context.cod) : null,
         offers: context.offers.map((offer) => toShipmentOfferDto(offer, names.agent)),
-        items: (shipment.items ?? []).map((item) => ({
-            orderItemId: item.order_item_id ? item.order_item_id.toString() : null,
-            productId: item.product_id ? item.product_id.toString() : null,
-            variantId: item.variant_id ? item.variant_id.toString() : null,
-            quantity: item.quantity ?? 0,
-        })),
+        items: (shipment.items ?? []).map((item) => {
+            const orderItemId = item.order_item_id ? item.order_item_id.toString() : null;
+            const productId = item.product_id ? item.product_id.toString() : null;
+            const variantId = item.variant_id ? item.variant_id.toString() : null;
+            const snapshot = orderItemId ? context.itemSnapshots.get(orderItemId) : undefined;
+
+            return {
+                orderItemId,
+                productId,
+                variantId,
+                quantity: item.quantity ?? 0,
+                title: snapshot?.title ?? null,
+                price: snapshot?.price ?? null,
+                currency: snapshot?.currency ?? null,
+                image: context.images.get(productImageKey(productId, variantId)) ?? null,
+            };
+        }),
         deliveryProofFileId: shipment.delivery_proof_file_id
             ? shipment.delivery_proof_file_id.toString()
             : null,

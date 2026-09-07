@@ -38,7 +38,7 @@ Checked against the ask, field by field:
 
 | Asked for | Status |
 |---|---|
-| **Image** | **Absent.** No `images`, no `imageFileIds`, no `thumbnail`. And gap **D2** applies even if there were: *"This service resolves no file URLs"* ([ADR-008 D-6](../../admin/ADR-008-VENDOR-MANAGEMENT.md)) — an id alone renders nothing |
+| **Image** | **Absent.** No `images`, no `imageFileIds`, no `thumbnail`. And gap **D2** applies even if there were: *"This service resolves no file URLs"* ([ADR-008 D-6](../../ADR-008-VENDOR-MANAGEMENT.md)) — an id alone renders nothing |
 | **Stock / inventory** | **Absent.** Zero occurrences of `stock`, `inventory` or `quantity` on any product field |
 | **Price** | **Absent** from the product row |
 | **Storage fee the vendor pays the agency** | **Absent as a charge** — see below, the *tariff* exists but nothing joins it to a product |

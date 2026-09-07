@@ -173,6 +173,14 @@ export class ArticleService {
         return this.requireArticle(input.id);
     }
 
+    /**
+     * ⚠ **`source_locale` is never in `set`, and that is a contract rather than an
+     * oversight.** It records the language the article was written in first — the editor's
+     * component driver — so a `PATCH` that adds, removes or reorders translations must
+     * leave it exactly where it was. A field that moves is the thing it exists to replace
+     * (BR-019 § 1). `updateByKey` only ever `$set`s the keys assembled here, so leaving it
+     * out is enough; there is no path that rewrites the whole document.
+     */
     async update(key: string, input: UpdateArticleBody, admin: AdminAuthorStamp): Promise<ArticleDocument> {
         const article = await this.requireArticle(key);
 
@@ -241,6 +249,7 @@ export class ArticleService {
         const author = await this.authors.findByKey(article.author_key);
         const blockers = collectPublishBlockers({
             translations: article.translations,
+            cover: article.cover ?? null,
             authorExists: author !== null,
         });
         if (blockers.length > 0) {

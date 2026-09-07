@@ -143,6 +143,10 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'Product oversight suspends listings the agency cascade also touches',
     },
+    [COLLECTIONS.PRODUCT_VARIANT]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'The line an order item actually names; its media and price are what a dispute screen has to show (BR-017)',
+    },
 
     // ── Shipment assignment, payments, tracking health (Phase 10) ────────────
     // What a shipment detail needs to answer "why is this delivery stuck", and what an
@@ -291,6 +295,33 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
     [COLLECTIONS.TICKET_ATTACHMENT]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'Rows reference uploaded files; the cleanup worker sweeps them on a terminal-status clock',
+    },
+
+    // ── Stored files (BR-015) ────────────────────────────────────────────────
+    //
+    // The Media library reads both of these DIRECTLY, and that is ADR-009 D-1 applied rather
+    // than an exception to it: a file row and a reference row are RECORDS. There is no verdict
+    // on this surface at all — nothing here is a decision the platform then acts on.
+    //
+    // It is also the only way the screen can exist. The listing has to filter by owner, join
+    // live reference rows to answer "is this used, and by what", and resolve an owner *name*
+    // across five different role collections. jovi-mall's `GET /api/files` does none of those
+    // three, so delegating would have meant building the query there and calling it from here —
+    // a second endpoint whose only caller is this service, for a read with no invariant.
+    //
+    // ⚠ **WRITES ARE STILL DELEGATED, and on this pair the reason is concrete rather than
+    // precautionary.** Creating a file row is the tail of an upload that also wrote bytes
+    // through `STORAGE_PROVIDER`; a reference row is maintained by the file-reference layer,
+    // which is what sets and clears `File.orphanedAt`. A second writer here produces a row
+    // pointing at no object, or an orphan sweep that reclaims a file something is using. So
+    // `POST /api/v1/files/upload` streams to jovi-mall and jovi-mall writes the row (L-2).
+    [COLLECTIONS.FILE]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'A stored file is a record. The row is written by the upload pipeline that also put the bytes; `orphanedAt` is maintained by the reference layer',
+    },
+    [COLLECTIONS.FILE_REFERENCE]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'One live row per (fileId, entityType, entityId, field) — the source of truth for "is this file used". Written beside the entity that uses it, never alone',
     },
 
     // ── Editorial — the one place ownership moved (ADR-004 D-4) ──────────────

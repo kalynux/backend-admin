@@ -46,7 +46,7 @@ Two caveats, neither fatal:
 }
 ```
 
-[`vendors.md`](../../admin/api/vendors.md) is explicit that this is **"presence, not content"**, and
+[`vendors.md`](../../api/vendors.md) is explicit that this is **"presence, not content"**, and
 notes that *"~30 fields of the vendor's own commercial terms exist"* upstream and are not projected.
 
 So an administrator can see *that* a vendor has a return policy and not *what it says* — which is

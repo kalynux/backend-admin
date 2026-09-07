@@ -30,7 +30,7 @@
 | Coordinates | Yes — GeoJSON `[longitude, latitude]`, **in that order** |
 | A place name / address | **No field anywhere in the service** |
 | Accuracy | **No field** |
-| A live position | **No.** [`agents.md`](../../admin/api/agents.md): *"wi-admin has no data door into geo-tracker"*; [`system.md`](../../admin/api/system.md): *"Live agent positions or GPS trails → geo-tracker, behind Tracking Allow. **No door exists from this service.**"* |
+| A live position | **No.** [`agents.md`](../../api/agents.md): *"wi-admin has no data door into geo-tracker"*; [`system.md`](../../api/system.md): *"Live agent positions or GPS trails → geo-tracker, behind Tracking Allow. **No door exists from this service.**"* |
 | A trail / history | **No** |
 
 `GET /agents/:agentId/tracking-policy` returns the *verdict* (`trackingAllowed` + `denyReason`), not a

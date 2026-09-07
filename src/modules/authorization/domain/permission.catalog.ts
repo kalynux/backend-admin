@@ -542,6 +542,46 @@ export const PERMISSION_CATALOG = Object.freeze({
     },
 
     /**
+     * Retrieving a file's CONTENTS — the bytes, not the metadata (BR-011).
+     *
+     * ── Why this is not `files.resolve` ───────────────────────────────────────
+     * `files.resolve` is held by every tier on a reasoning that is good and does **not**
+     * carry over: "the caller is already holding the id, which means they already passed
+     * the guard on the record that carried it." That justifies disclosing a *name* and a
+     * *size*. It does not justify disclosing **a photograph of somebody's front door**,
+     * which is what `shipments/` holds, or a vendor's saleable product file, which is what
+     * `digital/` holds. Resolving an id and opening the file are different acts, and this
+     * platform already separates acts of that kind — revealing a payout destination is its
+     * own permission for exactly this reason.
+     *
+     * Before this existed there was **no path at all**: a private file resolves with
+     * `url: null`, so an operator settling a delivery dispute was told a photograph
+     * existed and that they could not look at it.
+     *
+     * ── Held by Support (tier 3), and the audit is the other half of that ─────
+     * Support answers the delivery tickets, and refusing them means every proof-photo
+     * ticket escalates to a tier holding no more context than the person already on it.
+     * That is the same trade the platform made once already for `agents.tracking.read` —
+     * grant it wider, and pay for it with a record. Every use writes an audit row
+     * (`files.content.read`), fail-closed: the row commits before the bytes are fetched
+     * and a failure of that write is not caught, so with the audit store down nothing is
+     * disclosed.
+     *
+     * ⚠ **No `reason` is required**, unlike the two tracking disclosures. Those answer a
+     * question about a person's movements that an operator asks rarely and deliberately;
+     * this one is opened repeatedly inside a single dispute, and a reason prompt per image
+     * becomes a box somebody types "dispute" into forever. If that turns out to be wrong,
+     * the change is additive — the schema gains a field and this note is what to revisit.
+     *
+     * Neither `destructive` nor flagged `financial`, so `allInFamily('files')` sweeps it
+     * into tiers 1 and 2; tier 3 names it explicitly in `TIER_GRANTS`.
+     */
+    'files.content.read': {
+        family: 'files', action: 'read', phase: 6,
+        summary: 'Open a file’s contents, including delivery proofs and other private files — every read is recorded in the audit trail',
+    },
+
+    /**
      * The listing, and the complement of the resolver above: it answers which files
      * nothing refers to, which is a question no id set can express.
      *
@@ -560,6 +600,74 @@ export const PERMISSION_CATALOG = Object.freeze({
     'files.orphans.read': {
         family: 'files', action: 'read', phase: 5,
         summary: 'List uploaded files no record refers to',
+    },
+
+    /**
+     * The media library — the SECOND listing on this mount (BR-015).
+     *
+     * ── Why it is a new name and not `files.resolve` ──────────────────────────
+     * The same reason `files.orphans.read` is. `files.resolve` is grantable to every tier
+     * on one argument — the caller already holds the id, so nothing new is disclosed — and
+     * **that argument does not survive a listing.** A caller who can enumerate does not
+     * need to hold an id. The mount's own rule, written when the orphan listing was added,
+     * is that a listing here gets its own permission and its own tier; this is the second
+     * instance of it rather than a new precedent.
+     *
+     * ── Tiers 1 and 2, the line `files.orphans.read` already draws ────────────
+     * No flag keeps a read out of `allInFamily('files')`, so this is swept into Admin and
+     * reaches Support only if somebody names it in `TIER_GRANTS` — and nobody does.
+     * Support answers tickets about records they were pointed at; enumerating every file on
+     * the platform is not that question, and the orphan listing already settled it.
+     *
+     * ── NOT audited, and that was a decision rather than an omission (L-5) ────
+     * The dashboard asked for an audit row per listing, on the argument that this route
+     * discloses something the other four cannot: it ENUMERATES. It was declined, and the
+     * test is ADR-006 D-5's own: the exceptions are all "**the output IS the disclosure**"
+     * — a payout destination, a live position, a trail, a file's bytes. Metadata about a
+     * file fails that test, and `files.orphans.read` already enumerates on this mount
+     * unaudited. Auditing a browse surface also dilutes the trail it is meant to protect:
+     * an operator paging a media picker would generate more rows in a minute than the
+     * disclosures do in a week.
+     *
+     * ⚠ **Adding the row later is purely additive** — a catalogued action and an
+     * `audit:` on the route. If the enumeration argument wins on reflection, this note is
+     * what to revisit; nothing here has to be undone first.
+     */
+    'files.library.read': {
+        family: 'files', action: 'read', phase: 6,
+        summary: 'Browse every uploaded file on the platform, with its owner and what uses it',
+    },
+
+    /**
+     * Uploading a file as the administration (BR-015).
+     *
+     * ── The first WRITE path for files on this service ────────────────────────
+     * There has never been one: `README.md` and `files.md` both state that wi-admin accepts
+     * no multipart bodies anywhere, so no administrator has ever been able to put a file on
+     * the platform through this service. That made four downstream screens impossible — the
+     * blog's cover image and image block, the ticket-attachment form, and the media picker
+     * they all share.
+     *
+     * The bytes still land in jovi-mall and jovi-mall still writes the row: this service
+     * pipes an unparsed body through and never parses multipart (ADR-021 D-2). What the
+     * permission gates is the door, not a storage layer.
+     *
+     * ── Tiers 1 and 2 ────────────────────────────────────────────────────────
+     * Neither `destructive` nor flagged, so `allInFamily('files')` sweeps it into Admin —
+     * which is right: writing an article and attaching a document to a ticket are Admin
+     * work. Support is not granted it, matching the line the two listings draw. Note
+     * Support DOES hold `content.articles.write`, so a Support administrator can edit prose
+     * and cannot add a picture to it; that asymmetry is deliberate and is the same one that
+     * withholds `content.articles.publish`.
+     *
+     * ── Audited (L-6), and this one needs no argument ─────────────────────────
+     * It is a write, and every write on this service is audited. The row is what says which
+     * administrator put a file on the platform — the only record of it, since the file's own
+     * `ownerId` is an id in a database that cannot resolve an administrator.
+     */
+    'files.upload': {
+        family: 'files', action: 'write', phase: 6,
+        summary: 'Upload a file to the platform as the administration',
     },
 
     /**

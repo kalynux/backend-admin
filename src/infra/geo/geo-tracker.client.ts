@@ -3,20 +3,34 @@ import { env } from '../../config/env';
 import { PROM_TEXT_MAX_BYTES, ParsedPromText, parsePromText } from './prom-text';
 
 /**
- * The ONLY door this service has into geo-tracker, and it is three unauthenticated paths wide.
+ * The OPERATIONS door into geo-tracker, and it is three unauthenticated paths wide.
  *
- * ── ADR-009 §D-2 still stands, and this is its named exception ────────────────
- * That decision says wi-admin has no geo-tracker door, because every geo-tracker **data** read
- * requires a real jovi-mall user JWT and resolves per-agent visibility by calling
- * `/api/tracking/visible-agents` *as the viewer* — which does a `findById` on `users`, and an
- * administrator deliberately has no `users` row.
+ * ⚠ **This file used to open "The ONLY door this service has into geo-tracker" and to
+ * conclude that D-2 reads, after Phase 15, as "wi-admin has no geo-tracker DATA door". Both
+ * were true for three phases and neither has been true since 2026-08-22** (corrected
+ * 2026-09-06, DOC-PROGRAM P-16). `admin/docs/ADR-020` amends ADR-009 §D-2: geo-tracker grew
+ * a **service-caller** authorization path — a second path, visibly separate in its source —
+ * and `geo-tracker-data.client.ts` is the client of it. That sibling's docstring recorded
+ * the amendment; this one was not updated with it, which is exactly the failure mode
+ * `../../CLAUDE.md` warns about — a claim about a *different* repository ages without
+ * anybody editing the file that makes it.
  *
- * `/healthz`, `/readyz` and `/metrics` are different in kind: they need no identity, they are
- * service-level, and they expose **no agent position, no trail and no session content**.
- * `/healthz` returns the literal string `ok`; `/readyz` returns a map of dependency name → status;
- * `/metrics` returns aggregate counters. So D-2 reads, after Phase 15, as *"wi-admin has no
- * geo-tracker **data** door"* — and this is the boundary the next person asking for "just one
- * more geo-tracker endpoint" should be pointed at. See ADR-015 D-5.
+ * ── Why the exception below still stands, unchanged ───────────────────────────
+ * The reasoning that made this door acceptable is untouched by ADR-020. Every geo-tracker
+ * **viewer** read requires a real jovi-mall user JWT and resolves per-agent visibility by
+ * calling `/api/tracking/visible-agents` *as the viewer* — which does a `findById` on
+ * `users`, and an administrator deliberately has no `users` row. That is why the data door
+ * had to be a separate authorization path rather than a branch inside this one.
+ *
+ * `/healthz`, `/readyz` and `/metrics` are different in kind again: they need no identity,
+ * they are service-level, and they expose **no agent position, no trail and no session
+ * content**. `/healthz` returns the literal string `ok`; `/readyz` returns a map of
+ * dependency name → status; `/metrics` returns aggregate counters.
+ *
+ * So the boundary to point the next "just one more geo-tracker endpoint" request at is now
+ * **two** boundaries: this path set is closed and unauthenticated (ADR-015 D-5), and the
+ * data door is scoped, credentialed and audited in wi-admin (ADR-020 D-5). A request that
+ * fits neither does not become this file's problem by being small.
  *
  * ── Deliberately NOT `platformRequest`, and not in `infra/platform/` ──────────
  * Different base URL, no auth, different failure semantics. Folding it into the platform client

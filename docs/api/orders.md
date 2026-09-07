@@ -107,6 +107,8 @@ one to a collection this size to serve a sort nobody has asked for is the wrong 
 | `checkoutGroupId` | The cart id. **One checkout splits into one order per vendor, all sharing it** — this is how a customer's single purchase is reassembled |
 | `disputeHeld` | The order is frozen by a payment dispute |
 | `completedAt` | The escrow gate. `null` while funds are still held |
+| `vendorName` | ⚠ **This is `vendors.display_name` — the vendor's PERSONAL name, not the business.** `vendor.model.ts` says so at the field: "the public BUSINESS name … live on the vendor's Store". The business name is `stores.name`, and it is what [`GET /shipments/:shipmentId`](shipments.md#get-shipmentsshipmentid)'s `order.vendorName` returns and what the vendor directory's `businessName` returns. **The two `vendorName` fields share a name and answer different questions.** Recorded here rather than changed: correcting this list would be a breaking wire change to a paginated endpoint, and is a decision for its own request |
+| `customerName` | `customers.name` |
 
 ---
 
@@ -175,9 +177,20 @@ Every list field, plus:
         "quantity": 3,
         "price": 2500,
         "currency": "XAF",
+        "image": {
+          "id": "6612aabbccddeeff00112233",
+          "key": "products/6660.../plantain-1kg.jpg",
+          "url": "https://cdn.example.com/products/6660.../plantain-1kg.jpg",
+          "access": "public",
+          "mimeType": "image/jpeg",
+          "size": 84213,
+          "originalName": "plantain.jpg"
+        },
         "delivery": {
           "agencyId": "665c0011223344556677889a",
+          "agencyName": "Littoral Express Delivery",
           "shipmentId": "6671aabbccddeeff00112233",
+          "trackingNumber": "WM-2026-0088412",
           "status": "assigned",
           "freeDelivery": false,
           "hold": null,
@@ -196,7 +209,38 @@ Every list field, plus:
 | `dispute` | **`null` when the order has never been disputed** — absent entirely rather than a block of nulls that reads as "unknown". Present (with `active: false`) once resolved, because a resolved dispute is exactly what an administrator opens this screen for |
 | `completion.auto` | Whether the escrow released automatically or a person confirmed |
 | **`deliveryAddress`** | **Textual only.** `coordinates` and the customer's raw input are excluded by projection *and* by the mapping — the sharpest PII in the collection |
+| **`items[].image`** | The **primary** image of what was sold, never the gallery. A full `FileDetail`, or `null` — see below |
+| **`items[].delivery.agencyName`** | The agency's **business name**, from the Magazin. `null` where the item has no agency, the agency row is gone, or the Magazin has no name — **never `display_name`**, which is the agency's contact *person* |
+| **`items[].delivery.trackingNumber`** | ⚠ **The handle an operator actually works with.** `shipmentId` is an internal id that cannot be typed into anything; [`GET /shipments`](shipments.md#get-shipments)'s `search` takes a tracking-number **prefix**, and a customer on the phone quotes a tracking number. `null` while the item is unfulfilled — the ordinary state, not an error |
 | `items[].delivery.hold` | Set when an agency deactivation put this item on hold |
+
+#### `items[].image` — how it resolves, and when it is `null`
+
+Resolved **live** against the product's current media rather than snapshotted. The line
+snapshots `title`, `sku` and `price` because those are the terms of the sale and must not
+drift; an image is not a term of the sale, it is an aid to recognising the object, so the
+*current* picture is the more useful one — and every order that already exists has one with no
+backfill.
+
+**Variant-preferred, as a fallback and never a merge.** The line names a specific `variantId`,
+so that variant's own media is the truthful answer — a red T-shirt must not show the blue one.
+Where the variant carries no image (the normal case) the product's own media is used. This is
+the same rule jovi-mall's `media.primaryImage` applies, deliberately, so this screen and the
+customer's own order page cannot show different pictures.
+
+Only `image/*` files qualify: `fileIds` is generic product media and legitimately holds a video
+or a spec sheet, and the first slot is the thumbnail *by convention*, not by type.
+
+⚠ **Gate rendering on all three of `access === 'public'`, `url !== null` and
+`mimeType.startsWith('image/')`** — the both-conditions rule in [files.md](files.md). The field
+is a full `FileDetail` rather than a bare URL string exactly so a client is not left guessing at
+the first two.
+
+`null` is expected and fine: a digital line, a product whose media was swept by the orphan
+cleanup, a product deleted since the order. Render the title alone.
+
+**Batched.** One resolution for the whole `items` array — three reads regardless of how many
+lines the order has, never one per line.
 
 ### Errors
 
@@ -223,7 +267,38 @@ administrators did.
 | Parameter | Type | Notes |
 |---|---|---|
 | `actorType` | `vendor` \| `customer` \| `system` \| `admin` | Pinned — this service writes `admin` itself |
-| `eventType` | string, 2–60 | Dotted tokens like `payment.updated`. Format-validated, not pinned |
+| `eventType` | string, 2–60 | Dotted tokens like `payment.updated`. **Format-validated here; a closed set of nine at the platform** — see below |
+
+#### `eventType` — the nine, and where the set is closed
+
+The vocabulary is a **closed Mongoose enum of nine values** on jovi-mall's
+`order-timeline.model.ts`: the `TimelineEventType` union and the schema's own
+`event_type: { enum: [...], required: true }` list the same nine, so a value outside them
+cannot be written through Mongoose at all.
+
+| `eventType` | Written when |
+|---|---|
+| `order.created` | The order was placed |
+| `payment.updated` | The payment status moved |
+| `fulfillment.updated` | The fulfilment status moved |
+| `delivery.agency_updated` | The delivery agency on an item was assigned or changed |
+| `order.completed` | The customer confirmed delivery, or the escrow auto-confirmed |
+| `note.added` | A vendor note was appended |
+| `entitlement.revoked` | A digital entitlement was revoked |
+| `entitlement.restored` | A digital entitlement was restored |
+| `system.action` | An automated action with no more specific type |
+
+⚠ **This service still validates the token by SHAPE, not membership** (ADR-005 D-17): the
+vocabulary is jovi-mall's to grow, and a pinned copy here is how a filter goes stale silently
+and matches nothing while looking correct. A client may rely on the nine for rendering and
+should treat an unrecognised token as plain text.
+
+The collection is **append-only, and it is enforced rather than merely intended**: the schema
+declares `timestamps: { createdAt: 'created_at', updatedAt: false }` and registers five `pre`
+hooks — `updateOne`, `updateMany`, `findOneAndUpdate`, `deleteOne`, `deleteMany` — each of
+which calls `next(new Error(...))`. Nothing on this service writes it in any case (`orders`
+and `order_timeline` are both `access: 'read'`), and wi-admin reads with the raw driver, which
+those hooks do not reach.
 
 ### Response (200)
 
@@ -237,13 +312,49 @@ administrators did.
       "description": "Payment marked paid via MTN MoMo",
       "actorType": "system",
       "actorId": null,
+      "actorName": null,
       "metadata": { "gateway": "mtn_momo", "reference": "MP260812.1402.A44127" },
       "occurredAt": "2026-08-12T14:02:31.000Z"
+    },
+    {
+      "id": "6672aabbccddeeff00112240",
+      "eventType": "fulfillment.updated",
+      "description": "Order cancelled by administrator",
+      "actorType": "admin",
+      "actorId": "665a11223344556677889900",
+      "actorName": "Nadège M.",
+      "metadata": { "reason": "Customer changed their mind" },
+      "occurredAt": "2026-08-12T15:10:04.000Z"
     }
   ],
   "meta": { "total": 18, "page": 1, "limit": 20, "pages": 1 }
 }
 ```
+
+#### `actorName` — three id spaces, two databases
+
+⚠ **`actorId` is not a user id for any actor type**, whatever
+`order-timeline.model.ts`'s "User ID if applicable" comment says. Which collection it resolves
+in is decided by `actorType`:
+
+| `actorType` | `actorId` is | Resolved in |
+|---|---|---|
+| `admin` | a **wi-admin `admin_accounts._id`** | **this service's own database, with no hop** |
+| `vendor` | a `vendors._id` | `jovi_mall.stores` by `vendor_id` → the **business** name |
+| `customer` | a `customers._id` | `jovi_mall.customers` |
+| `system` | always `null` | — |
+
+The `admin` row is the one no other service could answer. jovi-mall's admin-caller middleware
+stamps `X-Actor-Id` — a wi-admin administrator id — into a column declared `ref: MODELS.USER`,
+where it dereferences to nothing (ADR-004 D-1). "Which of us did this" is the question an order
+timeline is opened for, and the platform database cannot answer it.
+
+The `vendor` row resolves to the **Store's** name, matching jovi-mall's own resolution on the
+vendor-facing timeline, so the two surfaces name the same vendor the same way.
+`vendors.display_name` is a *person* and is not used.
+
+`actorName` is `null` for `system` and wherever the record is gone. **`null`, never the id.**
+Resolution is three batched reads for the page, never one per row.
 
 `metadata` is an opaque object written by every transition path — treat it as free-form.
 

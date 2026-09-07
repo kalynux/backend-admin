@@ -11,7 +11,12 @@ import { resolveScope } from '../../authorization/domain/resource-scope';
 import { assignableTiers, mayActOnTicket, mayClaim } from '../domain/assignment-authority';
 import { snapshotOf } from '../domain/admin-snapshot';
 import * as gateway from '../gateways/ticket.gateway';
-import { TicketAttachmentReadRepository, TicketReadRepository } from '../repositories/ticket.read.repository';
+import { TicketEntityReadRepository } from '../repositories/ticket-entity.read.repository';
+import {
+    TicketAttachmentFileReadRepository,
+    TicketAttachmentReadRepository,
+    TicketReadRepository,
+} from '../repositories/ticket.read.repository';
 import { assignmentStateOf, toTicketDetailDto, toTicketDto } from '../read-models/ticket.dto';
 import {
     AddFollowerBody,
@@ -54,7 +59,11 @@ import {
 
 const tickets = new TicketReadRepository();
 const attachments = new TicketAttachmentReadRepository();
+/** The `fileId` stamp on the attachment list. See `withFileIds`. */
+const attachmentFiles = new TicketAttachmentFileReadRepository();
 const accounts = new AdminAccountRepository();
+/** Makes `about` navigable — one read on the DETAIL only. See the repository's header. */
+const ticketEntities = new TicketEntityReadRepository();
 
 /** The caller's own snapshot, for the assigner stamp and the D-10 refresh. */
 async function callerSnapshot(adminId: string) {
@@ -101,6 +110,38 @@ function assertMayAct(req: Request, ticket: Parameters<typeof assignmentStateOf>
     }
 }
 
+/**
+ * Stamp each delegated attachment row with `fileId` — the id of the File it points at.
+ *
+ * ── Why the list is delegated but this field is not ───────────────────────────
+ * The row itself has to come from jovi-mall: its `url` is `storage.getPublicUrl(key)` on
+ * the active provider, which is machinery this service does not own (ADR-018 D-4). The file
+ * ID is the opposite kind of value — a plain reference sitting on the attachment row in the
+ * shared database, needing nothing to resolve — so it is read here rather than waiting on a
+ * jovi-mall release. That split is ADR-009 D-1: delegate the projection that needs the other
+ * service's machinery, read the record directly.
+ *
+ * ── Why a row can come back with `fileId: null` ──────────────────────────────
+ * The two reads are not one transaction: an attachment deleted between jovi-mall's answer
+ * and this lookup has a row and no id. The key is still present, because a client that must
+ * branch on `'fileId' in row` learns nothing a `null` does not tell it, and an omitted key
+ * looks like an older service rather than a raced delete.
+ *
+ * Anything that is not a list of rows is passed through untouched — this decorates jovi-mall's
+ * answer, and it is not this route's job to decide that answer was malformed.
+ */
+async function withFileIds(ticketId: string, delegated: unknown): Promise<unknown> {
+    if (!Array.isArray(delegated) || delegated.length === 0) return delegated;
+
+    const fileIds = await attachmentFiles.findFileIdsByTicket(ticketId);
+
+    return delegated.map((row) => {
+        if (row === null || typeof row !== 'object') return row;
+        const id = (row as { id?: unknown }).id;
+        return { ...row, fileId: typeof id === 'string' ? fileIds.get(id) ?? null : null };
+    });
+}
+
 export class SupportTicketController {
 
     static search = asyncHandler(async (req: Request, res: Response) => {
@@ -116,9 +157,21 @@ export class SupportTicketController {
         );
     });
 
+    /**
+     * One ticket, with its `about` made navigable (BR-016 § 7).
+     *
+     * `entity.vendorId` is the field that unblocks it: a product's detail route needs a
+     * vendor id and a product id, and the ticket carries one. The label beside it is a
+     * convenience — the destination screen supplies the name once the link exists.
+     *
+     * The queue does not do this, deliberately: one lookup per row would be a hundred reads
+     * across three collections to decorate a column that shows an id.
+     */
     static get = asyncHandler(async (req: Request, res: Response) => {
         const { identity, ticket } = await loadScoped(req, req.params.ticketId);
-        sendSuccess(res, toTicketDetailDto(ticket, identity));
+        const entity = await ticketEntities.resolve(ticket.entity_type, ticket.entity_id);
+
+        sendSuccess(res, toTicketDetailDto(ticket, identity, entity));
     });
 
     static create = asyncHandler(async (req: Request, res: Response) => {
@@ -297,7 +350,8 @@ export class SupportTicketController {
 
     static listAttachments = asyncHandler(async (req: Request, res: Response) => {
         await loadScoped(req, req.params.ticketId);
-        sendSuccess(res, await gateway.listAttachments(req.params.ticketId, actorContextOf(req)));
+        const rows = await gateway.listAttachments(req.params.ticketId, actorContextOf(req));
+        sendSuccess(res, await withFileIds(req.params.ticketId, rows));
     });
 
     static attachFile = asyncHandler(async (req: Request, res: Response) => {

@@ -71,6 +71,30 @@ export interface VendorProductSearchQuery extends ListQueryBase {
     type?: string;
     mode?: string;
     suspensionReason?: string;
+    /** Matched against the **resolved** agency — see `resolveDeliveryAgencyId`. */
+    deliveryAgencyId?: string;
+}
+
+/**
+ * Which agency actually answers for a listing: its own override, else the vendor's default.
+ *
+ * ── The single definition of that precedence, in this service ─────────────────
+ * It is jovi-mall's `resolveEffectiveAgencyId`, restated here because this service reads
+ * the documents directly and holds no domain entity. Three call sites now depend on it —
+ * the `deliveryAgency` block on a catalogue row, the `deliveryAgencyId` filter below, and
+ * `productCount` on a vendor's agency-connection row (BR-018) — and a second definition
+ * would show as the catalogue page and the connections panel disagreeing about the same
+ * forty-two products.
+ *
+ * Expressed over the raw override rather than over a product document so that the
+ * `$group` in `countByResolvedAgency` can apply the identical rule to a grouped `_id`
+ * without fabricating a product to pass in.
+ */
+export function resolveDeliveryAgencyId(
+    overrideAgencyId: ObjectId | null | undefined,
+    vendorDefaultAgencyId: string | null,
+): string | null {
+    return overrideAgencyId?.toString() ?? vendorDefaultAgencyId;
 }
 
 /** One bucket of the status breakdown on the detail screen. */
@@ -91,12 +115,66 @@ export class VendorProductReadRepository extends PlatformReadRepository<VendorPr
     async search(
         vendorId: string,
         query: VendorProductSearchQuery,
+        vendorDefaultAgencyId: string | null = null,
     ): Promise<Paginated<VendorProductReadModel>> {
-        return this.findPage(buildProductFilter(vendorId, query), {
+        return this.findPage(buildProductFilter(vendorId, query, vendorDefaultAgencyId), {
             page: query.page,
             limit: query.limit,
             sort: toMongoSort(query.sort, VENDOR_PRODUCT_SORT),
         });
+    }
+
+    /**
+     * How many of this vendor's products each agency is responsible for — **one
+     * aggregation for the whole page**, not one count per row.
+     *
+     * ── Why it is shaped this way (BR-018's open question) ────────────────────
+     * The request asked whether the number is cheap, and offered to drop the column rather
+     * than have a slow endpoint. The naive form genuinely is bad: a `countDocuments` per
+     * connection row means a vendor with nine agencies pays nine scans of the same
+     * catalogue to answer one question, and the nine can disagree with each other if a
+     * product moves while they run. That is the argument `countByStatus` below already
+     * makes about five counts, applied to a number that varies with the page.
+     *
+     * So the whole catalogue is grouped once. The `$match` is served by the `vendorId`
+     * prefix of `{ vendorId, slug }`, the `$group` key comes off the fetched document, and
+     * the cost is one bounded pass over ONE vendor's listings — the same plan, on the same
+     * range, that `countByStatus` already runs on every `GET /vendors/:vendorId`. It costs
+     * one query no matter how many connections the page shows.
+     *
+     * ── What resolution means here ────────────────────────────────────────────
+     * `$group` on a missing path yields `_id: null`, which is exactly the set of products
+     * carrying no override — and those resolve to the vendor's default. Folding that
+     * bucket onto the default through `resolveDeliveryAgencyId` is what keeps this number
+     * equal to what the catalogue page shows in `deliveryAgency`. When the vendor has no
+     * default either, the bucket resolves to nothing and is counted nowhere: those
+     * products have no responsible agency at all, which is a real state (and one that
+     * blocks activation), not a row to invent.
+     *
+     * `deletedAt: null` is pinned for the reason the file header gives — a soft-deleted
+     * listing must not be counted on an oversight screen.
+     */
+    async countByResolvedAgency(
+        vendorId: string,
+        vendorDefaultAgencyId: string | null,
+    ): Promise<Map<string, number>> {
+        const counts = new Map<string, number>();
+        if (!Types.ObjectId.isValid(vendorId)) return counts;
+
+        const rows = await this.aggregateBy<{ _id: ObjectId | null; n: number }>([
+            { $match: { vendorId: new ObjectId(vendorId), deletedAt: null } },
+            { $group: { _id: '$delivery.agency_id', n: { $sum: 1 } } },
+        ]);
+
+        for (const row of rows) {
+            const resolved = resolveDeliveryAgencyId(row._id, vendorDefaultAgencyId);
+            if (!resolved) continue;
+            // `+=` rather than `set`: the null bucket and an explicit override naming the
+            // default agency are two groups that resolve to the same agency.
+            counts.set(resolved, (counts.get(resolved) ?? 0) + row.n);
+        }
+
+        return counts;
     }
 
     /**
@@ -138,10 +216,15 @@ export class VendorProductReadRepository extends PlatformReadRepository<VendorPr
  *
  * `vendorId` and `deletedAt: null` are pinned first and cannot be overridden by any input
  * — see the file header for why that matters more here than in a jovi-mall repository.
+ *
+ * `vendorDefaultAgencyId` is server-resolved context, not client input: it arrives from
+ * the vendor document the controller has already loaded, and only `deliveryAgencyId` uses
+ * it. Same shape as `buildFilter`'s pre-resolved store ids on the vendor directory.
  */
 export function buildProductFilter(
     vendorId: string,
     query: VendorProductSearchQuery,
+    vendorDefaultAgencyId: string | null = null,
 ): Filter<VendorProductReadModel> {
     const clauses: Record<string, unknown>[] = [
         { vendorId: new ObjectId(vendorId) },
@@ -151,6 +234,27 @@ export function buildProductFilter(
     if (query.status) clauses.push({ status: query.status });
     if (query.type) clauses.push({ type: query.type });
     if (query.suspensionReason) clauses.push({ 'suspension.reason': query.suspensionReason });
+
+    if (query.deliveryAgencyId) {
+        /**
+         * ⚠ **The filter matches the RESOLVED agency, not the stored override**, or it
+         * would disagree with the `deliveryAgency` column beside it on the same row.
+         *
+         * Most products carry no override at all, so the common case is the fallback: when
+         * the requested agency IS the vendor's default, "products this agency answers for"
+         * has to include every product with no `delivery.agency_id`. `{ x: null }` matches
+         * both an explicit null and an absent key, which is exactly the set wanted.
+         *
+         * This is what makes `productCount` on `GET /vendors/:vendorId/agencies` clickable:
+         * `meta.total` on this filtered page is the same number, computed the same way.
+         */
+        const requested = new ObjectId(query.deliveryAgencyId);
+        clauses.push(
+            query.deliveryAgencyId === vendorDefaultAgencyId
+                ? { $or: [{ 'delivery.agency_id': requested }, { 'delivery.agency_id': null }] }
+                : { 'delivery.agency_id': requested },
+        );
+    }
 
     if (query.mode) {
         // Documents predating the `mode` field carry no key at all, and jovi-mall's readers
@@ -169,7 +273,7 @@ export function buildProductFilter(
         clauses.push({ $or: [{ title: pattern }, { slug: pattern }] });
     }
 
-    // Always `$and`: there are two `$or`-shaped clauses in play (the mode fallback and the
-    // search), and merging by assignment would drop one.
+    // Always `$and`: there are THREE `$or`-shaped clauses in play (the mode fallback, the
+    // search, and the resolved-agency filter), and merging by assignment would drop one.
     return { $and: clauses } as Filter<VendorProductReadModel>;
 }

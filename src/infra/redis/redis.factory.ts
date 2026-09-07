@@ -11,8 +11,25 @@ import { logger } from '../../core/logging/logger';
  * is what "lazy" means here.
  *
  * Logical databases are reserved up front so two features never collide on an index.
- * jovi-mall reserves 3–10 on its own Redis instance; these are this service's own
- * namespace and are independent of those.
+ *
+ * ⚠ **This paragraph used to read "jovi-mall reserves 3–10 on its own Redis instance; these
+ * are this service's own namespace and are independent of those." Both halves were wrong**
+ * (corrected 2026-09-06, DOC-PROGRAM P-13).
+ *
+ *  1. jovi-mall uses **0, 3, 5, 6, 7, 8 and 10–15**, not 3–10. Its own
+ *     `src/infra/redis/redis.factory.ts` carries the authoritative catalogue, states the
+ *     budget as **5–15 precisely because THIS service holds 1, 2 and 3**, and records that
+ *     4 and 9 are **retired rather than free** — reading a pre-cutover verification code
+ *     back as something else is a security incident.
+ *  2. "Independent" holds only when each service has its own Redis, which is what the
+ *     workspace compose stack provides. **A developer machine runs one**, and both
+ *     `.env.example` files ship `REDIS_URL=redis://localhost:6379`. On that deployment
+ *     jovi-mall's `EMAIL_VERIFY_DB = 3` collides with `PERMISSION_CACHE_DB` below —
+ *     knowingly and harmlessly, since nothing reads the other's keys and both are exact
+ *     gets, but a flush of one clears the other.
+ *
+ * So: **read `jovi-mall/src/infra/redis/redis.factory.ts` before claiming a new index
+ * here.** There is no free range above 3 to expand into; that side has taken 5–15.
  */
 
 /** Admin sessions (Phase 2). Revocable server-side, which a stateless JWT cannot be. */

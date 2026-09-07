@@ -33,6 +33,18 @@ import {
     ShipmentOrderRefReadRepository,
     TrackingOutboxReadRepository,
 } from '../repositories/shipment-context.read.repository';
+/**
+ * Two reads from the VENDORS module, for the same reason the agency and agent name lookups
+ * come from theirs: the module that owns the collection owns the read. `stores` answers what
+ * a vendor is CALLED (their business name lives there, not on the vendor row), and the media
+ * repository answers what a parcel's contents look like — the same resolution the order
+ * detail uses, so the two screens cannot show different pictures of one shipment.
+ */
+import {
+    ProductImageRef,
+    ProductMediaReadRepository,
+} from '../../vendors/repositories/product-media.read.repository';
+import { StoreReadRepository } from '../../vendors/repositories/store.read.repository';
 import {
     ShipmentNames,
     toShipmentDetailDto,
@@ -55,6 +67,8 @@ const outbox = new TrackingOutboxReadRepository();
 const orderRefs = new ShipmentOrderRefReadRepository();
 const agents = new AgentReadRepository();
 const agencies = new AgencyReadRepository();
+const stores = new StoreReadRepository();
+const productMedia = new ProductMediaReadRepository();
 const audit = new AuditRepository();
 
 async function loadOr404(shipmentId: string): Promise<ShipmentReadModel> {
@@ -139,16 +153,36 @@ export class ShipmentController {
      * The screen that answers "why is this delivery stuck": the status and its history, the
      * assignment state and who has been asked, the handover, the failure attempts, the cash
      * position, and whether this shipment's news actually reached geo-tracker.
+     *
+     * ── What the parcel actually CONTAINS (BR-016 § 6, BR-017 B) ──────────────
+     * A shipment item is the thinnest row on the platform, and this is the screen an
+     * operator opens mid-dispute — `6670…40 × 3` describes nothing. The line's title, price
+     * and currency are joined from the ORDER's item snapshot on `orderItemId`, and its
+     * picture from the same media resolution the order detail uses, so the two screens
+     * cannot disagree about one parcel. The order card gains the vendor's business name for
+     * the same reason: it carried a 24-hex `vendorId` and nothing else.
+     *
+     * The vendor lookup is the one read that cannot join the batch, because the vendor id
+     * arrives on the order reference that `hydrateNames` is still resolving. One extra round
+     * trip on one detail screen, in the same place the offer-agent names already take one.
      */
     static detail = asyncHandler(async (req: Request, res: Response) => {
         const shipment = await shipments.findDetailById(req.params.shipmentId);
         if (!shipment) throw createAppError(ERROR_CODES.NOT_FOUND, 404, 'Shipment not found');
 
-        const [names, offerRows, cod, outboxHealth] = await Promise.all([
+        const orderId = shipment.order_id.toString();
+        const imageRefs: ProductImageRef[] = (shipment.items ?? []).map((item) => ({
+            productId: item.product_id ? item.product_id.toString() : null,
+            variantId: item.variant_id ? item.variant_id.toString() : null,
+        }));
+
+        const [names, offerRows, cod, outboxHealth, itemSnapshots, images] = await Promise.all([
             hydrateNames([shipment]),
             offers.findForShipment(req.params.shipmentId),
             cashCollections.findForShipment(req.params.shipmentId),
             outbox.healthForShipment(req.params.shipmentId),
+            orderRefs.findItemSnapshots(orderId),
+            productMedia.primaryImages(imageRefs),
         ]);
 
         // The offers name agents the shipment itself never did — everyone who was asked and
@@ -161,9 +195,21 @@ export class ShipmentController {
             extra.forEach((value, key) => names.agent.set(key, value));
         }
 
+        const vendorId = names.order.get(orderId)?.vendorId ?? null;
+        const vendorName = vendorId
+            ? (await stores.findNamesByVendorIds([new ObjectId(vendorId)])).get(vendorId) ?? null
+            : null;
+
         sendSuccess(
             res,
-            toShipmentDetailDto(shipment, names, { offers: offerRows, cod, outbox: outboxHealth }),
+            toShipmentDetailDto(shipment, names, {
+                offers: offerRows,
+                cod,
+                outbox: outboxHealth,
+                vendorName,
+                itemSnapshots,
+                images,
+            }),
         );
     });
 

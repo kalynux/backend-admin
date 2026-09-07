@@ -602,7 +602,7 @@ page that feed ever returned.
 The rows themselves are not lost: `admin_action_log` survives in the platform database. What
 went is this service's read of it, because after cutover every new row there duplicates a
 wi-admin audit row for the same operation, written with a real administrator identity and a
-catalogued action. See [`audit.md`](../../admin/api/audit.md) § `GET /audit/legacy`.
+catalogued action. See [`audit.md`](../api/audit.md) § `GET /audit/legacy`.
 
 ---
 

@@ -4,10 +4,10 @@ import { ActorContext } from '../../audit/domain/audit-context';
 import { AuditAction } from '../../audit/domain/audit.catalog';
 
 /**
- * The agent domain's DELEGATED half: every write, plus the three reads whose answer is a
+ * The agent domain's DELEGATED half: every write, plus the four reads whose answer is a
  * verdict rather than a record.
  *
- * ── The three delegated reads, and why they are not repository methods ────────
+ * ── The four delegated reads, and why they are not repository methods ─────────
  * ADR-009 D-1: **delegate a read whose answer is a VERDICT the platform acts on.**
  *
  *  - `eligibility` — the dispatcher branches on it, and it reports EVERY failed rule at
@@ -22,9 +22,14 @@ import { AuditAction } from '../../audit/domain/audit.catalog';
  *    still hold headroom while `deactivated` ones do not. That is a domain decision, and a
  *    copy would drift on it silently, reporting headroom that does not exist.
  *
+ *  - `assignability` — the other half of `eligibility`: the CONTRACT gates (coverage
+ *    region, per-shipment value ceiling, COD exposure). See its own header, which makes
+ *    the sharpest version of this argument — a repository implementation is genuinely
+ *    available for it and would still be wrong.
+ *
  * Being honest about the third: the argument is drift of a classification list, not the
  * protection of an invariant. It is still the right call, and it is a weaker one than the
- * first two.
+ * other three.
  *
  * The write methods are thin by design: this file should never grow logic.
  */
@@ -172,6 +177,49 @@ export async function eligibility(
         method: 'GET',
         path: `/agents/${agentId}/eligibility`,
         query: { agencyId },
+        actor: context.actor,
+        requestId: context.requestId,
+    });
+    return result.data;
+}
+
+/**
+ * A FOURTH delegated verdict: every gate on giving this agent work from this agency —
+ * the platform rules `eligibility` already reports, PLUS the contract terms it does not.
+ *
+ * ── Why this is delegated, stated in ADR-009 D-1's terms ─────────────────────
+ *
+ * It is the strongest case of the four, and for a reason none of the others has. The
+ * contract half of the answer is arithmetic over numbers this service can read directly
+ * — a COD threshold, a trust score, a cash balance — so a repository implementation is
+ * genuinely available here, and it would be WRONG in a way nobody would notice:
+ *
+ *  - the trust multiplier's thresholds are jovi-mall env config (`COD_TRUST_*`), so a
+ *    copy is correct only until an operator changes a variable in another service;
+ *  - exposure counts PENDING collections, not just held cash, and this service has no
+ *    read model for those at all;
+ *  - the effective score is `cod.trust_override ?? cod.trust_score`, and every screen in
+ *    this service that had projected only the latter reported the wrong number.
+ *
+ * A drifted verdict does not fail — it lies, and support repeats the lie to an agency.
+ * That is the whole reason this endpoint exists, so building it on a copy would be
+ * self-defeating.
+ *
+ * @param shipmentId optional. With one, every gate runs against that shipment. Without,
+ *   the two shipment-scoped gates report `skipped` and the cash gate answers "is this
+ *   agent already at their limit for this agency" — the question support asks first,
+ *   before it has a shipment id.
+ */
+export async function assignability(
+    agentId: string,
+    agencyId: string,
+    shipmentId: string | undefined,
+    context: ActorContext,
+): Promise<unknown> {
+    const result = await platformRequest<unknown>({
+        method: 'GET',
+        path: `/agents/${agentId}/assignability`,
+        query: shipmentId ? { agencyId, shipmentId } : { agencyId },
         actor: context.actor,
         requestId: context.requestId,
     });

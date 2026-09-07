@@ -233,6 +233,26 @@ interface OrderRefReadModel extends Document {
     fulfillment_status?: string;
     customer_id?: ObjectId;
     vendor_id?: ObjectId;
+    /** Present only on the item-snapshot read below, which projects its own narrow set. */
+    items?: {
+        _id?: ObjectId;
+        title?: string | null;
+        price?: number | null;
+        currency?: string | null;
+    }[];
+}
+
+/**
+ * What a shipment item's `order_item_id` joins to — the SALE's terms for that line.
+ *
+ * The shipment row is the thinnest on the platform (`orderItemId`, `productId`, `variantId`,
+ * `quantity`), and it is on the screen an operator opens mid-dispute. `6670…40 × 3` is not a
+ * description of a parcel.
+ */
+export interface OrderItemSnapshot {
+    title: string | null;
+    price: number | null;
+    currency: string | null;
 }
 
 export interface OrderRef {
@@ -288,5 +308,51 @@ export class ShipmentOrderRefReadRepository extends PlatformReadRepository<Order
                 },
             ]),
         );
+    }
+
+    /**
+     * The sale's terms for every line of ONE order, keyed by `order_item_id` (BR-017 B).
+     *
+     * ── One read of one document, not one per shipment item ───────────────────
+     * A shipment's items all belong to the same order — `shipment.order_id` — so the join
+     * BR-017 asks for is to a document this screen is already reading for its order card.
+     * The `$in` is done in memory against the returned array because `items` is an EMBEDDED
+     * array: there is no second collection to query, and a positional projection would
+     * return one element rather than the set.
+     *
+     * ── The projection is dotted and deliberately short ───────────────────────
+     * Three fields. `items.delivery.pickup_location.address_snapshot` embeds a VENDOR's
+     * premises and `options_snapshot` is free text neither screen renders; naming the array
+     * whole (`items: 1`) would bring both. That is the same rule the order module's own
+     * detail projection states, applied here where it is easier to forget because this
+     * repository's subject is not the order.
+     *
+     * A shipment item whose `order_item_id` matches nothing is absent from the map — a line
+     * removed from the order after the parcel was cut. The caller renders `null` rather than
+     * dropping the row: that broken state is what the screen is open to find.
+     */
+    async findItemSnapshots(orderId: string): Promise<Map<string, OrderItemSnapshot>> {
+        if (!Types.ObjectId.isValid(orderId)) return new Map();
+
+        const [order] = await this.findBy({ _id: new ObjectId(orderId) } as Filter<OrderRefReadModel>, {
+            projection: {
+                'items._id': 1,
+                'items.title': 1,
+                'items.price': 1,
+                'items.currency': 1,
+            },
+            limit: 1,
+        });
+
+        const snapshots = new Map<string, OrderItemSnapshot>();
+        for (const item of order?.items ?? []) {
+            if (!item._id) continue;
+            snapshots.set(item._id.toString(), {
+                title: item.title ?? null,
+                price: typeof item.price === 'number' ? item.price : null,
+                currency: item.currency ?? null,
+            });
+        }
+        return snapshots;
     }
 }

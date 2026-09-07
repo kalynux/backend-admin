@@ -113,7 +113,7 @@ export class ContentArticleController {
     });
 
     static get = asyncHandler(async (req: Request, res: Response) => {
-        const { article, author } = await articleService.getByKey(req.params.articleKey);
+        const { article, author } = await articleService.getByKey(req.params.articleId);
         sendSuccess(res, toAdminArticleDto(article, author));
     });
 
@@ -126,7 +126,7 @@ export class ContentArticleController {
      */
     static preview = asyncHandler(async (req: Request, res: Response) => {
         const { locale } = req.query as unknown as PreviewQuery;
-        const { article, translation } = await articleService.previewTranslation(req.params.articleKey, locale);
+        const { article, translation } = await articleService.previewTranslation(req.params.articleId, locale);
         const author = await articleService.resolveAuthor(article);
 
         sendSuccess(res, toPublicArticleDetailDto(article, translation, author));
@@ -156,7 +156,7 @@ export class ContentArticleController {
     static update = asyncHandler(async (req: Request, res: Response) => {
         const identity = requireAdminIdentity(req);
         const body = req.body as UpdateArticleBody;
-        const before = await articleService.requireArticle(req.params.articleKey);
+        const before = await articleService.requireArticle(req.params.articleId);
 
         const updated = await auditedContentWrite(
             'content.articles.update',
@@ -168,7 +168,7 @@ export class ContentArticleController {
             articleState(before),
             async () => {
                 const article = await articleService.update(
-                    req.params.articleKey,
+                    req.params.articleId,
                     body,
                     adminAuthorStampOf(identity),
                 );
@@ -183,7 +183,7 @@ export class ContentArticleController {
     static publish = asyncHandler(async (req: Request, res: Response) => {
         const identity = requireAdminIdentity(req);
         const body = req.body as PublishArticleBody;
-        const before = await articleService.requireArticle(req.params.articleKey);
+        const before = await articleService.requireArticle(req.params.articleId);
 
         const published = await auditedContentWrite(
             'content.articles.publish',
@@ -193,7 +193,7 @@ export class ContentArticleController {
             articleState(before),
             async () => {
                 const article = await articleService.publish(
-                    req.params.articleKey,
+                    req.params.articleId,
                     body,
                     adminAuthorStampOf(identity),
                 );
@@ -207,7 +207,7 @@ export class ContentArticleController {
 
     static unpublish = asyncHandler(async (req: Request, res: Response) => {
         const identity = requireAdminIdentity(req);
-        const before = await articleService.requireArticle(req.params.articleKey);
+        const before = await articleService.requireArticle(req.params.articleId);
 
         const updated = await auditedContentWrite(
             'content.articles.unpublish',
@@ -217,7 +217,7 @@ export class ContentArticleController {
             articleState(before),
             async () => {
                 const article = await articleService.unpublish(
-                    req.params.articleKey,
+                    req.params.articleId,
                     adminAuthorStampOf(identity),
                 );
                 return { value: article, after: articleState(article) };
@@ -230,7 +230,7 @@ export class ContentArticleController {
 
     static archive = asyncHandler(async (req: Request, res: Response) => {
         const identity = requireAdminIdentity(req);
-        const before = await articleService.requireArticle(req.params.articleKey);
+        const before = await articleService.requireArticle(req.params.articleId);
 
         const updated = await auditedContentWrite(
             'content.articles.archive',
@@ -240,7 +240,7 @@ export class ContentArticleController {
             articleState(before),
             async () => {
                 const article = await articleService.archive(
-                    req.params.articleKey,
+                    req.params.articleId,
                     adminAuthorStampOf(identity),
                 );
                 return { value: article, after: articleState(article) };
@@ -252,7 +252,7 @@ export class ContentArticleController {
     });
 
     static remove = asyncHandler(async (req: Request, res: Response) => {
-        const before = await articleService.requireArticle(req.params.articleKey);
+        const before = await articleService.requireArticle(req.params.articleId);
 
         await auditedContentWrite(
             'content.articles.delete',
@@ -261,7 +261,7 @@ export class ContentArticleController {
             null,
             articleState(before),
             async () => {
-                const article = await articleService.remove(req.params.articleKey);
+                const article = await articleService.remove(req.params.articleId);
                 // `after` is null rather than the pre-delete state: the row is gone from
                 // every live query, and repeating `before` would read as "nothing changed".
                 return { value: article, after: null };
@@ -280,7 +280,7 @@ export class ContentAuthorController {
     });
 
     static get = asyncHandler(async (req: Request, res: Response) => {
-        const { author, articleCount } = await articleAuthorService.getByKey(req.params.authorKey);
+        const { author, articleCount } = await articleAuthorService.getByKey(req.params.authorId);
         sendSuccess(res, toAdminArticleAuthorDto(author, articleCount));
     });
 
@@ -304,7 +304,7 @@ export class ContentAuthorController {
 
     static update = asyncHandler(async (req: Request, res: Response) => {
         const body = req.body as UpdateAuthorBody;
-        const { author: before } = await articleAuthorService.getByKey(req.params.authorKey);
+        const { author: before } = await articleAuthorService.getByKey(req.params.authorId);
 
         const result = await auditedContentWrite(
             'content.authors.update',
@@ -313,7 +313,7 @@ export class ContentAuthorController {
             { fields: Object.keys(body) },
             authorState(before),
             async () => {
-                const updated = await articleAuthorService.update(req.params.authorKey, body);
+                const updated = await articleAuthorService.update(req.params.authorId, body);
                 return { value: updated, after: authorState(updated.author) };
             },
         );
@@ -322,7 +322,7 @@ export class ContentAuthorController {
     });
 
     static remove = asyncHandler(async (req: Request, res: Response) => {
-        const { author: before } = await articleAuthorService.getByKey(req.params.authorKey);
+        const { author: before } = await articleAuthorService.getByKey(req.params.authorId);
 
         await auditedContentWrite(
             'content.authors.delete',
@@ -331,7 +331,7 @@ export class ContentAuthorController {
             null,
             authorState(before),
             async () => {
-                const author = await articleAuthorService.remove(req.params.authorKey);
+                const author = await articleAuthorService.remove(req.params.authorId);
                 return { value: author, after: null };
             },
         );

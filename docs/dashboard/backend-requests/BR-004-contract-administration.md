@@ -38,7 +38,7 @@ rendering only `coverageRegions`. That is now fixed on our side.
 
 Two documentation problems remain, though, and they are real:
 
-1. **[`agencies.md`](../../admin/api/agencies.md) writes three of these sub-objects as `{ "…": "…" }`.**
+1. **[`agencies.md`](../../api/agencies.md) writes three of these sub-objects as `{ "…": "…" }`.**
    `terms.employment`, `terms.remittance` and `terms.feeSplit` have **no documented field names at
    all**. The dashboard typed them by reading jovi-mall's
    `agent-agency-membership.model.ts`. That is not a contract; it is archaeology.
@@ -55,7 +55,7 @@ Two documentation problems remain, though, and they are real:
 `{ agentId, fromAgencyId, toAgencyId, reason }`. That is the entire administrative surface on a
 membership.
 
-There is no `PATCH` or `POST` on any contract path. [`agents.md`](../../admin/api/agents.md) says why:
+There is no `PATCH` or `POST` on any contract path. [`agents.md`](../../api/agents.md) says why:
 
 > **Editing contract terms** — *"A live contract's terms change by proposal between the two parties,
 > never by edit — an administrator imposing a fee split neither party proposed would bind an agent to

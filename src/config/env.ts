@@ -266,6 +266,69 @@ const EnvSchema = z
         JOVI_MALL_TIMEOUT_MS: positiveInt.default(5_000),
 
         /**
+         * ── Storage, for building public file URLs here (BR-015 · ADR-021) ────
+         *
+         * ⚠ **These four names are IDENTICAL to jovi-mall's, deliberately.** They are the
+         * sixth value shared across a service boundary on this platform, and the newest
+         * lesson already written down is that a new shared value should not also be a new
+         * name to remember — the reason `GEO_TRACKER_ADMIN_TOKEN` was given a matching name.
+         * `STORAGE_LOCAL_URL` here IS `STORAGE_LOCAL_URL` there, and the two MUST hold the
+         * same value.
+         *
+         * ⚠ **Nothing compares the two sides, so a mismatch is SILENT** — the property every
+         * other shared value on this platform has. It does not fail a boot and it logs
+         * nothing; it produces URLs that 404 on a screen full of thumbnails, which reads as
+         * "the files are gone". `docs/RUNBOOK.md` § Rotation is where that is verified.
+         *
+         * All optional, and genuinely inert when unset: `FileDetail.url` is `null` and a
+         * warning is logged once. Not required-with-a-refinement like the two doors above,
+         * because unlike a base URL with no token this combination produces no failing calls
+         * — it produces a shape every client on this platform already handles, since `null`
+         * is the normal answer for a private file.
+         *
+         * `STORAGE_PROVIDER` intentionally has **no default**, where jovi-mall defaults it to
+         * `'local'`. A default here would be this service guessing what the other one is
+         * configured as, and guessing right by luck is worse than being inert: it publishes
+         * URLs built from an assumption nobody stated.
+         */
+        STORAGE_PROVIDER: z.enum(['local', 'firebase', 'cloudinary']).optional(),
+        /** Must equal jovi-mall's `STORAGE_LOCAL_URL`. Its default there is the same string. */
+        STORAGE_LOCAL_URL: z.string().url().default('http://localhost:8022/api/files'),
+        STORAGE_FIREBASE_BUCKET: z.string().min(1).optional(),
+        STORAGE_FIREBASE_PUBLIC: z
+            .string()
+            .optional()
+            .transform((value) => value === 'true'),
+
+        /**
+         * ── The upload ceiling THIS service declares (BR-015 · ADR-021 D-4) ───
+         *
+         * The whole `multipart/form-data` request body, in bytes — not a per-file figure,
+         * because this service never parses the body and therefore cannot see where one
+         * file ends and the next begins. Enforced on `Content-Length` when the client sends
+         * one and on the bytes as they flow when it does not.
+         *
+         * ⚠ **Deliberately unrelated to jovi-mall's number.** Its per-request ceiling is
+         * keyed on a session ROLE, and an administrator's figure there is **2 GB** — chosen
+         * for a surface an administrator can no longer reach at all (Phase 5 Part B). It
+         * still resolves, because `requireAdminCaller` fabricates `role: 'admin'`, so a
+         * proxy that declared nothing would inherit 2 GB by accident. 32 MiB is what an
+         * administrator actually uploads: jovi-mall's own upload policy caps an image at 10
+         * MB and a PDF at 25 MB, so this is the largest artefact it will accept plus room
+         * for multipart framing, and no more.
+         *
+         * Refusing here rather than there is the point of declaring it: a body doomed at
+         * the far end is never streamed across the hop.
+         *
+         * ⚠ **The accepted MIME list is NOT here**, and that is not an oversight — see
+         * `modules/files/domain/upload-limits.ts`. wi-admin cannot enforce a type it never
+         * parses, so the list it publishes is jovi-mall's, mirrored for documentation. A
+         * deployment-tunable allowlist on this side would let an operator advertise a type
+         * the pipeline then refuses, which is worse than not offering the knob.
+         */
+        ADMIN_UPLOAD_MAX_BYTES: positiveInt.default(32 * 1024 * 1024),
+
+        /**
          * ── geo-tracker OPERATIONS reads (Phase 15) ───────────────────────────
          *
          * The `_OPS_` is deliberate and load-bearing as documentation: this is not a general

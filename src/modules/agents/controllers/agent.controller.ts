@@ -1,4 +1,6 @@
 import { Request, Response } from 'express';
+import { ObjectId } from 'mongodb';
+import { Types } from 'mongoose';
 import { actorContextOf } from '../../audit/domain/audit-context';
 import { asyncHandler } from '../../../core/http/async-handler';
 import { createAppError } from '../../../core/errors/app-error';
@@ -9,16 +11,22 @@ import { requireAdminIdentity } from '../../admin-identity/domain/admin-identity
 import { toAuditEntryDto } from '../../audit/domain/audit.dto';
 import { AuditRepository } from '../../audit/repositories/audit.repository';
 import { ListAuditQuery } from '../../audit/validators/audit.validator';
-import { ContractEventReadRepository } from '../../agencies/repositories/contract-event.read.repository';
+import {
+    ContractEventReadRepository,
+    distinctAgentIds,
+} from '../../agencies/repositories/contract-event.read.repository';
 import { ContractReadRepository } from '../../agencies/repositories/contract.read.repository';
+import { AgencyReadRepository } from '../../agencies/repositories/agency.read.repository';
 import { toAgentContractDto, toContractEventDto } from '../../agencies/read-models/contract.dto';
 import { ListContractEventsQuery } from '../../agencies/validators/agency.validator';
+import { allocationAgencyIds, toCodAllocationDto } from '../read-models/cod-allocation.dto';
 import { readAgentPresence } from '../../../infra/geo/geo-tracker-data.client';
 import { discloseAgentPosition, readNonDisclosing } from '../domain/tracking-disclosure';
 import * as gateway from '../gateways/agent.gateway';
 import { AgentReadModel, AgentReadRepository } from '../repositories/agent.read.repository';
 import {
     BanAgentBody,
+    AssignabilityQuery,
     EligibilityQuery,
     ListAgentActivityQuery,
     ListContractsQuery,
@@ -65,6 +73,14 @@ import {
 const agents = new AgentReadRepository();
 const contracts = new ContractReadRepository();
 const contractEvents = new ContractEventReadRepository();
+/**
+ * Reached for one thing: the business name and status behind an agency id on a COD slice.
+ *
+ * The agencies module owns `delivery_agencies` and the Magazin join that answers "what is
+ * this agency called" — `findRowsByIds` is that join, and reusing it is what keeps this
+ * endpoint and `GET /agents/:agentId/contracts` naming the same agency the same way.
+ */
+const agencies = new AgencyReadRepository();
 const audit = new AuditRepository();
 
 interface AgentDto {
@@ -94,7 +110,16 @@ interface AgentDto {
         maxActiveShipments: number;
     };
     trackingAllowed: boolean;
+    /**
+     * The EFFECTIVE score — an administrator's pinned override when one exists, the computed
+     * score otherwise. Matches what every gate in jovi-mall acts on (O-7).
+     *
+     * ⚠ The `trustScore` SORT still orders by the computed `cod.trust_score`, because that is
+     * the indexed field. An overridden agent therefore sorts by a score that is not being
+     * applied to them. `trustSource` is what lets a column say so.
+     */
     trustScore: number | null;
+    trustSource: 'override' | 'computed';
     createdAt: string;
     updatedAt: string;
 }
@@ -127,7 +152,8 @@ function toAgentDto(agent: AgentReadModel): AgentDto {
             maxActiveShipments: agent.capacity?.max_active_shipments ?? 0,
         },
         trackingAllowed: agent.tracking?.allowed === true,
-        trustScore: agent.cod?.trust_score ?? null,
+        trustScore: agent.cod?.trust_override?.score ?? agent.cod?.trust_score ?? null,
+        trustSource: agent.cod?.trust_override ? 'override' : 'computed',
         createdAt: toIso(agent.created_at) ?? String(agent.created_at),
         updatedAt: toIso(agent.updated_at) ?? String(agent.updated_at),
     };
@@ -315,8 +341,29 @@ function toAgentDetailDto(agent: AgentReadModel) {
             active: agent.capacity?.active_shipment_count ?? 0,
             reconciledAt: toIso(agent.capacity?.reconciled_at),
         },
+        /**
+         * ⚠ `trustScore` is the EFFECTIVE score — the administrator's pinned override when
+         * one exists, the computed score otherwise. Every gate in jovi-mall reads it that
+         * way (O-7), and until Phase 6.J this DTO reported `cod.trust_score` alone, so on
+         * exactly the agents where a human had overridden the machine, this screen showed
+         * the number the platform was NOT using.
+         *
+         * All three are shipped, never just the effective one: a screen that cannot say
+         * "pinned at 80, computed 35, by Awa on 12 Aug" cannot tell an administrator what
+         * releasing the override would do. `source` is for display, never for a branch.
+         */
         cod: {
-            trustScore: agent.cod?.trust_score ?? null,
+            trustScore: agent.cod?.trust_override?.score ?? agent.cod?.trust_score ?? null,
+            computedTrustScore: agent.cod?.trust_score ?? null,
+            trustSource: agent.cod?.trust_override ? ('override' as const) : ('computed' as const),
+            trustOverride: agent.cod?.trust_override
+                ? {
+                      score: agent.cod.trust_override.score ?? null,
+                      reason: agent.cod.trust_override.reason ?? null,
+                      setAt: toIso(agent.cod.trust_override.set_at),
+                      setByName: agent.cod.trust_override.set_by_name ?? null,
+                  }
+                : null,
             maxThreshold: agent.cod?.max_threshold ?? null,
         },
         /**
@@ -450,6 +497,12 @@ export class AgentController {
      * GET /api/v1/agents/:agentId/contract-history — what everyone did to this agent's
      * relationships. The sibling `/activity` is what administrators did. Two feeds, two
      * databases, two permissions — see the repository header.
+     *
+     * ── `agent` is decorated here too, and it is not redundant (BR-016 § 1) ───
+     * Every row on THIS feed names the agent in the path, so the object is the same on all
+     * of them. It is still carried, because the two feeds share one DTO and a client
+     * branching on which endpoint it called to know whether `agent` is present is a client
+     * that will get it wrong. The cost is one batched read of one id.
      */
     static contractHistory = asyncHandler(async (req: Request, res: Response) => {
         const query = req.query as unknown as ListContractEventsQuery;
@@ -468,7 +521,13 @@ export class AgentController {
             },
         );
 
-        sendPaginated(res, page.items.map(toContractEventDto), toPageMeta(page.total, page.page, page.limit));
+        const agentNames = await agents.findNamesByIds(distinctAgentIds(page.items));
+
+        sendPaginated(
+            res,
+            page.items.map((event) => toContractEventDto(event, agentNames)),
+            toPageMeta(page.total, page.page, page.limit),
+        );
     });
 
     /**
@@ -584,10 +643,34 @@ export class AgentController {
         );
     });
 
-    /** GET /api/v1/agents/:agentId/cod-allocation — pool, per-contract slices, headroom. */
+    /**
+     * GET /api/v1/agents/:agentId/cod-allocation — pool, per-contract slices, headroom.
+     *
+     * ── Delegated verdict, decorated locally (BR-016 § 2) ─────────────────────
+     * The arithmetic stays jovi-mall's: `ALLOCATING_CONTRACT_STATUSES` is the judgement that
+     * `paused` and `suspended` contracts still hold headroom while `deactivated` ones do
+     * not, and a copy of it here would drift silently and report headroom that does not
+     * exist. What is added is a NAME, which jovi-mall cannot produce — the agency's business
+     * name lives on the Magazin, and this endpoint's subject there is a number.
+     *
+     * That is the two rules meeting rather than either bending: the verdict is delegated,
+     * the record decorating it is read directly.
+     *
+     * One batched read for the whole payload, and it is bounded twice over — by the agent's
+     * contract count, which is single digits, and by the fact that the slices are already in
+     * hand when it runs.
+     */
     static codAllocation = asyncHandler(async (req: Request, res: Response) => {
         await loadOr404(req.params.agentId);
-        sendSuccess(res, await gateway.codAllocation(req.params.agentId, actorContextOf(req)));
+
+        const allocation = await gateway.codAllocation(req.params.agentId, actorContextOf(req));
+        const agencyRows = await agencies.findRowsByIds(
+            allocationAgencyIds(allocation)
+                .filter((id) => Types.ObjectId.isValid(id) && id.length === 24)
+                .map((id) => new ObjectId(id)),
+        );
+
+        sendSuccess(res, toCodAllocationDto(allocation, agencyRows));
     });
 
     /**
@@ -605,6 +688,49 @@ export class AgentController {
         sendSuccess(
             res,
             await gateway.eligibility(req.params.agentId, query.agencyId, actorContextOf(req)),
+        );
+    });
+
+    /**
+     * GET /api/v1/agents/:agentId/assignability?agencyId=…&shipmentId=… — every gate on
+     * giving this agent work from this agency, with the numbers behind each one.
+     *
+     * ── What this adds over `/eligibility`, and why it is a separate endpoint ────
+     *
+     * `eligibility` answers the PLATFORM half — banned, KYC, active, available, tracking,
+     * device, capacity. This answers that half plus the CONTRACT half — active contract,
+     * coverage region, per-shipment value ceiling and COD exposure — which was reachable
+     * from no surface at all before Phase 6.J.
+     *
+     * The gap was not academic. An agency refused with `COD_AGENT_EXPOSURE_EXCEEDED` could
+     * see its own COD threshold on three of this service's screens, and could see neither
+     * the agent's actual exposure (which counts undelivered COD packages, not just held
+     * cash, and spans EVERY agency the agent serves) nor the trust multiplier that had
+     * halved that threshold. Support had the wrong number in front of them and no way to
+     * know it.
+     *
+     * A separate endpoint rather than fields added to `eligibility`: that shape is a
+     * documented contract three dashboards already parse, its subject is genuinely the
+     * platform rule set, and this one takes an argument it does not.
+     *
+     * ── Not audited, and that is consistent rather than an omission ──────────────
+     *
+     * A GET that mutates nothing. The two audited reads in this service are audited
+     * because they disclose a person's live COORDINATES (ADR-020 D-5); this discloses a
+     * cash position to the tier that already holds `agents.read` and can see the COD
+     * holders list.
+     */
+    static assignability = asyncHandler(async (req: Request, res: Response) => {
+        const query = req.query as unknown as AssignabilityQuery;
+        await loadOr404(req.params.agentId);
+        sendSuccess(
+            res,
+            await gateway.assignability(
+                req.params.agentId,
+                query.agencyId,
+                query.shipmentId,
+                actorContextOf(req),
+            ),
         );
     });
 

@@ -13,7 +13,7 @@ question being asked is structurally a partial answer.
 
 An owner can hold several subscription rows at once.
 
-[`billing.md`](../../admin/api/billing.md) gives `GET /billing/subscriptions` a stated purpose:
+[`billing.md`](../../api/billing.md) gives `GET /billing/subscriptions` a stated purpose:
 
 > *"Which owners have a plan queued behind their current one — `status=pending_activation`. **That is
 > the state that silently becomes active without anybody acting.**"*

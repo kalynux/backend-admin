@@ -24,14 +24,14 @@ platform party.
 
 Four contract lines make this explicit rather than accidental:
 
-- [`notifications.md`](../../admin/api/notifications.md): *"Nothing here creates a notification. There
+- [`notifications.md`](../../api/notifications.md): *"Nothing here creates a notification. There
   is no `POST /notifications`. Every row is derived by a background projector from a row some other
   part of the platform already committed. An endpoint that manufactured one would be exactly the hole
   this design was asked not to open."* `/notifications` is the **administrator inbox**, inbound only.
-- [`users.md`](../../admin/api/users.md), *what this surface deliberately does not offer*:
+- [`users.md`](../../api/users.md), *what this surface deliberately does not offer*:
   password reset — *"jovi-mall has no administrator-initiated password flow"*; forced sign-out —
   *"jovi-mall issues stateless JWTs with no session store — there is nothing to revoke."*
-- [`permissions.md`](../../admin/api/permissions.md): `users.password.reset †`,
+- [`permissions.md`](../../api/permissions.md): `users.password.reset †`,
   `users.sessions.revoke †`, `users.roles.manage †`, `broadcast.send †`, `customers.read †`,
   `customers.suspend †` — all **catalogued policy with no endpoint built yet**.
 - WhatsApp and Telegram appear **twice in the whole contract**, neither of them a send:

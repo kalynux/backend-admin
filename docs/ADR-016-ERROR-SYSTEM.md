@@ -64,8 +64,9 @@ frontend to highlight a form field for *"this agency does not handle cash on del
   must **disagree** with what the rules already derive. A dead override is dead policy, the
   argument `tier-grants.ts` makes about a permission granted to no tier. This assertion
   immediately found two redundant entries and they were deleted.
-- **The census** — `test:errors` statically scans all 1362 `createAppError(ERROR_CODES.X, N)`
-  sites and asserts no code yields two categories.
+- **The census** — `test:errors` statically scans **every** `createAppError(ERROR_CODES.X, N)`
+  site in jovi-mall's `src/` (**1 517** on 2026-09-06; re-measure with
+  `grep -rhoE "createAppError\(" src/ | wc -l`) and asserts no code yields two categories.
 
 > **The census found 25 pre-existing conflicts on its first run.** They are baselined, not
 > amnestied: the list cannot grow, and a second assertion fails if an entry is fixed and
@@ -111,8 +112,8 @@ what a frontend and a support agent branch on. The *message* and *details* carry
 payloads, and those are what get masked.
 
 This closed the `payment-orchestrator.service.ts` and `google-calendar.client.ts` leaks
-**without editing either file**. A rule enforced at 1362 call sites is a rule enforced at
-1361 of them.
+**without editing either file**. A rule enforced at every call site is a rule enforced at all
+but one of them.
 
 > **The `NODE_ENV` gate stopped being what protects us.** `internal` and `external_service`
 > are masked in development exactly as in production, and `test:errors` asserts the two

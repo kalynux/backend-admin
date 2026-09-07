@@ -59,6 +59,14 @@ import { ARTICLE_SORT, SearchArticlesQuery } from '../validators/article.validat
  *
  * A whitelist rather than an exclusion list, for the reason every projection in this
  * service is one: an exclusion protects only what somebody thought of.
+ *
+ * ⚠ **The cost of that whitelist is that a NEW translation field is invisible here until
+ * it is added below, and the symptom is a plausible value rather than an error.** It has
+ * happened once already: `cover_alt` landed on `ArticleTranslationDoc` and on the summary
+ * DTO without landing here, so every row of the editor's inbox reported
+ * `coverAlt: null` — indistinguishable from "nobody has written it", on the one field
+ * whose whole purpose is to warn the inbox that a publish will be refused. Adding a field
+ * to `ArticleTranslationDoc` means adding it here in the same change.
  */
 const ARTICLE_LIST_PROJECTION = {
     _id: 1,
@@ -71,6 +79,7 @@ const ARTICLE_LIST_PROJECTION = {
     published_at: 1,
     content_updated_at: 1,
     archived_at: 1,
+    source_locale: 1,
     slug_keys: 1,
     created_by_admin: 1,
     updated_by_admin: 1,
@@ -81,6 +90,7 @@ const ARTICLE_LIST_PROJECTION = {
     'translations.title': 1,
     'translations.meta_title': 1,
     'translations.excerpt': 1,
+    'translations.cover_alt': 1,
     'translations.word_count': 1,
     'translations.published': 1,
     'translations.previous_slugs': 1,
@@ -98,6 +108,7 @@ const ARTICLE_DETAIL_PROJECTION = {
     published_at: 1,
     content_updated_at: 1,
     archived_at: 1,
+    source_locale: 1,
     slug_keys: 1,
     created_by_admin: 1,
     updated_by_admin: 1,

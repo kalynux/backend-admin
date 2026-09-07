@@ -274,6 +274,15 @@ async function main(): Promise<number> {
             stored !== null && 'content_updated_at' in stored && stored.content_updated_at === null);
         t.assert('slug_keys landed, derived', () =>
             Array.isArray(stored?.slug_keys) && stored.slug_keys.includes(`en:${SLUG}`));
+        /**
+         * The editor's component driver (BR-019 § 1). Read from the raw document on purpose:
+         * the DTO falls back to `translations[0].locale` for a document written before the
+         * field existed, so a `sourceLocale` on the wire is NOT evidence the key landed —
+         * and a key that never lands is a field that silently degrades to the positional
+         * driver it exists to replace.
+         */
+        t.assert('source_locale landed, derived from the first translation', () =>
+            stored?.source_locale === 'en');
         t.assert('per-translation word_count landed as a NUMBER, derived', () =>
             typeof stored?.translations?.[0]?.word_count === 'number'
             && stored.translations[0].word_count > 0);

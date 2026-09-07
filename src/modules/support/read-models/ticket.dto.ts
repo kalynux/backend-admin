@@ -1,5 +1,6 @@
 import { AdminTier } from '../../admin-identity/domain/admin-identity.types';
 import { assignableTiers, mayClaim, TicketAssignmentState } from '../domain/assignment-authority';
+import { TicketEntityRef } from '../repositories/ticket-entity.read.repository';
 import { AdminSnapshotRead, TicketReadModel } from '../repositories/ticket.read.repository';
 
 /**
@@ -57,7 +58,42 @@ export interface TicketDto {
     priority: string;
     priorityLocked: boolean;
     importance: string;
-    entity: { type: string; id: string };
+    /**
+     * What the ticket is about — `(type, id)`, polymorphic.
+     *
+     * `type` is one of **eleven** values, and the set is **CLOSED at the platform**:
+     * jovi-mall's `EntityType` is a TypeScript enum, its ticket schema declares
+     * `enum: ENTITY_TYPE_VALUES` on a required column, and its create and list validators
+     * both `z.enum` the same array. So a stored value outside the eleven is not reachable
+     * through any write path. See `docs/api/support.md` for the list.
+     *
+     * ⚠ **This service still validates the token by SHAPE, not membership** (ADR-005 D-17,
+     * and `entityType` on the search schema is a bounded string). That is not a
+     * contradiction: the vocabulary is jovi-mall's to grow, and pinning a copy here is how a
+     * filter goes stale silently. A client may rely on the eleven for routing and should
+     * still render an unrecognised token as plain text.
+     */
+    entity: {
+        type: string;
+        id: string;
+        /**
+         * The product's vendor — set for `type: 'PRODUCT'`, `null` otherwise (BR-016 § 7).
+         *
+         * Without it a product ticket cannot be linked anywhere: the product detail route is
+         * `/vendors/:vendorId/products/:productId` and the ticket carries one id.
+         *
+         * `null` also when the product row is gone — a deleted listing is exactly what a
+         * catalogue complaint tends to end in, so the ticket survives with no link rather
+         * than being given a fabricated one.
+         */
+        vendorId: string | null;
+        /**
+         * Something an operator recognises, where one read can supply it: the order number,
+         * the tracking number, the product title. `null` for every other type and for a
+         * missing record — a nice-to-have, never a substitute for the id.
+         */
+        label: string | null;
+    };
     trackingNumber: string | null;
     createdBy: { role: string; userId: string | null; administrator: AdminSnapshotDto | null };
     /** The platform actor a ticket was routed to, which is NOT the administrator holding it. */
@@ -106,9 +142,19 @@ export function assignmentStateOf(ticket: TicketReadModel): TicketAssignmentStat
     };
 }
 
+/**
+ * Nothing resolved — what the QUEUE passes.
+ *
+ * The list deliberately does not resolve entities: a hundred-row page would be a hundred
+ * lookups across three collections to decorate a column that shows an id. The detail is one
+ * ticket and one query, which is what makes the decoration affordable there.
+ */
+const UNRESOLVED_ENTITY: TicketEntityRef = { vendorId: null, label: null };
+
 export function toTicketDto(
     ticket: TicketReadModel,
     caller: { adminId: string; tier: AdminTier },
+    entity: TicketEntityRef = UNRESOLVED_ENTITY,
 ): TicketDto {
     const state = assignmentStateOf(ticket);
     const assignment = ticket.admin_assignment ?? null;
@@ -121,7 +167,12 @@ export function toTicketDto(
         priority: ticket.priority,
         priorityLocked: ticket.priority_locked ?? false,
         importance: ticket.importance,
-        entity: { type: ticket.entity_type, id: ticket.entity_id },
+        entity: {
+            type: ticket.entity_type,
+            id: ticket.entity_id,
+            vendorId: entity.vendorId,
+            label: entity.label,
+        },
         trackingNumber: ticket.tracking_number ?? null,
         createdBy: {
             role: ticket.created_by_role,
@@ -152,9 +203,10 @@ export function toTicketDto(
 export function toTicketDetailDto(
     ticket: TicketReadModel,
     caller: { adminId: string; tier: AdminTier },
+    entity: TicketEntityRef = UNRESOLVED_ENTITY,
 ): TicketDetailDto {
     return {
-        ...toTicketDto(ticket, caller),
+        ...toTicketDto(ticket, caller, entity),
         description: ticket.description ?? '',
     };
 }

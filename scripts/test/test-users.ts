@@ -244,11 +244,51 @@ t.assert('no role projection reaches an agent’s identity, payout or emergency 
 t.assert('the agent projection takes `kyc.status` only — never the documents behind it', () =>
     ROLE_REPO.includes("'kyc.status': 1") && !ROLE_REPO.includes('kyc: 1'));
 
+/**
+ * ⚠ **NARROWED 2026-08-25 (BR-015). The property is unchanged; the counting was too broad.**
+ *
+ * This counted `collection: COLLECTIONS.` and `projection: {` across the WHOLE FILE and
+ * required both to be exactly 4 — a fair proxy for "every role source names a projection"
+ * only while the file contained nothing but the four-row `ROLE_SOURCES` table.
+ *
+ * It stopped being one when the media library needed batched customer names and
+ * `findCustomerNamesByIds` was added here (rather than declaring a SECOND narrow projection
+ * of `customers` next to the files module — that collection carries `saved_addresses` and
+ * `saved_payment_methods`, so one whitelist per role is the point of this file). That method
+ * passes its own `projection: { _id: 1, name: 1 }` to `findBy`, which is *more* explicit than
+ * the rule requires — and the count went to 5 and the assertion went red for a change that
+ * strengthens the very property it defends.
+ *
+ * So it now counts **inside the `ROLE_SOURCES` table only**. It still fails the day somebody
+ * adds a fifth role without a projection, which is the whole job, and it no longer objects to
+ * a per-query projection override elsewhere in the file.
+ *
+ * A blunter fix — bumping 4 to 5 — was available and is worse: it would have re-pinned a
+ * number that means nothing, and the next legitimate method here would break it again.
+ */
 t.assert('every role source names an explicit projection', () => {
-    const sources = ROLE_REPO.split('collection: COLLECTIONS.').length - 1;
-    const projections = ROLE_REPO.split('projection: {').length - 1;
+    const start = ROLE_REPO.indexOf('const ROLE_SOURCES');
+    if (start === -1) return false;
+
+    // The table literal ends at the `});` that closes `Object.freeze({`.
+    const end = ROLE_REPO.indexOf('});', start);
+    if (end === -1) return false;
+
+    const table = ROLE_REPO.slice(start, end);
+    const sources = table.split('collection: COLLECTIONS.').length - 1;
+    const projections = table.split('projection: {').length - 1;
+
     return sources === 4 && projections === 4;
 });
+
+/**
+ * The other half, and it is what the file-wide count was really reaching for: no read
+ * anywhere in this repository may run without a projection. `PlatformReadRepository` supplies
+ * one from its constructor for every query, so the only way to lose it is a `findBy` whose
+ * options override it with something wider — and there is no such call.
+ */
+t.assert('no read here widens the projection back out', () =>
+    !ROLE_REPO.includes('projection: {}') && !/projection:\s*undefined/.test(ROLE_REPO));
 
 t.assert('the read repository still holds no delegation client', () =>
     !USER_REPO.includes('platform.client') && !ROLE_REPO.includes('platform.client'));

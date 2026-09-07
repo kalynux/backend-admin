@@ -334,6 +334,7 @@ total would be a sum of two counts and `meta.pages` a lie.
       "contractId": "6661aabbccddeeff00112233",
       "agentId": "6660112233445566778899aa",
       "agencyId": "665c0011223344556677889a",
+      "agent": { "id": "6660112233445566778899aa", "name": "Ibrahim T." },
       "type": "CONTRACT_APPROVED",
       "fromStatus": "pending",
       "toStatus": "active",
@@ -347,8 +348,25 @@ total would be a sum of two counts and `meta.pages` a lie.
 }
 ```
 
-> **`actorUserId` has no `source` companion.** Read the **role**, not the id — an `admin` row's
-> id belongs to the wi-admin database and resolves to nothing in the platform database.
+| Field | Notes |
+|---|---|
+| **`agent`** | Who the row is **about**. `{ id, name }`, or `null` when the agent record is gone — a broken state the row is kept to show, never a fabricated label |
+| `agent.name` | ⚠ **`name`, not `businessName`.** An agent is a **person**. The mirror decoration on [`GET /agents/:agentId/contracts`](agents.md#get-agentsagentidcontracts) carries `businessName` because an agency is a business; the two are different kinds of thing and a company name under a column headed "Agent" would be wrong in the same way `contactName` under "Agency" was |
+
+The lookup runs **after** `skip`/`limit`, in one batched read, so it touches at most one page
+however deep the history goes. The same decoration is on
+[`GET /agents/:agentId/contract-history`](agents.md#get-agentsagentidcontract-history), where
+every row names the agent in the path — carried anyway, because the two feeds share one shape
+and a client branching on which endpoint it called to know whether `agent` is present will get
+it wrong.
+
+> **`actorUserId` has no `source` companion, and is deliberately NOT resolved.** Read the
+> **role**, not the id — an `admin` row's id belongs to the wi-admin database and resolves to
+> nothing in the platform database, and the other three roles write ids from three different
+> collections. The **agent** is the subject of the row and is unambiguous; the **actor** is not.
+> The one place an actor name *is* resolved is
+> [`GET /orders/:orderId/timeline`](orders.md#get-ordersorderidtimeline), whose `actorType`
+> tells you which of three id spaces to look in.
 
 ---
 

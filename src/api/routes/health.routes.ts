@@ -7,11 +7,20 @@ import { pingPlatform } from '../../infra/platform/platform.client';
 /**
  * Health endpoints, mounted UNVERSIONED at `/health`.
  *
- * jovi-mall's entire observability surface is `GET /api/health` → `{ status: 'ok' }`,
- * which reports only that Express is running. It cannot distinguish a healthy service from
- * one whose database vanished, so it cannot drive a load balancer or a deployment gate.
+ * ⚠ **This docstring opened by describing jovi-mall's observability as "entirely
+ * `GET /api/health` → `{ status: 'ok' }` … it cannot drive a load balancer or a deployment
+ * gate". That was true when written and has been false since Phase 14** (corrected
+ * 2026-09-06, DOC-PROGRAM P-15). jovi-mall now serves `/api/health/live`,
+ * `/api/health/ready`, `/metrics` and twelve `/api/internal/admin/system/*` routes.
  *
- * The split matters:
+ * The correction matters more than a stale sentence usually would, because the *reason*
+ * jovi-mall kept an unconditional 200 on `/api/health` is a cross-service constraint rather
+ * than an omission: geo-tracker registers that exact path as a **readiness** checker and
+ * treats any status >= 300 as an error, so putting readiness semantics on it means a
+ * jovi-mall Redis wobble 503s geo-tracker's `/readyz` and kills every live tracking session.
+ * Its readiness therefore went on `/api/health/ready`. See ADR-014 D-1.
+ *
+ * The split below is the same split, arrived at first here, and it matters:
  *
  *   /health/live   Is the process alive? NEVER checks a dependency. An orchestrator kills
  *                  and restarts on a failing liveness probe — and restarting this service

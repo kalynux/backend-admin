@@ -101,6 +101,26 @@ export class ContractEventReadRepository extends PlatformReadRepository<Contract
     }
 }
 
+/**
+ * The distinct agents named by a PAGE of history rows (BR-016 § 1).
+ *
+ * Here rather than in either controller because both feeds decorate with the same name and
+ * two copies of "collect the ids" is how one of them ends up resolving the wrong column.
+ * Pure and DB-free — the batched read itself belongs to the agents module, which owns
+ * `delivery_agents` and its projection.
+ *
+ * Takes the PAGE, never the filter: the lookup must run after skip/limit or a deep history
+ * would resolve every agent it has ever touched to render twenty rows.
+ */
+export function distinctAgentIds(events: ContractEventReadModel[]): ObjectId[] {
+    const seen = new Set<string>();
+    for (const event of events) {
+        const id = event.agent_id?.toString();
+        if (id && Types.ObjectId.isValid(id) && id.length === 24) seen.add(id);
+    }
+    return [...seen].map((id) => new ObjectId(id));
+}
+
 /** Exported so `test-agents.ts` can assert the branches without a database. */
 export function buildContractEventFilter(
     scope: ContractEventScope,

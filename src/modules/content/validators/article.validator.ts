@@ -77,7 +77,10 @@ const CoverSchema = z
                 (url) => /^https?:\/\//i.test(url) || (url.startsWith('/') && !url.startsWith('//')),
                 'A cover url must be an http(s):// URL or an internal path starting with "/"',
             ),
-        alt: z.string().trim().min(1).max(300),
+        // ⚠ No `alt` here — it is per-locale, as `coverAlt` on each translation. An article
+        // publishes in up to five languages off this one image, and a shared alt string puts
+        // English into a French screen reader and onto the French page's `og:image`.
+        //
         // Required for the same reason an inline image's are: they reserve the box. A cover
         // is also the `og:image`, so 16:9 at >= 1200px wide is the recommendation
         // (1200x630 is the social-card floor) — a recommendation, not a rule.
@@ -101,6 +104,21 @@ export const ArticleTranslationSchema = z
         metaTitle: z.string().trim().min(1).max(200).optional(),
         excerpt: z.string().trim().min(1).max(400),
         body: ArticleBodySchema,
+        /**
+         * Alt text for the article's shared cover image, in this language.
+         *
+         * **Optional here and refused at publish** (`collectPublishBlockers`), rather than
+         * required here. Two reasons, and the second is the load-bearing one:
+         *
+         *   1. An article may have no cover at all, in which case there is nothing to
+         *      describe and a required field would be busywork on every translation.
+         *   2. `PATCH` can add a cover *without* sending `translations`. If this were
+         *      required, adding a cover to a live five-language article would be a request
+         *      that must carry all five alt strings or fail — so an editor would be blocked
+         *      mid-draft by a rule that belongs on the publish checklist, where every other
+         *      "not finished yet" condition in this module already lives.
+         */
+        coverAlt: z.string().trim().min(1).max(300).optional(),
         published: z.boolean().optional().default(true),
     })
     .strict();
@@ -129,7 +147,7 @@ const TranslationsSchema = z
 /**
  * Create an article. Always lands as a **draft** — `status` is not settable here, because
  * "created" and "published" are different decisions and the second one has a checklist
- * (`POST /:articleKey/publish`) that a create body could quietly skip.
+ * (`POST /:articleId/publish`) that a create body could quietly skip.
  */
 export const CreateArticleSchema = z
     .object({
@@ -167,7 +185,7 @@ export const UpdateArticleSchema = z
 export type UpdateArticleBody = z.infer<typeof UpdateArticleSchema>;
 
 /**
- * `POST /:articleKey/publish`.
+ * `POST /:articleId/publish`.
  *
  * `publishedAt` exists for one case: importing an article that was published elsewhere and
  * needs to keep its date. Left out, first publish stamps now — and a *re*-publish never
@@ -185,8 +203,16 @@ export type PublishArticleBody = z.infer<typeof PublishArticleSchema>;
 /** Unpublish and archive take no body; declared so `.strict()` refuses a stray field. */
 export const NoBodySchema = z.object({}).strict();
 
-export const ArticleKeyParamSchema = z.object({ articleKey: ArticleKeySchema }).strict();
-export const AuthorKeyParamSchema = z.object({ authorKey: ArticleKeySchema }).strict();
+/**
+ * The path params. **Named `id`, matching the payload** — see the naming note in
+ * `routes/content.routes.ts` for why they were renamed from `:articleKey` / `:authorKey`.
+ *
+ * The key here must stay identical to the `:param` in the route path: Express fills
+ * `req.params` from the path, and a schema keyed on a name the route does not declare
+ * validates `undefined` against a required string and 400s every request to it.
+ */
+export const ArticleIdParamSchema = z.object({ articleId: ArticleKeySchema }).strict();
+export const AuthorIdParamSchema = z.object({ authorId: ArticleKeySchema }).strict();
 
 /**
  * What the editor's list may be ordered by: **wire name → stored field path**.
@@ -216,7 +242,7 @@ export const SearchArticlesQuerySchema = listQuery(ARTICLE_SORT, '-updatedAt', {
 
 export type SearchArticlesQuery = z.infer<typeof SearchArticlesQuerySchema>;
 
-/** `GET /:articleKey/preview?locale=…` — the public shape, at any status. */
+/** `GET /:articleId/preview?locale=…` — the public shape, at any status. */
 export const PreviewQuerySchema = z.object({ locale: LocaleSchema }).strict();
 
 export type PreviewQuery = z.infer<typeof PreviewQuerySchema>;

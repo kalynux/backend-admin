@@ -15,9 +15,9 @@ Design records: [`../ADR-003-GRANULAR-PERMISSIONS.md`](../ADR-003-GRANULAR-PERMI
 
 | Level (`tier`) | Label | Holds | Shape of the job |
 |---|---|---|---|
-| **1** | Developer | 113 of 113 | Everything, including the developer tools and every escalation-flagged action |
-| **2** | Admin | 96 of 113 | The operational tier — runs the platform day to day, including the money |
-| **3** | Support | 29 of 113 | Ticket work, the lookups needed to answer a ticket, and editorial write on articles and bylines. Nothing financial, nothing destructive, and publishing stays a level above |
+| **1** | Developer | 116 of 116 | Everything, including the developer tools and every escalation-flagged action |
+| **2** | Admin | 99 of 116 | The operational tier — runs the platform day to day, including the money |
+| **3** | Support | 30 of 116 | Ticket work, the lookups needed to answer a ticket, and editorial write on articles and bylines. Nothing financial, nothing destructive, and publishing stays a level above |
 
 A level is an administrator's **entire** authorization state. `tier` appears on the profile
 returned by `GET /auth/me`.
@@ -145,7 +145,7 @@ record were one decision, not two. See [ADR-020](../ADR-020-ADMIN-DATA-DOOR.md) 
 ## The matrix
 
 ● granted  ·  not granted  ·  **†** = catalogued policy with **no endpoint built yet**
-(**4** of 113 permissions — down from 27, and the four that remain each have a written reason
+(**4** of 116 permissions — down from 27, and the four that remain each have a written reason
 below. The policy is decided ahead of the surface, deliberately.)
 
 ### `agents`
@@ -262,8 +262,58 @@ own but **not** `publish`, which carries no flag (Phase 5 P-1).
 | Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
 |---|---|:-:|:-:|:-:|---|---|
 | `files.resolve` | read | ● | ● | ● | — | Resolve file ids returned by this service into names, types and URLs |
+| `files.content.read` | read | ● | ● | ● | **audited** | Open a file's contents, including delivery proofs and other private files |
 | `files.orphans.read` | read | ● | ● | · | — | List uploaded files no record refers to |
+| `files.library.read` | read | ● | ● | · | — | Browse every uploaded file on the platform, with its owner and what uses it |
+| `files.upload` | write | ● | ● | · | — | Upload a file to the platform as the administration |
 | `files.delete` | write | ● | · | · | destructive | Permanently delete a file from storage — unrecoverable |
+
+**`files.content.read` is a separate name from `files.resolve`, and the reason is the whole
+point of it.** Resolve is held by every tier because it discloses nothing the caller did not
+already have — they hold an id that arrived on a record they were allowed to read, and turning
+it into a name and a size adds nothing. **That reasoning stops at the metadata.** Opening the
+file discloses a delivery-proof photograph (a place, a time, usually a residence) or a vendor's
+saleable `digital/` product. Different acts get different names; the platform made the same call
+for `money.payouts.destination.read`.
+
+**Support holds it, and the audit row is the other half of that decision.** "The courier says
+they delivered it and I never got it" is a Support ticket and the proof photo is its answer —
+refusing them escalates every one to a tier that knows less about it. That is the same trade
+already made for `agents.tracking.read`. What bounds it is not the grant but the record: **every
+read commits an audit row before the bytes are fetched, and a failure of that write is not
+caught**, so with the audit store unreachable nothing is disclosed.
+
+⚠ **No `reason` is required**, unlike the two tracking disclosures — an operator opens many
+images inside one dispute, and a per-image prompt becomes a box somebody types "dispute" into
+forever. See [files.md](files.md#get-apiv1filesfileidcontent).
+
+**`files.library.read` is the mount's rule in its third instance: a listing gets its own name.**
+`files.resolve` is grantable to every tier on one argument — the caller already holds the id, so
+resolving it discloses nothing new — and **that argument does not survive enumeration.** A caller
+who can browse does not need to hold an id. `files.orphans.read` established the rule; the media
+library follows it, and draws the same line at Support for the same reason.
+
+⚠ **It is NOT audited, and the dashboard asked for the opposite.** Their case was good and is
+recorded rather than waved away: this route discloses something the other four cannot, because it
+enumerates. It was declined because ADR-006 D-5's exception test is *"the output IS the
+disclosure"* — true of a payout destination, a live position, a trail and a file's bytes, and not
+of a filename and a size — and because `files.orphans.read` already enumerates on this mount
+unaudited. Auditing a *browse* surface also dilutes the trail it is meant to protect: an operator
+paging a media picker would generate more rows in a minute than the four real disclosures do in a
+week. **Adding it later is purely additive** — a catalogued action and one line on the route. See
+[ADR-021](../ADR-021-ADMIN-MEDIA-LIBRARY.md) D-6.
+
+**`files.upload` is the first write path for files on this service, and it IS audited** — because
+it is a write, and every write here is. No exception argument was needed. The row matters more
+than most: jovi-mall stamps the file `ownerId: <X-Actor-Id>`, an id in *this* service's database
+that jovi-mall can never dereference, and it audits nothing on its own side because it
+authenticates a **service** rather than a person. This row is the only record of who uploaded it.
+
+⚠ **Support holds `content.articles.write` and not this**, so a Support administrator can fix a
+typo in a live article and cannot add a picture to it. That asymmetry is deliberate and matches
+the line every other `files.*` name draws; `test:files` § 5 pins it, because *"Support can already
+edit the article"* is exactly the argument that would widen it without anyone revisiting the
+enumeration question.
 
 ### `messaging`
 
@@ -414,17 +464,19 @@ name is not the same kind of thing as an ungranted one.
 
 ## Composite guards
 
-Thirteen endpoints require **more than one** permission (`all` mode) because they compose data
-from two or three domains. A caller missing any one of them is refused.
+**Fifteen** endpoints require **more than one** permission (`all` mode) because they compose
+data from two or three domains. A caller missing any one of them is refused.
 
 | Endpoint | Requires |
 |---|---|
 | `GET /users/:userId/activity` | `users.read` + `audit.read` |
 | `GET /vendors/:vendorId/activity` | `vendors.read` + `audit.read` |
+| `GET /vendors/:vendorId/agencies` | `vendors.read` + `agencies.read` |
 | `GET /agencies/:agencyId/activity` | `agencies.read` + `audit.read` |
 | `GET /agencies/:agencyId/agents` | `agencies.read` + `agents.read` |
 | `GET /agents/:agentId/activity` | `agents.read` + `audit.read` |
 | `GET /agents/:agentId/contracts` | `agents.read` + `agencies.read` |
+| `GET /contracts/:contractId` | `agencies.read` + `agents.read` |
 | `GET /orders/:orderId/activity` | `orders.read` + `audit.read` |
 | `GET /shipments/:shipmentId/activity` | `shipments.read` + `audit.read` |
 | `GET /shipments/:shipmentId/offers` | `shipments.read` + `agents.read` |
@@ -438,11 +490,23 @@ plan and a COD liability as well as earnings, so gating it on `money.earnings.re
 be a side door onto billing and COD data. **No `accounts` permission family exists**, and none
 should be added.
 
+`GET /contracts/:contractId` is composite for the same reason, and it is the argument for
+`/contracts` existing as its own mount at all: a contract's payload names a party from **each**
+directory — an agent and an agency — so holding one directory's read permission is not enough
+to see it. (This row was missing from the table until BR-012, and the count above read
+"Thirteen". admin-dash's own `ROUTE-MAP.md` and `MIGRATION-2026-08.md` § 8 — authored in
+`frontend/admin-dash/api-doc/`, not part of this tree — were both already right.)
+
 ### The one `any`-mode guard
 
 `GET /system/errors` accepts **any** of `developer_tools.logs.read`, `system.errors.read`,
 `support.errors.lookup` — and returns a *different projection* per level. See
 [system.md](system.md).
+
+**This one is not counted in the fifteen above**: fifteen `all`-mode guards plus this single
+`any`-mode one, sixteen in all. `GET /vendors/:vendorId/agencies` is the fifteenth, added by
+BR-018. ⚠ A page written before that says *fifteen* meaning "fourteen `all`-mode plus the
+`any`-mode one" — the same claim about a set one endpoint smaller.
 
 ---
 

@@ -49,6 +49,14 @@ export interface AdminArticleTranslationSummaryDto {
     title: string;
     metaTitle: string | null;
     excerpt: string;
+    /**
+     * Alt text for the article's shared cover, in this language. `null` until written.
+     *
+     * The editor needs it on the LIST as well as the detail, because it is the one field a
+     * publish can be refused for that is otherwise invisible from the inbox — see
+     * `collectPublishBlockers`.
+     */
+    coverAlt: string | null;
     wordCount: number;
     published: boolean;
     /**
@@ -76,6 +84,21 @@ interface AdminArticleBaseDto {
     updatedAt: string | null;
     archivedAt: string | null;
     availableLocales: ContentLocale[];
+    /**
+     * The language this article was written in first — the editor's **component driver**.
+     *
+     * ⚠ **Use this, never `translations[0]`.** The array's order is whatever the last write
+     * sent (`translations` is a full-array replace and nothing here reorders it), so a
+     * client that sorts it for display and sends it back repoints a positional driver
+     * without any request failing. This field is set once at create and never mutated, so
+     * it survives a reorder, a `$sort` somebody adds for tidiness, and a document rewrite.
+     * BR-019 § 1.
+     *
+     * **It always names a locale that is present in `translations`**, so a client can
+     * `find()` on it without a fallback. `null` only for an article with no translations at
+     * all, which the write schema does not permit.
+     */
+    sourceLocale: ContentLocale | null;
     createdBy: AdminAuthorStampDto | null;
     updatedBy: AdminAuthorStampDto | null;
     createdAt: string;
@@ -89,6 +112,20 @@ interface AdminArticleBaseDto {
     lastSavedAt: string;
 }
 
+/**
+ * ⚠ **The order of `translations` on both DTOs below is the order the last write sent, and
+ * nothing on this service reorders it.**
+ *
+ * That is a description, not a guarantee: `mergeTranslations` returns `incoming.map(…)`, so
+ * a `PATCH` carrying the array in a different order stores it in that order and every read
+ * repeats it. No projection, sort or canonical ordering touches it — the canonical-order
+ * list is `availableLocales`, which is a different field for a different question.
+ *
+ * So the array is stable **against this service** and not against its own clients, which is
+ * exactly the property that makes a positional driver a quiet failure. `sourceLocale` is
+ * what to derive an original language from.
+ */
+
 /** A row of the editor's inbox. Every translation, **without its body**. */
 export interface AdminArticleSummaryDto extends AdminArticleBaseDto {
     translations: AdminArticleTranslationSummaryDto[];
@@ -97,6 +134,34 @@ export interface AdminArticleSummaryDto extends AdminArticleBaseDto {
 /** One article, whole. */
 export interface AdminArticleDto extends AdminArticleBaseDto {
     translations: AdminArticleTranslationDto[];
+}
+
+/**
+ * Which language drives the editor's block inheritance.
+ *
+ * Two layers, and they answer two different questions:
+ *
+ *   1. `source_locale` — stored at create, never mutated. The real answer.
+ *   2. `translations[0].locale` — the answer for a document written before the field
+ *      existed. **Not a backfill and not a guess dressed up as one:** nothing seeds
+ *      articles, so every such document was created through this editor, whose create body
+ *      lists translations in the order they were written and which nothing has reordered
+ *      since. It is exactly the value `source_locale` would hold, derived the only way a
+ *      pre-existing document allows (D-5: this codebase writes no data migrations).
+ *
+ * The presence check is the third case, and it is the one a client cannot handle alone: a
+ * full-array replace may drop the source language entirely, leaving the stored value
+ * pointing at a translation that no longer exists. `source_locale` is still not rewritten —
+ * it is a record of what happened — but a DTO that named an absent locale would hand the
+ * editor a `find()` that returns `undefined`, so the read falls back to the first surviving
+ * translation and the field's promise ("always present in `translations`") holds.
+ */
+function sourceLocaleOf(article: ArticleDocument): ContentLocale | null {
+    const stored = article.source_locale ?? null;
+    if (stored && article.translations.some((translation) => translation.locale === stored)) {
+        return stored;
+    }
+    return article.translations[0]?.locale ?? null;
 }
 
 function toStampDto(stamp: AdminAuthorStamp | null | undefined): AdminAuthorStampDto | null {
@@ -119,6 +184,7 @@ function baseOf(article: ArticleDocument, author: ArticleAuthorDocument | null):
         updatedAt: article.content_updated_at ? article.content_updated_at.toISOString() : null,
         archivedAt: article.archived_at ? article.archived_at.toISOString() : null,
         availableLocales: availableLocalesOf(article),
+        sourceLocale: sourceLocaleOf(article),
         createdBy: toStampDto(article.created_by_admin),
         updatedBy: toStampDto(article.updated_by_admin),
         createdAt: article.createdAt.toISOString(),
@@ -135,6 +201,7 @@ function toTranslationSummary(
         title: translation.title,
         metaTitle: translation.meta_title ?? null,
         excerpt: translation.excerpt,
+        coverAlt: translation.cover_alt ?? null,
         wordCount: translation.word_count,
         published: translation.published,
         previousSlugs: [...translation.previous_slugs],

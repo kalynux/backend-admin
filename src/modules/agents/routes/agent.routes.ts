@@ -4,6 +4,7 @@ import { AgentController } from '../controllers/agent.controller';
 import { ListContractEventsQuerySchema } from '../../agencies/validators/agency.validator';
 import {
     AgentIdParamSchema,
+    AssignabilityQuerySchema,
     BanAgentSchema,
     EligibilityQuerySchema,
     ListAgentActivityQuerySchema,
@@ -21,9 +22,16 @@ import {
 /**
  * `/api/v1/agents` — delivery-agent administration.
  *
- * Fifteen routes. Eleven are the legacy surface ported (PHASE-0: "port faithfully"), and
- * four are new: the LIST that never existed, the contract list, the contract history, and
- * the administrative activity feed.
+ * EIGHTEEN routes. Eleven are the legacy surface ported (PHASE-0: "port faithfully"); four
+ * were new at that time (the LIST that never existed, the contract list, the contract history,
+ * and the administrative activity feed); two came with the geo-tracker DATA door at Phase 6.I
+ * (see the `═══ The geo-tracker DATA door ═══` block below); and one is the assignability
+ * diagnostic — the fourth verdict read delegated to jovi-mall.
+ *
+ * ⚠ This count said "Fifteen" until 2026-09-06 and had been wrong through two separate
+ * additions (DOC-PROGRAM F-62). Do not trust it over the router: `grep -c defineRoute` on this
+ * file, or `GET /api/v1/agents` in the live route dump, is the answer. A hand-kept count in a
+ * header is exactly the claim nobody revisits when the thing it counts grows.
  *
  * ── Route order is load-bearing here ─────────────────────────────────────────
  * `POST /transfer` is declared FIRST, above `/:agentId`. Express matches in declaration
@@ -120,11 +128,25 @@ defineRoute(router, {
     handler: AgentController.trackingPolicy,
 });
 
+/**
+ * ⚠ `agencies.read` joined this route at BR-016 § 2, with the slices' agency object.
+ *
+ * Same dependency the contract list one route above states, for the same reason: the rows
+ * now carry an agency's business name AND its account status, so `agents.read` alone would
+ * make this a second door onto the agency directory.
+ *
+ * **It costs nobody access, and the request that asked for the field assumed otherwise.**
+ * BR-016 § 2 argued the composition would degrade the screen "for anyone holding the
+ * narrower grant" — there is no such holder. Grants are per TIER, tier 2 is built as
+ * `union(SUPPORT, …)` and tier 1 is every permission, so all three tiers that hold
+ * `agents.read` hold `agencies.read` as well. The composition states the coupling so a
+ * future tier change cannot quietly open a side door; it does not narrow the audience.
+ */
 defineRoute(router, {
     mountedAt,
     method: 'get',
     path: '/:agentId/cod-allocation',
-    access: permission('agents.read'),
+    access: permission('agents.read', 'agencies.read'),
     validate: { params: AgentIdParamSchema },
     handler: AgentController.codAllocation,
 });
@@ -190,6 +212,28 @@ defineRoute(router, {
     access: permission('agents.read'),
     validate: { params: AgentIdParamSchema, query: EligibilityQuerySchema },
     handler: AgentController.eligibility,
+});
+
+/**
+ * The other half of `/eligibility` — the CONTRACT gates, which were diagnosable nowhere.
+ * See the controller for what it adds and why it is not folded into the route above.
+ *
+ * `agencies.read` joins it for the reason the contract list and `cod-allocation` both
+ * state: the payload names an agency and reports its contract's terms, so `agents.read`
+ * alone would make this a side door onto the agency directory. It costs nobody access —
+ * all three tiers holding `agents.read` hold `agencies.read`.
+ *
+ * Support holds both, deliberately. Explaining "why can't I assign my agent" to an agency
+ * IS the ticket this endpoint exists for, and routing it to tier 2 would mean escalating
+ * every one of them.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/:agentId/assignability',
+    access: permission('agents.read', 'agencies.read'),
+    validate: { params: AgentIdParamSchema, query: AssignabilityQuerySchema },
+    handler: AgentController.assignability,
 });
 
 /**

@@ -102,6 +102,20 @@ export const EligibilityQuerySchema = z.object({
     agencyId: objectId,
 }).strict();
 
+/**
+ * The assignability diagnostic's query.
+ *
+ * `agencyId` is required for the reason above — the answer is pairwise. `shipmentId` is
+ * NOT, and that asymmetry is deliberate: support reaches this endpoint having been told
+ * "I can't assign my agent", holding an agency and an agent and no shipment id at all.
+ * Requiring one would make the diagnostic unreachable at the moment it is wanted. With
+ * one, every gate runs; without, the two shipment-scoped gates report `skipped`.
+ */
+export const AssignabilityQuerySchema = z.object({
+    agencyId: objectId,
+    shipmentId: objectId.optional(),
+}).strict();
+
 export const AGENT_ACTIVITY_SORT = { occurredAt: 'occurred_at' } as const;
 
 /**
@@ -235,6 +249,7 @@ export const TransferAgentSchema = z
 export type SearchAgentsQuery = z.infer<typeof SearchAgentsQuerySchema>;
 export type ListContractsQuery = z.infer<typeof ListContractsQuerySchema>;
 export type EligibilityQuery = z.infer<typeof EligibilityQuerySchema>;
+export type AssignabilityQuery = z.infer<typeof AssignabilityQuerySchema>;
 export type ListAgentActivityQuery = z.infer<typeof ListAgentActivityQuerySchema>;
 export type SetAgentStatusBody = z.infer<typeof SetAgentStatusSchema>;
 export type ReviewAgentKycBody = z.infer<typeof ReviewAgentKycSchema>;

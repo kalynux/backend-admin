@@ -300,6 +300,11 @@ service is keeping a second opinion about a domain it does not own.
 
 ## D-9 · Error format
 
+> **Amended 2026-09-06 (Phase 16).** The shape below gained a **`category`** field, and it is
+> **always present**. [ADR-016](./ADR-016-ERROR-SYSTEM.md) made the nine-value taxonomy shared
+> across all three services; `category` is **derived** from `(code, statusCode)`, never annotated
+> at the throw site. The original block omitted it, which is what this amendment adds.
+
 ```json
 {
   "success": false,
@@ -308,6 +313,7 @@ service is keeping a second opinion about a domain it does not own.
     "code": "AUTHZ_PERMISSION_DENIED",
     "message": "You do not have permission to perform this action",
     "statusCode": 403,
+    "category": "authorization",
     "details": { "required": ["cod.remittances.confirm"], "mode": "all" }
   }
 }

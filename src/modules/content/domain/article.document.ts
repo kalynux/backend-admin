@@ -41,7 +41,9 @@ import { ArticleBody } from '../validators/article-body.validator';
  * | `content_updated_at`           | `null`  | "                           |
  * | `archived_at`                  | `null`  | "                           |
  * | `translations` / `slug_keys`   | `[]`    | "                           |
+ * | `source_locale`                | first translation's locale | **none — see below** |
  * | translation `meta_title`       | `null`  | `ArticleTranslationSchema`  |
+ * | translation `cover_alt`        | `null`  | " (per-locale, see below)   |
  * | translation `word_count`       | `0`     | " (derived, never accepted) |
  * | translation `published`        | `true`  | "                           |
  * | translation `previous_slugs`   | `[]`    | "                           |
@@ -52,14 +54,30 @@ import { ArticleBody } from '../validators/article-body.validator';
  * object.** Reading and writing it as `Record<locale, …>` through the driver is the same
  * bytes; constructing an actual `Map` and handing it to the driver is not, and would store
  * `{}`.
+ *
+ * ⚠ **`source_locale` is the one row above with no jovi-mall counterpart**, and the only
+ * field on this document that exists on the writer's side alone. That direction of the
+ * asymmetry is safe — see the field itself for why, and `platform-collections.ts` for why
+ * the OTHER direction is not.
  */
 
 // ─── Articles ────────────────────────────────────────────────────────────────
 
-/** A cover image. Optional — an article without one gets generated cover art on the site. */
+/**
+ * A cover image. Optional — an article without one gets generated cover art on the site.
+ *
+ * ⚠ **The alt text is NOT here.** It lives on each translation as `cover_alt`, because it is
+ * prose: one article is published in up to five languages off one image, and a single shared
+ * `alt` puts English words on the French page's `og:image` and into a French screen reader.
+ * Every other reader-facing string on this document is already per-locale; this one was the
+ * exception, and it was an oversight rather than a decision.
+ *
+ * The image itself stays shared. `url`, `width` and `height` are properties of the file, not
+ * of the prose, and duplicating them per locale would mean five uploads before an article
+ * could publish.
+ */
 export interface ArticleCover {
     url: string;
-    alt: string;
     /** Required, both of them: they reserve the box so a loading image does not shift the page. */
     width: number;
     height: number;
@@ -72,6 +90,17 @@ export interface ArticleTranslationDoc {
     meta_title: string | null;
     excerpt: string;
     body: ArticleBody;
+    /**
+     * Alt text for the article's shared cover image, in **this** language.
+     *
+     * `null` while unwritten, which is legal on a draft and refused at publish — see
+     * `collectPublishBlockers`. Only a translation that is actually going live needs one, so
+     * a drafted language does not block the languages beside it.
+     *
+     * Inline images inside `body` carry their own `alt` and always have: `body` is
+     * per-translation, so those were never the problem this field fixes.
+     */
+    cover_alt: string | null;
     /** Words in `body`, derived on write — never accepted from the editor. */
     word_count: number;
     /** Whether this language is live. A drafted language 404s until this flips. */
@@ -116,6 +145,37 @@ export interface ArticleDocument extends Document {
     archived_at: Date | null;
 
     translations: ArticleTranslationDoc[];
+
+    /**
+     * The language this article was written in FIRST — the editor's *component driver*.
+     *
+     * ⚠ **Stored rather than derived, and that is the entire point of the field.** The
+     * editor seeds a new language's blocks from the article's original one, and the only
+     * other way to know which language that is, is `translations[0]` — which is not a fact
+     * about the article. `translations` is a **full-array replace** (`mergeTranslations`
+     * returns `incoming.map(…)`, so the stored order is the order of whichever `PATCH` last
+     * sent it), and nothing rejects a reordered array. A client that sorts the array for
+     * display and sends it back has silently repointed the driver, and the failure is
+     * quiet: the editor then seeds new languages from the wrong source and flags
+     * correctly-translated blocks as untranslated. BR-019 § 1 is that question, asked.
+     *
+     * Set once, at create, from the first translation of the create body, and **never
+     * mutated** — not by a `PATCH`, not by adding a language, not by removing one. A field
+     * that moves is the thing it exists to replace.
+     *
+     * ⚠ **jovi-mall's `ArticleSchema` does not declare it, and must not need to.** Which
+     * language came first is an *editor* concern; the public reader resolves one locale
+     * from the URL and never asks. This direction of the asymmetry is safe only because
+     * jovi-mall has no runtime writer for `articles` — a Mongoose write with `strict` on
+     * would drop the field — and the dangerous direction is the other one, which
+     * `platform-collections.ts` describes.
+     *
+     * `null` on any document written before the field existed. Deliberately not backfilled:
+     * this is pre-production, and nothing seeds articles (jovi-mall's `seed:blog` writes the
+     * byline only), so those documents are ones a person created through this editor. The
+     * DTO answers for them — see `read-models/article.dto.ts`.
+     */
+    source_locale: ContentLocale | null;
 
     /**
      * `"<locale>:<slug>"` for every current **and** retired slug.
@@ -170,6 +230,13 @@ export function newArticleDocument(input: {
         archived_at: null,
 
         translations: input.translations,
+        // Derived HERE rather than taken as a parameter, for the reason every default in
+        // this function is here: the create body's first translation is the only definition
+        // of "the language this was written in", and a caller that had to pass it could
+        // pass something else. `?? null` covers nothing a validator allows —
+        // `TranslationsSchema` requires at least one — but BSON omits an `undefined` path,
+        // and a document missing this key is one the DTO cannot tell from a legacy one.
+        source_locale: input.translations[0]?.locale ?? null,
         slug_keys: input.slugKeys,
 
         created_by_admin: input.admin,

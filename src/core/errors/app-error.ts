@@ -140,6 +140,12 @@ export const DEFAULT_MESSAGES: Partial<Record<ErrorCode, string>> = {
     [ERROR_CODES.FILE_NOT_FOUND]: 'This file no longer exists',
     [ERROR_CODES.FILE_DELETE_NOT_CONFIRMED]:
         'Repeat the file id in the request body to confirm this permanent delete',
+    [ERROR_CODES.FILE_CONTENT_NOT_SUPPORTED]:
+        'This deployment’s storage provider cannot display file contents',
+    [ERROR_CODES.FILE_UPLOAD_NOT_MULTIPART]:
+        'An upload must be sent as multipart/form-data with a `files` field',
+    [ERROR_CODES.FILE_UPLOAD_TOO_LARGE]:
+        'This upload is larger than the administration upload limit',
     [ERROR_CODES.BLOG_ARTICLE_NOT_FOUND]: 'No article with this id',
     [ERROR_CODES.BLOG_ARTICLE_KEY_TAKEN]: 'An article already uses this id',
     [ERROR_CODES.BLOG_ARTICLE_NOT_PUBLISHABLE]: 'This article is not ready to publish',

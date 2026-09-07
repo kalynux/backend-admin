@@ -333,8 +333,48 @@ t.assert('snapshotOf produces the stored shape, with avatar_url null', () => {
         && built.name === 'Tier Three'
         && Object.keys(built).sort().join(',') === 'avatar_url,department,id,job_title,name,source,tier';
 });
-t.assert('no upload surface exists in this service — the reason the field stays null', () =>
-    !readCode(join(__dirname, '..', '..', 'src', 'modules', 'files')).some((f) => /multer|upload/i.test(f.code)));
+/**
+ * ⚠ **REPLACED 2026-08-25 (BR-015). The property still holds; the PROOF had to change.**
+ *
+ * This read:
+ *
+ *     !readCode('src/modules/files').some((f) => /multer|upload/i.test(f.code))
+ *
+ * — "no upload surface exists in this service" — and it was a fair proxy for
+ * "nothing can populate `avatarUrl`" only while it was true service-wide. **It is not any
+ * more:** decision L-2 deliberately built `POST /api/v1/files/upload`, a stream proxy that
+ * pipes a multipart body to jovi-mall so an administrator can attach an image to an article
+ * or a ticket. Eight files under `modules/files/` now match that grep, and the assertion
+ * went red for a change that does not touch this property at all.
+ *
+ * **What actually keeps `avatarUrl` null is narrower than "no uploads exist":**
+ * `admin_accounts` stores no avatar, and no administrator-facing surface accepts one. The
+ * new upload writes a `files` row in *jovi-mall* stamped `ownerType: 'admin'` — a platform
+ * file owned by an administrator — and touches administrator IDENTITY nowhere. `snapshotOf`
+ * still hardcodes `avatar_url: null`, which the assertion above proves directly by feeding
+ * it a stored value and watching it be ignored.
+ *
+ * So the scan is re-aimed at the three modules where an administrator-avatar surface would
+ * HAVE to live — the identity model, the administrator routes, and the file surface itself
+ * — and looks for the concept rather than for the transport. Comments are stripped by
+ * `readCode`, so the several prose mentions of "avatar" in those files (all about *platform*
+ * avatars this service resolves for other people) do not trip it.
+ *
+ * It still fails the day somebody builds one, which is the whole job. **Deleting it was the
+ * alternative and is worse**: the field would stay on the wire with nothing checking the
+ * reason it is null.
+ */
+t.assert('no administrator-AVATAR surface exists — the reason the field stays null', () => {
+    const src = join(__dirname, '..', '..', 'src', 'modules');
+    const guarded = ['admin-identity', 'administrators', 'files']
+        .flatMap((module) => readCode(join(src, module)));
+
+    // It is looking at something — a path typo would make this pass by reading nothing,
+    // which is exactly how a guard ends up never running.
+    if (guarded.length < 10) return false;
+
+    return !guarded.some((f) => /avatar/i.test(f.code));
+});
 
 /**
  * `availableActions` is DERIVED from the same two functions the service enforces with. A
@@ -610,6 +650,35 @@ t.assert('the owner lookup projects two fields — never the attachment row', ()
     && /ATTACHMENT_OWNER_PROJECTION = \{\s*_id: 1,\s*ticket_id: 1,\s*\}/.test(repoCode));
 t.assert('...so file_name and visible_to_user_ids never leave the database', () =>
     !repoCode.includes('file_name') && !repoCode.includes('visible_to_user_ids'));
+
+/**
+ * The attachment LIST is delegated for its `url` (ADR-018 D-4 — `storage.getPublicUrl` is
+ * machinery this service does not own), but `fileId` is a plain reference on the row, so it
+ * is read here and stamped on. Three things have to stay true for that to be safe:
+ *
+ *  - the stamp happens AFTER `loadScoped`, or it becomes a way to read attachment rows of a
+ *    ticket the caller may not see;
+ *  - the lookup is keyed on the TICKET, not on an attachment id a caller supplied;
+ *  - it uses its own repository, so the unscoped owner lookup's two-field projection above
+ *    stays two fields.
+ */
+const listBody = handlerBody('listAttachments') ?? '';
+
+t.assert('the attachment list is stamped with fileId', () => listBody.includes('withFileIds('));
+t.assert('...only after the scope has already let the ticket through', () =>
+    listBody.indexOf('loadScoped(') < listBody.indexOf('withFileIds('));
+
+/** The function ALONE — `deleteAttachment` names the other lookup, so a slice to EOF proves nothing. */
+const stampAt = controllerCode.indexOf('async function withFileIds');
+const stampBody = controllerCode.slice(stampAt, controllerCode.indexOf('\n}\n', stampAt));
+
+t.assert('the fileId lookup is keyed on the ticket, never on a caller-supplied attachment id', () =>
+    stampBody.includes('findFileIdsByTicket(ticketId)') && !stampBody.includes('findTicketIdByAttachment'));
+t.assert('...and rows keep the key even when nothing resolves, so a client need not branch', () =>
+    /fileId:/.test(stampBody) && stampBody.includes('null'));
+t.assert('the stamp reads through its OWN repository, leaving the owner projection at two fields', () =>
+    repoCode.includes('ATTACHMENT_FILE_PROJECTION')
+    && /ATTACHMENT_FILE_PROJECTION = \{\s*_id: 1,\s*ticket_id: 1,\s*file_id: 1,\s*\}/.test(repoCode));
 
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('8. Data access, and the two silent paths that must not be silent');

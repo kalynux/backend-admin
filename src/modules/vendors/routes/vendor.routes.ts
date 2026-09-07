@@ -4,6 +4,7 @@ import { VendorController } from '../controllers/vendor.controller';
 import {
     ApproveVendorKycSchema,
     ListVendorActivityQuerySchema,
+    ListVendorAgenciesQuerySchema,
     ListVendorProductsQuerySchema,
     RejectVendorKycSchema,
     SearchVendorsQuerySchema,
@@ -102,6 +103,30 @@ defineRoute(router, {
     access: permission('vendors.read'),
     validate: { params: VendorProductParamsSchema },
     handler: VendorController.product,
+});
+
+/**
+ * The delivery-agency connections, as rows rather than as the seven counts on the detail
+ * (BR-018). The mirror image of `/agencies/:agencyId/agents`, and a **direct read** — a
+ * connection document is a record, and ADR-004 D-2 as amended by ADR-009 D-1 / ADR-011 D-1
+ * says to read a record directly and delegate only a verdict.
+ *
+ * BOTH permissions, in `all` mode, for the reason the roster states in the other
+ * direction: the rows name agencies and carry their business names and commercial state,
+ * so gating on `vendors.read` alone would be a second door onto the agency directory.
+ * `/agents/:agentId/contracts` and `/shipments/:shipmentId/offers` are guarded the same
+ * way. Both tiers holding either hold both, so it costs nobody access.
+ *
+ * Declared above `/:vendorId/products/:productId` and below `/:vendorId/products` — no
+ * path here can shadow it, since `agencies` is a distinct second segment.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/:vendorId/agencies',
+    access: permission('vendors.read', 'agencies.read'),
+    validate: { params: VendorIdParamSchema, query: ListVendorAgenciesQuerySchema },
+    handler: VendorController.agencies,
 });
 
 /**

@@ -2,8 +2,8 @@ import { Router } from 'express';
 import { defineRoute, permission, records } from '../../../api/route-manifest';
 import { ContentArticleController, ContentAuthorController } from '../controllers/content.controller';
 import {
-    ArticleKeyParamSchema,
-    AuthorKeyParamSchema,
+    ArticleIdParamSchema,
+    AuthorIdParamSchema,
     CreateArticleSchema,
     CreateAuthorSchema,
     ListAuthorsQuerySchema,
@@ -25,11 +25,11 @@ import {
  *
  * ── One mount, two `:id` namespaces ───────────────────────────────────────────
  * jovi-mall served two routers at two prefixes so each kept its own `:id`. Here they are one
- * route group with two literal segments — `/articles/:articleKey`, `/authors/:authorKey` —
+ * route group with two literal segments — `/articles/:articleId`, `/authors/:authorId` —
  * which reads the same way in `docs/api/README.md`'s group list and needs no second mount.
  *
  * ── Route order ───────────────────────────────────────────────────────────────
- * `/authors` is a literal sibling of nothing (`:articleKey` lives under `/articles/`), so
+ * `/authors` is a literal sibling of nothing (`:articleId` lives under `/articles/`), so
  * unlike the support router there is no shadowing hazard here. The nesting is what removes
  * it; do not flatten these onto the root.
  *
@@ -39,8 +39,21 @@ import {
  * scope, because an article belongs to nobody. A Support administrator may fix a typo in
  * live prose and may not decide what the public sees, which is the shape D-2 asked for.
  *
- * ⚠ **Paths key on the stable string `key`**, not an ObjectId. `getting-paid-on-whatsapp`,
- * not a 24-hex value: the shared `objectId` validator would refuse every real id here.
+ * ⚠ **Paths key on a stable string, not an ObjectId.** `getting-paid-on-whatsapp`, not a
+ * 24-hex value: the shared `objectId` validator would refuse every real id here.
+ *
+ * ── The identifier is called `id`, everywhere ─────────────────────────────────
+ * These params used to be `:articleKey` / `:authorKey` while the payload called the very
+ * same string `id` / `authorId`. Nothing on the wire disagreed — a param name is not
+ * observable to a client — but the *documentation* did, and BR-014 is what that cost: the
+ * dashboard read "keys instead of ids" as a statement about the payload, built its whole
+ * `/content` module on `key`, and every create 400ed against `.strict()` while every list
+ * filter was silently stripped by a non-strict query schema.
+ *
+ * So the name is now the same in the path, in the payload and in the docs. `ArticleKeySchema`
+ * below keeps *its* name deliberately — it validates the string's FORMAT and is also what
+ * `authorId` is checked against, so it is not a param name and renaming it would say
+ * something false about its scope.
  */
 const router = Router();
 const mountedAt = '/content';
@@ -69,9 +82,9 @@ defineRoute(router, {
 defineRoute(router, {
     mountedAt,
     method: 'get',
-    path: '/articles/:articleKey',
+    path: '/articles/:articleId',
     access: permission('content.articles.read'),
-    validate: { params: ArticleKeyParamSchema },
+    validate: { params: ArticleIdParamSchema },
     handler: ContentArticleController.get,
 });
 
@@ -86,18 +99,18 @@ defineRoute(router, {
 defineRoute(router, {
     mountedAt,
     method: 'get',
-    path: '/articles/:articleKey/preview',
+    path: '/articles/:articleId/preview',
     access: permission('content.articles.read'),
-    validate: { params: ArticleKeyParamSchema, query: PreviewQuerySchema },
+    validate: { params: ArticleIdParamSchema, query: PreviewQuerySchema },
     handler: ContentArticleController.preview,
 });
 
 defineRoute(router, {
     mountedAt,
     method: 'patch',
-    path: '/articles/:articleKey',
+    path: '/articles/:articleId',
     access: permission('content.articles.write'),
-    validate: { params: ArticleKeyParamSchema, body: UpdateArticleSchema },
+    validate: { params: ArticleIdParamSchema, body: UpdateArticleSchema },
     audit: records('content.articles.update'),
     handler: ContentArticleController.update,
 });
@@ -114,9 +127,9 @@ defineRoute(router, {
 defineRoute(router, {
     mountedAt,
     method: 'post',
-    path: '/articles/:articleKey/publish',
+    path: '/articles/:articleId/publish',
     access: permission('content.articles.publish'),
-    validate: { params: ArticleKeyParamSchema, body: PublishArticleSchema },
+    validate: { params: ArticleIdParamSchema, body: PublishArticleSchema },
     audit: records('content.articles.publish'),
     handler: ContentArticleController.publish,
 });
@@ -124,9 +137,9 @@ defineRoute(router, {
 defineRoute(router, {
     mountedAt,
     method: 'post',
-    path: '/articles/:articleKey/unpublish',
+    path: '/articles/:articleId/unpublish',
     access: permission('content.articles.publish'),
-    validate: { params: ArticleKeyParamSchema, body: NoBodySchema },
+    validate: { params: ArticleIdParamSchema, body: NoBodySchema },
     audit: records('content.articles.unpublish'),
     handler: ContentArticleController.unpublish,
 });
@@ -134,9 +147,9 @@ defineRoute(router, {
 defineRoute(router, {
     mountedAt,
     method: 'post',
-    path: '/articles/:articleKey/archive',
+    path: '/articles/:articleId/archive',
     access: permission('content.articles.publish'),
-    validate: { params: ArticleKeyParamSchema, body: NoBodySchema },
+    validate: { params: ArticleIdParamSchema, body: NoBodySchema },
     audit: records('content.articles.archive'),
     handler: ContentArticleController.archive,
 });
@@ -152,9 +165,9 @@ defineRoute(router, {
 defineRoute(router, {
     mountedAt,
     method: 'delete',
-    path: '/articles/:articleKey',
+    path: '/articles/:articleId',
     access: permission('content.articles.delete'),
-    validate: { params: ArticleKeyParamSchema },
+    validate: { params: ArticleIdParamSchema },
     audit: records('content.articles.delete'),
     handler: ContentArticleController.remove,
 });
@@ -187,18 +200,18 @@ defineRoute(router, {
 defineRoute(router, {
     mountedAt,
     method: 'get',
-    path: '/authors/:authorKey',
+    path: '/authors/:authorId',
     access: permission('content.authors.read'),
-    validate: { params: AuthorKeyParamSchema },
+    validate: { params: AuthorIdParamSchema },
     handler: ContentAuthorController.get,
 });
 
 defineRoute(router, {
     mountedAt,
     method: 'patch',
-    path: '/authors/:authorKey',
+    path: '/authors/:authorId',
     access: permission('content.authors.write'),
-    validate: { params: AuthorKeyParamSchema, body: UpdateAuthorSchema },
+    validate: { params: AuthorIdParamSchema, body: UpdateAuthorSchema },
     audit: records('content.authors.update'),
     handler: ContentAuthorController.update,
 });
@@ -207,9 +220,9 @@ defineRoute(router, {
 defineRoute(router, {
     mountedAt,
     method: 'delete',
-    path: '/authors/:authorKey',
+    path: '/authors/:authorId',
     access: permission('content.authors.delete'),
-    validate: { params: AuthorKeyParamSchema },
+    validate: { params: AuthorIdParamSchema },
     audit: records('content.authors.delete'),
     handler: ContentAuthorController.remove,
 });

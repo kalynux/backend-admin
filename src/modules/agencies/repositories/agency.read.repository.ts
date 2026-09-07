@@ -282,6 +282,47 @@ export class AgencyReadRepository extends PlatformReadRepository<AgencyReadModel
     }
 
     /**
+     * The directory ROW for a page of agency ids — business name, contact name, status,
+     * country — batched into one query.
+     *
+     * ── Why a batched hydrate rather than a `$lookup` on the caller's list ─────
+     * `GET /vendors/:vendorId/agencies` (BR-018) needs the same four-field decoration
+     * `toAgentContractDto` puts on a contract row. It could join `delivery_agencies` and
+     * then `agency_magazins` from inside the connections aggregation — that is what
+     * `ContractReadRepository.agencyLookup()` does — but it would be a SECOND pipeline
+     * answering "what is this agency called", in a module that does not own agencies. The
+     * Magazin join is subtle enough (`preserveNullAndEmptyArrays` on both levels, `_id: 0`
+     * legal in the inner `$project` and fatal in the outer) that two copies of it is how
+     * two screens end up disagreeing.
+     *
+     * So the page is cut on its own index first and its agencies are hydrated here, in one
+     * indexed `$in` — the same shape `VendorController.search` uses to hydrate a page of
+     * stores, and bounded by `limit` for the same reason.
+     *
+     * The LIST projection, not the detail one: this is a decoration, not an agency record.
+     * A row whose agency was hard-deleted is simply absent from the map, and the caller
+     * renders `null` rather than dropping the connection — that broken state is exactly
+     * what an administrator opens the panel to find.
+     */
+    async findRowsByIds(ids: ObjectId[]): Promise<Map<string, AgencyReadModel>> {
+        if (ids.length === 0) return new Map();
+
+        const rows = await this.aggregatePage<AgencyReadModel>(
+            // One page, sized to the request. `aggregatePage` rather than `aggregateBy`
+            // because only the former applies this repository's own projection — the whole
+            // point of the base class, and the guarantee `aggregateBy` does not carry.
+            { page: 1, limit: ids.length, sort: { _id: 1 } },
+            {
+                match: [{ $match: { _id: { $in: ids } } }],
+                join: this.magazinLookup(),
+                project: KEEP_MAGAZIN,
+            },
+        );
+
+        return new Map(rows.items.map((row) => [row._id.toString(), row]));
+    }
+
+    /**
      * The join, in one place so the list and the detail cannot drift.
      *
      * `$unwind` with `preserveNullAndEmptyArrays` rather than a plain unwind: an agency

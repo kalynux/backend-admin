@@ -39,7 +39,9 @@ process.env.ADMIN_DASHBOARD_ORIGINS = 'http://localhost:5173';
 
 import {
     ApproveVendorKycSchema,
+    CONNECTION_STATUSES,
     ListVendorActivityQuerySchema,
+    ListVendorAgenciesQuerySchema,
     ListVendorProductsQuerySchema,
     RejectVendorKycSchema,
     SearchVendorsQuerySchema,
@@ -52,6 +54,10 @@ import {
 } from '../../src/modules/vendors/validators/vendor.validator';
 import { buildFilter } from '../../src/modules/vendors/repositories/vendor.read.repository';
 import { buildProductFilter } from '../../src/modules/vendors/repositories/vendor-product.read.repository';
+import {
+    buildConnectionFilter,
+    VENDOR_AGENCY_CONNECTION_SORT,
+} from '../../src/modules/vendors/repositories/vendor-context.read.repository';
 import { AUDIT_CATALOG, auditSpec, isAuditAction } from '../../src/modules/audit/domain/audit.catalog';
 import { subjectClassOf } from '../../src/modules/audit/domain/audit-subject';
 import { PERMISSION_CATALOG, permissionSpec } from '../../src/modules/authorization/domain/permission.catalog';
@@ -117,6 +123,9 @@ function conjuncts(filter: Record<string, unknown>): Record<string, unknown>[] {
 }
 
 const VENDOR_ID = '0123456789abcdef01234567';
+/** Two distinct agencies — the resolved-agency filter branches on which is the default. */
+const AGENCY_ID = '665c0011223344556677889a';
+const OTHER_AGENCY_ID = '665c0011223344556677889b';
 
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('1. The list query');
@@ -329,6 +338,226 @@ t.assert('⭐ VENDOR_PRODUCT_SORT is camelCase on both sides — products uses t
 
 t.assert('the vendor list sort is snake_case — vendors maps its timestamps', () =>
     VENDOR_SORT.createdAt === 'created_at' && VENDOR_SORT.updatedAt === 'updated_at');
+
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('3b. The delivery-agency connections (BR-018)');
+
+function connectionQuery(overrides: Record<string, unknown> = {}) {
+    return ListVendorAgenciesQuerySchema.parse(overrides) as never;
+}
+
+t.assert('paginates by default — page 1, 20 rows, newest first', () => {
+    const parsed = ListVendorAgenciesQuerySchema.parse({});
+    return parsed.page === 1 && parsed.limit === 20
+        && parsed.sort.field === 'createdAt' && parsed.sort.direction === -1;
+});
+
+t.assert('refuses a page size above the platform cap', () =>
+    throws(() => ListVendorAgenciesQuerySchema.parse({ limit: '101' })));
+
+t.assert('offers createdAt and status as sort keys, and nothing else', () => {
+    const keys = Object.keys(VENDOR_AGENCY_CONNECTION_SORT);
+    return keys.length === 2 && keys.includes('createdAt') && keys.includes('status')
+        && throws(() => ListVendorAgenciesQuerySchema.parse({ sort: 'productCount' }));
+});
+
+t.assert('the connection sort is snake_case — this collection maps its timestamps', () =>
+    VENDOR_AGENCY_CONNECTION_SORT.createdAt === 'created_at');
+
+/**
+ * ⭐ ADR-005 D-17: a vocabulary this service does not own is validated for SHAPE, not
+ * membership — the opposite call from `PRODUCT_STATUSES` above, and the same call
+ * `ListRosterQuerySchema` makes for contract status. A pinned copy here means a seventh
+ * `ConnectionStatus` added in jovi-mall is silently unfilterable until somebody remembers
+ * this file, and the failure mode of that drift is a filter that matches nothing.
+ */
+t.assert('⭐ status is bounded, not pinned — the vocabulary is jovi-mall’s', () =>
+    CONNECTION_STATUSES.every((status) =>
+        ListVendorAgenciesQuerySchema.parse({ status }).status === status)
+    && ListVendorAgenciesQuerySchema.parse({ status: 'a_seventh_status' }).status === 'a_seventh_status'
+    && throws(() => ListVendorAgenciesQuerySchema.parse({ status: '   ' })));
+
+t.assert('CONNECTION_STATUSES still lists jovi-mall’s six', () => {
+    const model = readCode(JOVI, 'modules', 'agency-connections', 'connection.model.ts');
+    return CONNECTION_STATUSES.length === 6
+        && CONNECTION_STATUSES.every((status) => model.includes(`'${status}'`));
+});
+
+t.assert('always scopes to the vendor in the path', () => {
+    const filter = buildConnectionFilter(VENDOR_ID, connectionQuery()) as Record<string, unknown>;
+    return 'vendor_id' in filter;
+});
+
+t.assert('every status by default — a rejected row is what the panel exists to explain', () => {
+    const filter = buildConnectionFilter(VENDOR_ID, connectionQuery()) as Record<string, unknown>;
+    return !('status' in filter);
+});
+
+t.assert('the status filter narrows without dropping the vendor scope', () => {
+    const filter = buildConnectionFilter(
+        VENDOR_ID, connectionQuery({ status: 'paused_reapproval' }),
+    ) as Record<string, unknown>;
+    return filter.status === 'paused_reapproval' && 'vendor_id' in filter;
+});
+
+t.assert('a malformed id matches nothing rather than throwing in the repository', () => {
+    const filter = buildConnectionFilter('not-an-id', {
+        page: 1, limit: 20, sort: { field: 'createdAt', direction: -1 },
+    }) as Record<string, unknown>;
+    return filter.vendor_id === 'not-an-id';
+});
+
+/**
+ * ⭐ The row read may only ADD to the four fields the counts already use.
+ *
+ * `aggregatePage` spreads the repository's own projection first and refuses an exclusion,
+ * so the narrow one stays the default. What this pins is the other half: the extras must
+ * not have quietly grown a whole-document grab.
+ */
+t.assert('⭐ status_history is projected nowhere — a list row does not carry a trail', () =>
+    MODULE_CODE.every((code) => !code.includes('status_history')));
+
+t.assert('the row extras are named individually, never as a whole document', () => {
+    const code = readCode(MODULE, 'repositories', 'vendor-context.read.repository.ts');
+    return code.includes('requester_role: 1')
+        && code.includes('paused_reason: 1')
+        && !/CONNECTION_ROW_EXTRAS[\s\S]{0,600}\$\$ROOT/.test(code);
+});
+
+/**
+ * ⭐ BR-006's distinction, on a third surface.
+ *
+ * `display_name` on a `delivery_agencies` row is a contact PERSON; the business name is
+ * the Magazin's. The dashboard reported a column headed "Agency" rendering a human's name
+ * because it was the only name on the payload, and the fix is worthless if the next DTO
+ * substitutes one for the other again.
+ */
+t.assert('⭐ businessName is the Magazin’s and contactName is display_name — never swapped', () => {
+    const dto = readCode(MODULE, 'read-models', 'vendor-agency-connection.dto.ts');
+    return /businessName:\s*agency\.magazin\?\.name\s*\?\?\s*null/.test(dto)
+        && /contactName:\s*agency\.display_name\s*\?\?\s*null/.test(dto);
+});
+
+t.assert('⭐ businessName falls back to null, never to "" and never to the contact name', () => {
+    const dto = readCode(MODULE, 'read-models', 'vendor-agency-connection.dto.ts');
+    return !/businessName:[^\n]*display_name/.test(dto)
+        && !/businessName:[^\n]*''/.test(dto);
+});
+
+/**
+ * ⭐ The `dispute` pattern from `GET /orders/:orderId`: an event that did not happen is
+ * `null`, not a block of null fields that reads as "unknown".
+ */
+t.assert('⭐ rejection, withdrawal and termination are whole objects or null', () => {
+    const dto = readCode(MODULE, 'read-models', 'vendor-agency-connection.dto.ts');
+    return ['rejection', 'withdrawal', 'termination'].every((field) =>
+        new RegExp(`${field}:\\s*${field}\\s*\\n?\\s*\\?`).test(dto))
+        && /:\s*null,\s*\n\s*(withdrawal|termination|createdAt)/.test(dto);
+});
+
+t.assert('reapproval stays a block — it is a STATE, not an event', () => {
+    const dto = readCode(MODULE, 'read-models', 'vendor-agency-connection.dto.ts');
+    return /reapproval:\s*\{\s*\n\s*requiredFrom:/.test(dto);
+});
+
+t.assert('the DTO maps field by field — no spread of a read model', () => {
+    const dto = readCode(MODULE, 'read-models', 'vendor-agency-connection.dto.ts');
+    return !/\.\.\.\s*(connection|agency)\b/.test(dto);
+});
+
+t.assert('no snake_case key reaches the wire shape', () => {
+    const dto = readCode(MODULE, 'read-models', 'vendor-agency-connection.dto.ts');
+    // Every `x_y:` in this file is a READ of jovi-mall's document; none may be a key of
+    // the returned object literal, which is what an assignment to a snake_case key is.
+    return !/^\s+[a-z]+_[a-z_]+:\s*(str|num|toIso|connection|agency)/m.test(dto);
+});
+
+// ── productCount: one aggregation for the page, never one count per row ──────
+
+t.assert('⭐ the tally is ONE $group, not a countDocuments per connection', () => {
+    const code = readCode(MODULE, 'repositories', 'vendor-product.read.repository.ts');
+    const method = code.slice(code.indexOf('async countByResolvedAgency'));
+    return method.includes('$group')
+        && !method.slice(0, method.indexOf('\n    }')).includes('countBy(');
+});
+
+t.assert('⭐ the tally pins deletedAt: null — a soft-deleted listing is not counted', () => {
+    const code = readCode(MODULE, 'repositories', 'vendor-product.read.repository.ts');
+    const method = code.slice(code.indexOf('async countByResolvedAgency'));
+    return /\$match:\s*\{\s*vendorId:[^}]*deletedAt:\s*null/.test(method);
+});
+
+t.assert('⭐ ONE definition of the resolved agency, shared by the DTO and the tally', () => {
+    const repo = readCode(MODULE, 'repositories', 'vendor-product.read.repository.ts');
+    const controller = readCode(MODULE, 'controllers', 'vendor.controller.ts');
+    return repo.includes('export function resolveDeliveryAgencyId')
+        // The controller's `effectiveAgencyId` must DELEGATE, not restate the `??` chain.
+        && /function effectiveAgencyId[\s\S]{0,300}resolveDeliveryAgencyId\(/.test(controller)
+        && !/function effectiveAgencyId[\s\S]{0,300}product\.delivery\?\.agency_id\?\.toString\(\)\s*\?\?/.test(controller)
+        && repo.includes('resolveDeliveryAgencyId(row._id');
+});
+
+// ── The drill-down: meta.total on the filtered page IS productCount ──────────
+
+t.assert('the products list accepts a deliveryAgencyId and refuses a malformed one', () =>
+    ListVendorProductsQuerySchema.parse({ deliveryAgencyId: VENDOR_ID }).deliveryAgencyId === VENDOR_ID
+    && throws(() => ListVendorProductsQuerySchema.parse({ deliveryAgencyId: 'nope' })));
+
+t.assert('⭐ filtering by a NON-default agency matches the override alone', () => {
+    const parts = conjuncts(buildProductFilter(
+        VENDOR_ID, productQuery({ deliveryAgencyId: AGENCY_ID }), OTHER_AGENCY_ID,
+    ) as Record<string, unknown>);
+    return parts.some((clause) => 'delivery.agency_id' in clause && !('$or' in clause));
+});
+
+/**
+ * ⭐ The whole reason the filter takes the vendor's default as context.
+ *
+ * Most products carry no override at all, so "the default agency's listings" has to
+ * include every product with no `delivery.agency_id`. Without this branch the column and
+ * the drill-down disagree on the common case — and `productCount` would be right while
+ * `meta.total` said zero.
+ */
+t.assert('⭐ filtering by the DEFAULT agency also matches products with no override', () => {
+    const parts = conjuncts(buildProductFilter(
+        VENDOR_ID, productQuery({ deliveryAgencyId: AGENCY_ID }), AGENCY_ID,
+    ) as Record<string, unknown>);
+    const branch = parts.find((clause) => Array.isArray(clause.$or));
+    const branches = branch?.$or as Record<string, unknown>[] | undefined;
+    return !!branches
+        && branches.length === 2
+        && branches.some((b) => b['delivery.agency_id'] === null);
+});
+
+t.assert('the agency filter never displaces the vendor scope or deletedAt', () => {
+    const parts = conjuncts(buildProductFilter(
+        VENDOR_ID, productQuery({ deliveryAgencyId: AGENCY_ID, search: 'x', mode: 'advanced' }), AGENCY_ID,
+    ) as Record<string, unknown>);
+    return parts.some((clause) => 'vendorId' in clause)
+        && parts.some((clause) => clause.deletedAt === null)
+        // Three `$or`-shaped clauses now coexist: mode, search and the resolved agency.
+        && parts.filter((clause) => Array.isArray(clause.$or)).length === 3;
+});
+
+/**
+ * The transport decision, pinned where it can be read.
+ *
+ * BR-018 proposed `Transport: Delegated`. It is a direct read, because a connection
+ * document is a RECORD and ADR-004 D-2 (as amended by ADR-009 D-1 / ADR-011 D-1) delegates
+ * only a verdict. The access table has said `read` since Phase 6; this asserts the handler
+ * actually honours it rather than reaching for the gateway.
+ */
+t.assert('⭐ vendor_agency_connections is read DIRECTLY, not delegated', () => {
+    const spec = (PLATFORM_COLLECTIONS as Record<string, { access: string; writes: string }>)
+        .vendor_agency_connections;
+    const controller = readCode(MODULE, 'controllers', 'vendor.controller.ts');
+    const handler = controller.slice(controller.indexOf('static agencies ='));
+    const body = handler.slice(0, handler.indexOf('\n    });'));
+    return spec?.access === 'read'
+        && spec.writes === 'internal-api'
+        && body.includes('connections.listForVendor(')
+        && !body.includes('gateway.');
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('4. The write bodies');
@@ -555,15 +784,16 @@ t.section('8. Routes, audit catalog and the access table');
 const vendorRouteDecls = routeManifest().filter((route) =>
     route.fullPath === '/api/v1/vendors' || route.fullPath.startsWith('/api/v1/vendors/'));
 
-// Eleven at Phase 6; twelve since the product detail landed.
-t.assert('twelve routes are declared', () => vendorRouteDecls.length === 12);
+// Eleven at Phase 6; twelve since the product detail landed; thirteen since the
+// agency-connections panel (BR-018).
+t.assert('thirteen routes are declared', () => vendorRouteDecls.length === 13);
 
 t.assert('every one carries a permission — none is public or self-service', () =>
     vendorRouteDecls.every((route) => route.access.kind === 'permission'));
 
-t.assert('the five reads need vendors.read', () => {
+t.assert('the six reads need vendors.read', () => {
     const reads = vendorRouteDecls.filter((route) => route.method === 'get');
-    return reads.length === 5 && reads.every((route) =>
+    return reads.length === 6 && reads.every((route) =>
         route.access.kind === 'permission' && route.access.permissions.includes('vendors.read'));
 });
 
@@ -596,6 +826,28 @@ t.assert('...and it is served through the gateway, not a repository', () => {
     const controller = readCode(SRC, 'modules', 'vendors', 'controllers', 'vendor.controller.ts');
     const handler = controller.slice(controller.indexOf('static product ='));
     return handler.startsWith('static product =') && handler.includes('gateway.product(');
+});
+
+/**
+ * ⭐ The connections panel needs `agencies.read` as well (BR-018).
+ *
+ * The rows name agencies and carry their business names, contact people and commercial
+ * state, so `vendors.read` alone would be a second door onto the agency directory —
+ * the same rule `/agencies/:agencyId/agents`, `/agents/:agentId/contracts` and
+ * `/shipments/:shipmentId/offers` each state from their own side.
+ */
+t.assert('⭐ the agency-connections panel needs agencies.read too, in `all` mode', () => {
+    const route = vendorRouteDecls.find((r) => r.fullPath.endsWith('/:vendorId/agencies'));
+    return !!route && route.access.kind === 'permission'
+        && route.access.mode === 'all'
+        && route.access.permissions.length === 2
+        && route.access.permissions.includes('vendors.read')
+        && route.access.permissions.includes('agencies.read');
+});
+
+t.assert('...and it is not audited — a business relationship is not a disclosure', () => {
+    const route = vendorRouteDecls.find((r) => r.fullPath.endsWith('/:vendorId/agencies'));
+    return !!route && route.method === 'get' && route.audit === null;
 });
 
 t.assert('⭐ the activity feed needs audit.read as well, in `all` mode', () => {

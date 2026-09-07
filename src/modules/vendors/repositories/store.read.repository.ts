@@ -87,6 +87,34 @@ export class StoreReadRepository extends PlatformReadRepository<StoreReadModel> 
     }
 
     /**
+     * The BUSINESS name only, for a page of vendor ids — `vendor_id` → `stores.name`.
+     *
+     * ── How this differs from `findForVendors`, and why both exist ─────────────
+     * That one hydrates a directory row and hands back the whole Store: branding file ids,
+     * the description, three support contacts. This one feeds a *decoration* — an actor's
+     * name on an order timeline, a vendor's name on a shipment's order card — where loading
+     * a support phone number to print a shop name is reading more than the screen asked for.
+     *
+     * ⚠ **`stores.name`, never `vendors.display_name`.** The latter is the vendor's
+     * PERSONAL name; `vendor.model.ts` says so at the field ("the public BUSINESS name …
+     * live on the vendor's Store"). Substituting it would print a human under a heading that
+     * says the business — the mislabelling BR-006 corrected one directory over.
+     *
+     * `null` where a vendor has no Store row at all, which is a vendor mid-onboarding.
+     * `null`, never `''`, and never the id.
+     */
+    async findNamesByVendorIds(vendorIds: ObjectId[]): Promise<Map<string, string | null>> {
+        if (vendorIds.length === 0) return new Map();
+
+        const rows = await this.findBy({ vendor_id: { $in: vendorIds } } as Filter<StoreReadModel>, {
+            projection: { _id: 0, vendor_id: 1, name: 1 },
+            limit: vendorIds.length,
+        });
+
+        return new Map(rows.map((row) => [row.vendor_id.toString(), row.name ?? null]));
+    }
+
+    /**
      * Vendor ids whose business name matches, capped.
      *
      * Returns `{ ids, truncated }` rather than a bare array: the caller has to be able to

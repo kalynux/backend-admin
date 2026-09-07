@@ -23,13 +23,16 @@ import {
     VendorSettingsReadRepository,
 } from '../repositories/vendor-context.read.repository';
 import {
+    resolveDeliveryAgencyId,
     VendorProductReadModel,
     VendorProductReadRepository,
 } from '../repositories/vendor-product.read.repository';
+import { toVendorAgencyConnectionDto } from '../read-models/vendor-agency-connection.dto';
 import { VendorReadModel, VendorReadRepository } from '../repositories/vendor.read.repository';
 import { toVendorPoliciesDto } from '../read-models/vendor-policies.dto';
 import {
     ListVendorActivityQuery,
+    ListVendorAgenciesQuery,
     ListVendorProductsQuery,
     RejectVendorKycBody,
     SearchVendorsQuery,
@@ -156,7 +159,11 @@ function effectiveAgencyId(
     product: VendorProductReadModel,
     vendorDefaultAgencyId: string | null,
 ): string | null {
-    return product.delivery?.agency_id?.toString() ?? vendorDefaultAgencyId;
+    // The rule itself lives in the repository, where the `$group` behind `productCount`
+    // also reaches it. Two definitions of "which agency answers for this listing" is how
+    // the catalogue tab and the connections panel end up disagreeing about the same
+    // forty-two products.
+    return resolveDeliveryAgencyId(product.delivery?.agency_id, vendorDefaultAgencyId);
 }
 
 function toProductDto(
@@ -501,16 +508,26 @@ export class VendorController {
         // sell nothing" rather than "no such vendor".
         const { vendor } = await loadOr404(req.params.vendorId);
 
-        const page = await products.search(req.params.vendorId, {
-            search: query.search,
-            status: query.status,
-            type: query.type,
-            mode: query.mode,
-            suspensionReason: query.suspensionReason,
-            page: query.page,
-            limit: query.limit,
-            sort: query.sort,
-        });
+        const vendorDefaultAgencyId = vendor.default_delivery_agency_id?.toString() ?? null;
+
+        const page = await products.search(
+            req.params.vendorId,
+            {
+                search: query.search,
+                status: query.status,
+                type: query.type,
+                mode: query.mode,
+                suspensionReason: query.suspensionReason,
+                deliveryAgencyId: query.deliveryAgencyId,
+                page: query.page,
+                limit: query.limit,
+                sort: query.sort,
+            },
+            // The filter matches the RESOLVED agency, and resolution needs the vendor's
+            // default: asking for the default agency's listings must include every product
+            // that names no agency of its own. See `buildProductFilter`.
+            vendorDefaultAgencyId,
+        );
 
         /**
          * One batched name lookup for the whole page, not one per row.
@@ -520,7 +537,6 @@ export class VendorController {
          * the domain, so it is batched on principle: the moment somebody adds per-product
          * agencies at scale, an unbatched version becomes twenty queries silently.
          */
-        const vendorDefaultAgencyId = vendor.default_delivery_agency_id?.toString() ?? null;
         const agencyIds = [
             ...new Set(
                 page.items
@@ -533,6 +549,84 @@ export class VendorController {
         sendPaginated(
             res,
             page.items.map((product) => toProductDto(product, vendorDefaultAgencyId, agencyNames)),
+            toPageMeta(page.total, page.page, page.limit),
+        );
+    });
+
+    /**
+     * GET /api/v1/vendors/:vendorId/agencies — the delivery-agency connections, as rows.
+     *
+     * ── The mirror image of the agency roster (BR-018) ────────────────────────
+     * `GET /agencies/:agencyId/agents` answers *"who works for this agency, and on what
+     * terms"*. This answers the same question from the other side: *"which agencies does
+     * this vendor ship through, and on what terms"*. Before it, `GET /vendors/:vendorId`
+     * reported `counts.agencyConnections` — seven integers — and an operator could see
+     * that six connections were active without being able to see which six. These rows are
+     * that same population, one document each.
+     *
+     * ── Why it is a DIRECT read, when the request proposed delegation ─────────
+     * A connection document is a RECORD, and ADR-004 D-2 as amended by ADR-009 D-1 /
+     * ADR-011 D-1 says to read a record directly and delegate only a verdict.
+     * `vendor_agency_connections` has been `access: 'read'` in the platform access table
+     * since Phase 6 — `counts.agencyConnections` and the agency detail's
+     * `policyVersionPausedConnections` both already read it. Every WRITE stays delegated,
+     * and there the reason is concrete rather than precautionary: a status change on one
+     * of these rows suspends or restores the vendor's products in the same transaction.
+     *
+     * ── Why BOTH permissions, in `all` mode ───────────────────────────────────
+     * `vendors.read` because the subject is a vendor, and `agencies.read` because the rows
+     * name agencies and carry their business names, contact people and commercial state.
+     * Requiring only the first would make this a second door onto the agency directory
+     * that bypasses the permission governing it — the same rule
+     * `/agencies/:agencyId/agents`, `/agents/:agentId/contracts` and
+     * `/shipments/:shipmentId/offers` each state in their own direction. Both tiers
+     * holding either hold both, so it costs nobody access; it states the dependency so a
+     * future tier change cannot quietly open a side door.
+     *
+     * ── Three queries, and why not one ────────────────────────────────────────
+     * The page comes off `{ vendor_id, status }`; the page's agencies are hydrated in one
+     * batched `$in`; the product tally is ONE aggregation over the whole catalogue rather
+     * than a count per row. All three are bounded — the first two by `limit`, the third by
+     * one vendor's listings — and the count is what BR-018 asked us to decide. Nine
+     * `countDocuments` for a nine-row page was the shape to avoid.
+     */
+    static agencies = asyncHandler(async (req: Request, res: Response) => {
+        const query = req.query as unknown as ListVendorAgenciesQuery;
+
+        // 404 first: an empty connection list for a vendor that does not exist reads as
+        // "they ship through nobody" rather than "no such vendor".
+        const { vendor } = await loadOr404(req.params.vendorId);
+        const vendorDefaultAgencyId = vendor.default_delivery_agency_id?.toString() ?? null;
+
+        const page = await connections.listForVendor(req.params.vendorId, {
+            status: query.status,
+            page: query.page,
+            limit: query.limit,
+            sort: query.sort,
+        });
+
+        const agencyIds = page.items
+            .map((connection) => connection.agency_id)
+            .filter((id): id is ObjectId => id !== undefined && id !== null);
+
+        // The tally runs unconditionally rather than only when the page is non-empty: it
+        // is one aggregation either way, and a `page=9` request on a nine-row list would
+        // otherwise take a different code path from `page=1`.
+        const [agencyRows, productCounts] = await Promise.all([
+            agencies.findRowsByIds(agencyIds),
+            products.countByResolvedAgency(req.params.vendorId, vendorDefaultAgencyId),
+        ]);
+
+        sendPaginated(
+            res,
+            page.items.map((connection) =>
+                toVendorAgencyConnectionDto(
+                    connection,
+                    agencyRows.get(connection.agency_id?.toString() ?? ''),
+                    vendorDefaultAgencyId,
+                    productCounts,
+                ),
+            ),
             toPageMeta(page.total, page.page, page.limit),
         );
     });

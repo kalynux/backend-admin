@@ -475,7 +475,23 @@ t.assert('every write in the gateway is wrapped in an audit intent', () => {
  */
 t.assert('every delegated path exists in jovi-mall’s admin agent router', () => {
     const gateway = readCode(...AGENT_GATEWAY);
-    const router = read(JOVI, 'modules', 'agents', 'routes', 'admin-agent.routes.ts');
+
+    /**
+     * ⚠ TWO routers serve `/api/internal/admin/agents` over there, and reading only the
+     * first is how this assertion silently stopped covering a route.
+     *
+     * `assignability` is declared in `shipment-assignment/admin-assignability.routes.ts`
+     * because its handler composes eligibility with the contract gates, and putting the
+     * route in the agents module would close an import cycle (that module already imports
+     * agents). Express tries routers at a shared prefix in order, so the URL is identical
+     * and nothing here could tell the difference — which is exactly why the SCAN has to
+     * know. Same widening `test:devtools` needed when the geo-tracker DATA client landed
+     * beside the OPS one and `geo-tracker\.client` stopped matching it.
+     */
+    const routers = [
+        read(JOVI, 'modules', 'agents', 'routes', 'admin-agent.routes.ts'),
+        read(JOVI, 'modules', 'shipment-assignment', 'admin-assignability.routes.ts'),
+    ].join('\n');
 
     const paths = [...gateway.matchAll(/path:\s*[`'](\/agents[^`']*)[`']/g)]
         .map((m) => m[1])
@@ -483,12 +499,28 @@ t.assert('every delegated path exists in jovi-mall’s admin agent router', () =
         .map((p) => p.replace('/agents', '').replace(/\$\{agentId\}/g, ':agentId'))
         .filter((p) => p.length > 0);
 
-    return paths.length > 0 && paths.every((p) => router.includes(`'${p}'`));
+    return paths.length > 0 && paths.every((p) => routers.includes(`'${p}'`));
 });
 
+/**
+ * Both mounts, and the ORDER between them.
+ *
+ * The assignability router must be mounted at the same prefix for its URL to resolve at
+ * all. It is asserted after the agent router rather than merely present because that is
+ * the arrangement reasoned about: `/:agentId` is one segment and can never shadow
+ * `/:agentId/assignability`, but a future literal route added to the first router could,
+ * and the order is what keeps the argument true.
+ */
 t.assert('jovi-mall mounts the agent router internally for this service to reach', () => {
     const mounts = read(JOVI, 'api', 'routes', 'internal-admin.routes.ts');
     return mounts.includes("router.use('/agents', buildAdminAgentRouter([requireAdminCaller]))");
+});
+
+t.assert('…and mounts the assignability router at the same prefix, after it', () => {
+    const mounts = read(JOVI, 'api', 'routes', 'internal-admin.routes.ts');
+    const agent = mounts.indexOf("router.use('/agents', buildAdminAgentRouter([requireAdminCaller]))");
+    const assign = mounts.indexOf("router.use('/agents', buildAdminAssignabilityRouter([requireAdminCaller]))");
+    return agent > -1 && assign > agent;
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -496,8 +528,23 @@ t.section('6. Routes, permissions and the audit catalog');
 
 const agentRoutes = routeManifest().filter((r) => r.fullPath.startsWith('/api/v1/agents'));
 
-/** Fifteen at Phase 5, plus the two geo-tracker data reads at Phase 6.I (ADR-020). */
-t.assert('seventeen agent routes are registered', () => agentRoutes.length === 17);
+/**
+ * Fifteen at Phase 5, plus the two geo-tracker data reads at Phase 6.I (ADR-020), plus the
+ * assignability diagnostic at Phase 6.J.
+ */
+t.assert('eighteen agent routes are registered', () => agentRoutes.length === 18);
+
+t.assert('assignability is a GET under agents.read + agencies.read, and is not audited', () => {
+    const route = agentRoutes.find((r) => r.fullPath === '/api/v1/agents/:agentId/assignability');
+    if (!route || route.access.kind !== 'permission') return false;
+    // Not audited, and that is consistent rather than an omission: the two audited reads on
+    // this surface are audited because they disclose a person's live COORDINATES (ADR-020
+    // D-5). This discloses a cash position to a tier that already holds `agents.read`.
+    return route.method === 'get'
+        && route.access.permissions.includes('agents.read')
+        && route.access.permissions.includes('agencies.read')
+        && !route.audit;
+});
 
 t.assert('the two tracking reads are declared, and neither is a mutation', () => {
     const presence = agentRoutes.find((r) => r.fullPath.endsWith('/tracking-presence'));

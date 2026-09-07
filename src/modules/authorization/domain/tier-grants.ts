@@ -122,6 +122,29 @@ const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
     'files.resolve',
 
     /**
+     * Opening the file itself — and the reasoning above does **not** stretch to cover it,
+     * which is why it is a second name rather than part of the first (BR-011).
+     *
+     * `files.resolve` discloses a name and a size. This discloses **the picture**, and for
+     * a private tree that means a delivery-proof photograph: a place, a time, usually a
+     * residence, sometimes a person. Resolving is the second half of a read the caller
+     * already made; opening is a new disclosure.
+     *
+     * It is here anyway, and for the same reason `agents.tracking.read` is: "the courier
+     * says they delivered it and I never got it" is a Support ticket, the proof photo is
+     * the answer to it, and a Support agent who cannot see it escalates a ticket to
+     * somebody who knows less about it than they do.
+     *
+     * **What bounds it is not this grant — it is the record.** Every read commits an audit
+     * row BEFORE the bytes are fetched, and the write is not caught, so with the audit
+     * store unreachable nothing is disclosed. That is the
+     * `money.payouts.destination.read` posture, applied one tier lower because the
+     * question is one tier lower — the same trade, and the same wording, as the tracking
+     * grants above. Widening the audience and adding the record were one decision.
+     */
+    'files.content.read',
+
+    /**
      * Gateway settlements. "Did my payment go through, and was I refunded" is one of the
      * commonest things a ticket asks, and answering it from the order alone is guesswork —
      * `payment_status` says what the order believes, not what the gateway did.

@@ -299,13 +299,38 @@ export function toContractDetailDto(contract: ContractReadModel) {
  * agency documents: `agent_membership_events` predates that convention and jovi-mall
  * writes `actor_role: 'admin'` there instead. Read the role, not the id — an `admin` row's
  * id belongs to the wi-admin database and resolves to nothing in `jovi_mall`.
+ *
+ * ── `agent` is a NAME, and `actorUserId` is still left alone (BR-016 § 1) ────
+ * The row is ABOUT an agent and the screen is a table of them, so `agentId` alone made the
+ * feed a column of 24-hex ids. The names are resolved for the page AFTER skip/limit, in one
+ * batched read — the same bound the roster and the agent's contract list already accept for
+ * the same reason.
+ *
+ * ⚠ **`name`, not `businessName`.** An agent is a PERSON. `toAgentContractDto` above
+ * carries a business name because an agency is a business; mirroring that shape here would
+ * print a company under a column headed "Agent", the same class of mistake as the
+ * `contactName` one BR-006 corrected.
+ *
+ * `actorUserId` is deliberately NOT resolved beside it, and the paragraph above is why: an
+ * `admin` row's actor id belongs to a different database, and the other three roles write
+ * ids from three different collections. The AGENT is the subject of the row and is
+ * unambiguous; the ACTOR is not.
+ *
+ * `agent` is `null` when the batch did not resolve the id — a row pointing at an agent that
+ * no longer exists. That is a broken state and precisely the one an administrator opens this
+ * feed to find, so the row survives rather than being dropped or given a fabricated label.
  */
-export function toContractEventDto(event: ContractEventReadModel) {
+export function toContractEventDto(
+    event: ContractEventReadModel,
+    agentNames: Map<string, string | null> = new Map(),
+) {
+    const agentId = event.agent_id?.toString() ?? '';
     return {
         id: event._id.toString(),
         contractId: event.membership_id?.toString() ?? null,
-        agentId: event.agent_id?.toString() ?? '',
+        agentId,
         agencyId: event.agency_id?.toString() ?? '',
+        agent: agentNames.has(agentId) ? { id: agentId, name: agentNames.get(agentId) ?? null } : null,
         type: event.type,
         fromStatus: event.from_status ?? null,
         toStatus: event.to_status ?? null,

@@ -268,3 +268,56 @@ export class TicketAttachmentReadRepository extends PlatformReadRepository<Ticke
         return found?.ticket_id ? found.ticket_id.toString() : null;
     }
 }
+
+/**
+ * The second field of an attachment this service reads: which FILE it points at.
+ *
+ * ── Why this is a separate repository from the owner lookup above ─────────────
+ * Not tidiness — the two reads answer to different rules and must keep different
+ * whitelists. `TicketAttachmentReadRepository` is deliberately **unscoped**, so its
+ * projection is pinned at two fields and nothing may be added to it: whatever it returns,
+ * it returns for any attachment on the platform. This read is the opposite shape — it is
+ * reached only after `loadScoped` has already proved the caller may see the ticket, and it
+ * is keyed on the TICKET rather than on an attachment id somebody guessed.
+ *
+ * Widening the owner projection to serve this would have merged the two, leaving one
+ * whitelist governed by the weaker of the two rules. A second class keeps the declaration
+ * where the base class wants it (the constructor) and keeps `test:support`'s pin on the
+ * owner projection meaningful.
+ *
+ * ── Why `file_id` is not new disclosure ───────────────────────────────────────
+ * The delegated row this decorates already carries the file's public `url`. The id is the
+ * handle for the same object, and jovi-mall's own attach route takes it as input.
+ */
+export interface TicketAttachmentFileRead extends Document {
+    _id: ObjectId;
+    ticket_id: ObjectId;
+    file_id: ObjectId;
+}
+
+const ATTACHMENT_FILE_PROJECTION = {
+    _id: 1,
+    ticket_id: 1,
+    file_id: 1,
+} as const;
+
+export class TicketAttachmentFileReadRepository extends PlatformReadRepository<TicketAttachmentFileRead> {
+    constructor() {
+        super(COLLECTIONS.TICKET_ATTACHMENT, ATTACHMENT_FILE_PROJECTION);
+    }
+
+    /**
+     * `attachmentId -> fileId` for one ticket, as strings.
+     *
+     * Every attachment of the ticket, not only the ones a given viewer may see: the filtering
+     * already happened in jovi-mall, which served the list this map decorates, and an entry
+     * with no row to attach to is simply never looked up. Scoping it twice, with a second
+     * copy of a visibility rule this service does not own, is the thing to avoid.
+     *
+     * jovi-mall hard-deletes attachments, so — as above — there is no `deletedAt` to filter.
+     */
+    async findFileIdsByTicket(ticketId: string): Promise<Map<string, string>> {
+        const rows = await this.findBy({ ticket_id: new ObjectId(ticketId) } as Filter<TicketAttachmentFileRead>);
+        return new Map(rows.map((row) => [row._id.toString(), row.file_id.toString()]));
+    }
+}

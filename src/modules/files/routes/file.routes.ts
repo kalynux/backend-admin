@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { defineRoute, permission, records } from '../../../api/route-manifest';
-import { FileController } from '../controllers/file.controller';
+import { FileController, FileLibraryController } from '../controllers/file.controller';
 import {
     FileIdParamSchema,
+    FileLibraryQuerySchema,
     HardDeleteFileBodySchema,
     OrphansQuerySchema,
     ResolveFilesQuerySchema,
@@ -41,9 +42,10 @@ import {
  * version is that a listing on this mount needs its own permission.
  *
  * ── Audit ────────────────────────────────────────────────────────────────────
- * The three reads are not audited (ADR-006 D-5), and the one audited read on this service
- * is the payout destination, where the disclosure is itself the action. `files.delete` is
- * audited and is the only unrecoverable operation on this service's whole surface.
+ * The three metadata reads are not audited (ADR-006 D-5). `GET /:fileId/content` is —
+ * opening a private file IS the disclosure, which is the same test that made the payout
+ * destination and the two tracking reads exceptions. `files.delete` is audited and is the
+ * only unrecoverable operation on this service's whole surface.
  */
 const router = Router();
 const mountedAt = '/files';
@@ -83,6 +85,67 @@ defineRoute(router, {
     handler: FileController.listOrphans,
 });
 
+/**
+ * The MEDIA LIBRARY — the second listing on this mount (BR-015).
+ *
+ * ⚠ **Declared BEFORE `/:fileId`, for the same reason `/orphans` is**, and `test:files`
+ * asserts both. A `/:fileId` above this one swallows `/library`: the request reaches
+ * `FileController.get`, fails the 24-hex param schema, and answers a 400 about a malformed
+ * id for a route that exists and that the caller is permitted to reach.
+ *
+ * ⚠ **The first read on this mount that is NOT delegated.** Every other route here goes to
+ * jovi-mall; this one reads `jovi_mall.files` and `file_references` directly (L-1), because
+ * the answer is a RECORD rather than a verdict (ADR-009 D-1) and because the two things the
+ * screen exists for — the usage join and the owner NAME — are things jovi-mall's own
+ * listing cannot do. The `admin` owner name resolves in *this* service's database, which
+ * jovi-mall cannot read at all.
+ *
+ * Tiers 1 and 2 — `allInFamily('files')` sweeps it into Admin, and no flag keeps a read
+ * out. The same line `files.orphans.read` draws: Support does not enumerate files.
+ *
+ * **Not audited** (L-5). The dashboard asked for a row per listing on the argument that
+ * this route enumerates; declined, because ADR-006 D-5's exception test is "the output IS
+ * the disclosure" and metadata fails it, and because `/orphans` already enumerates here
+ * unaudited. See `permission.catalog.ts` — adding it later is additive.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/library',
+    access: permission('files.library.read'),
+    validate: { query: FileLibraryQuerySchema },
+    handler: FileLibraryController.library,
+});
+
+/**
+ * The UPLOAD — the first write path for files on this service (BR-015).
+ *
+ * ⚠ **Declared before `/:fileId` as well.** It cannot actually collide with it — `POST` is
+ * a different method from the `GET` above — but the assertion in `test:files` reads the
+ * whole declaration order rather than per-method order, and a literal segment sitting below
+ * a parameter is a pattern nobody should have to re-derive as safe each time.
+ *
+ * ⚠ **No `validate.body`, and its absence is deliberate rather than an omission.** The body
+ * is `multipart/form-data` and this service never PARSES one (ADR-021 D-2): it is piped to
+ * jovi-mall unread. A `body:` schema here would be handed `{}` — Express's default for a
+ * request no parser matched — and would either pass meaninglessly or reject every upload.
+ * The two things that CAN be checked without parsing, the content type and the byte count,
+ * are checked in the controller and in `platformUpload`.
+ *
+ * Tiers 1 and 2, and **audited** (L-6) — it is a write, and every write on this service is
+ * audited. The row is the only place the acting administrator is named: jovi-mall stamps
+ * `ownerId` with a `wi_admin.admin_accounts._id` it can never dereference, and audits
+ * nothing on its own side because it authenticates a service rather than a person.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/upload',
+    access: permission('files.upload'),
+    audit: records('files.upload'),
+    handler: FileLibraryController.upload,
+});
+
 /** The single form, for a detail screen. 404s on an id that resolves to nothing. */
 defineRoute(router, {
     mountedAt,
@@ -91,6 +154,41 @@ defineRoute(router, {
     access: permission('files.resolve'),
     validate: { params: FileIdParamSchema },
     handler: FileController.get,
+});
+
+/**
+ * The BYTES — the one route here that answers no envelope (BR-011).
+ *
+ * ⚠ **`files.content.read`, deliberately NOT `files.resolve`.** The header above explains
+ * why resolve is grantable to every tier: the caller already holds the id, so it discloses
+ * nothing they did not have. **That reasoning stops at the metadata.** Resolving gives a
+ * name and a size; this gives the *picture* — and for `shipments/` that is a photograph of
+ * somebody's front door, while for `digital/` it is a vendor's saleable product. Different
+ * acts get different names, which is the same call the platform already made for
+ * `money.payouts.destination.read`.
+ *
+ * **Audited, and the audit is what makes the tier-3 grant defensible.** Support holds this
+ * because proof-photo disputes are their tickets and refusing them escalates every one —
+ * exactly the `agents.tracking.read` trade. The row commits before the bytes are fetched
+ * and its failure is not caught, so an unreachable audit store discloses nothing.
+ *
+ * **No `reason` required**, unlike the two tracking disclosures: an operator opens many
+ * images inside one dispute, and a per-image prompt becomes a box somebody types "dispute"
+ * into forever. Adding one later is additive — a schema field and a gateway argument.
+ *
+ * It answers for **any** file, public trees included, streaming them identically. One code
+ * path for the dashboard, and no need for a caller to know which tree a file is in.
+ *
+ * Declared after `/:fileId` because it cannot collide with it — two segments versus one.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/:fileId/content',
+    access: permission('files.content.read'),
+    validate: { params: FileIdParamSchema },
+    audit: records('files.content.read'),
+    handler: FileController.content,
 });
 
 /**

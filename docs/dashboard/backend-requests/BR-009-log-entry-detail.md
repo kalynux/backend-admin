@@ -81,7 +81,7 @@ AUDIT_LEGACY_FEED_DISABLED` when off.
 module is deleted at cutover, the row already carries everything the writer stored, and the only thing
 a detail route adds is addressability — the ability to link a colleague to one row.
 
-If the answer is no, put a line in [`audit.md`](../../admin/api/audit.md) saying the legacy feed is
+If the answer is no, put a line in [`audit.md`](../../api/audit.md) saying the legacy feed is
 list-only by design. That is genuinely all we need; the absence currently reads as an omission.
 
 ### 2. A declared shape for platform log entries
@@ -89,7 +89,7 @@ list-only by design. That is genuinely all we need; the absence currently reads 
 This one we do want.
 
 `GET /dev-tools/logs` entries are `Record<string, unknown>` on the wire and in
-[`dev-tools.md`](../../admin/api/dev-tools.md). A reader is guessing which keys exist, and a client
+[`dev-tools.md`](../../api/dev-tools.md). A reader is guessing which keys exist, and a client
 cannot tell a missing field from a renamed one.
 
 A **partial** declaration is enough — the point is not to close the shape, which would defeat a log:

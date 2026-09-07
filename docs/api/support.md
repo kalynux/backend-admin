@@ -31,7 +31,7 @@ D-17.
 | `DELETE` | `/:ticketId/followers/:userId` | `support.tickets.followers.manage` | **delegated** | ✅ |
 | `GET` | `/:ticketId/notes` | `support.tickets.notes.read` | **delegated** | — |
 | `POST` | `/:ticketId/notes` | `support.tickets.notes.write` | **delegated** | ✅ |
-| `GET` | `/:ticketId/attachments` | `support.tickets.attachments.read` | **delegated** | — |
+| `GET` | `/:ticketId/attachments` | `support.tickets.attachments.read` | **delegated** + `fileId` | — |
 | `POST` | `/:ticketId/attachments` | `support.tickets.attachments.write` | **delegated** | ✅ |
 
 **Every tier holds every permission on this surface.** Support is where a Support-tier
@@ -182,7 +182,7 @@ order nobody can predict.
 | `type` | token, 1–60 | |
 | `priority` | token, 1–60 | |
 | `importance` | token, 1–60 | |
-| `entityType` | token, 1–60 | `ORDER`, `PRODUCT`, `SHIPMENT`, `OTHER`, … |
+| `entityType` | token, 1–60 | **A closed set of eleven at the platform** — see [The `entityType` vocabulary](#the-entitytype-vocabulary-is-closed-at-eleven) |
 | `entityId` | string, 1–120 | |
 | `queue` | `all` \| `mine` \| `unassigned` | Default `all`. **Narrows inside your scope; it can never widen it** |
 | `from` / `to` | ISO-8601 instant | Creation range. **Max span 366 days** |
@@ -206,6 +206,58 @@ looking correct.
 
 An unrecognised value therefore returns an **empty page**, not a `400`.
 
+### The `entityType` vocabulary IS closed, at eleven
+
+`entityType` is the exception to the paragraph above, and BR-016 § 7 asked the question
+directly: **the token set is genuinely closed at the platform, not open.**
+
+jovi-mall declares it as a TypeScript `enum EntityType` (`modules/tickets/types/ticket.types.ts`),
+its ticket schema declares `entity_type: { enum: ENTITY_TYPE_VALUES, required: true }`, and both
+its create and its list validators run `z.enum(ENTITY_TYPE_VALUES)` over the same array. There
+is no write path by which a twelfth value can be stored.
+
+| Value | Routable from the ticket alone? |
+|---|---|
+| `ORDER` | ✅ `orderId` |
+| `SHIPMENT` | ✅ `shipmentId` |
+| `PRODUCT` | ✅ **since BR-016 § 7** — needs `entity.vendorId`, which is now on the detail |
+| `VENDOR` · `AGENT` · `AGENCY` · `USER` | ✅ each maps to a directory, the id is the parameter |
+| `CUSTOMER` | ❌ **there is no customer directory** — see below. This row said ✅ until 2026-08-26 |
+| `BOOKING` · `DELIVERY` | ❌ no administrative surface to link to |
+| `OTHER` | ❌ names no entity by definition — jovi-mall lets `entityId` be omitted for it alone |
+
+⚠ **This service still validates the token by SHAPE, not membership**, exactly as the four
+vocabularies above: the enum is jovi-mall's to grow, and a pinned copy here is how a filter goes
+stale silently. A client may rely on the eleven for **routing** and should still render an
+unrecognised token as plain text.
+
+#### ⚠ `CUSTOMER` is not routable, and this page claimed it was
+
+**There is no customer screen on this service and no `/api/v1/customers` mount.**
+`customers.read` was deleted at Phase 5 Part D (ADR-017 D-1) on the reasoning that
+`GET /users?role=customer` answers the same question. That holds for *finding* a customer and
+fails for *following a ticket's link*, because the two are keyed on different documents:
+
+- the user directory is keyed on **`users._id`** — `GET /users/:userId`, and the search box's
+  id branch matches `users._id` **only** (`user.read.repository.ts` § `searchClause`);
+- a "customer id" in the platform's vocabulary is a **`customers._id`**, a separate document
+  joined to a user by `customers.user_id`.
+
+So a customer id pasted into the user directory returns an empty page rather than an error. The
+row above put `CUSTOMER` beside four types that really do have a directory, and it was wrong.
+
+**And nothing guarantees which of the two a ticket carries.** jovi-mall resolves `entityId`
+for `ORDER`, `BOOKING` and `PRODUCT` only; every other type falls through
+`validateEntityReference`'s default branch after an ObjectId **shape** check and is stored
+unread (`ticket.service.ts`). A `CUSTOMER` ticket's `entityId` is whatever its creator sent,
+so even a customer screen could not be routed to from it safely.
+
+Render `CUSTOMER` as plain text, alongside `BOOKING` and `DELIVERY`. Two things on the same
+ticket **are** routable and are usually the operator's actual destination:
+`createdBy.userId` — a `users._id` whenever `createdBy.role` is not `admin`, so
+`/users/:userId` behind `users.read` — and the `ORDER` or `SHIPMENT` a complaint about a
+customer is normally filed against instead.
+
 ### Response (200)
 
 ```jsonc
@@ -220,7 +272,7 @@ An unrecognised value therefore returns an **empty page**, not a `400`.
       "priority": "high",
       "priorityLocked": true,
       "importance": "normal",
-      "entity": { "type": "ORDER", "id": "6670aabbccddeeff00112233" },
+      "entity": { "type": "ORDER", "id": "6670aabbccddeeff00112233", "vendorId": null, "label": null },
       "trackingNumber": "JM-2026-118842",
       "createdBy": {
         "role": "customer",
@@ -266,6 +318,7 @@ An unrecognised value therefore returns an **empty page**, not a `400`.
 | `assignment.assignedBy` | `null` when the ticket was **claimed** rather than handed over. The tier rules read its `tier` |
 | `availableActions` | What **this caller** may do, derived from the same authority table the service enforces with |
 | `terminalAt` | When the ticket reached a terminal status. Drives jovi-mall's attachment-cleanup clock |
+| **`entity.vendorId` / `entity.label`** | ⚠ **Always `null` on the LIST.** They are resolved on the **detail only** — see [`GET /support/tickets/:ticketId`](#get-supportticketsticketid). A hundred-row page would be a hundred lookups across three collections to decorate a column that shows an id |
 
 `description` is deliberately **absent from the list** — up to 700 characters of customer free
 text, a hundred of them per page. [`GET /:ticketId`](#get-supportticketsticketid) adds it.
@@ -292,7 +345,8 @@ could disagree.
 
 ### Response (200)
 
-The list item **plus `description`**. Nothing else differs — same mapper, same projection.
+The list item **plus `description`**, and with **`entity` resolved** — the two differences from
+the queue row. Same mapper, same projection.
 
 ```jsonc
 {
@@ -301,10 +355,34 @@ The list item **plus `description`**. Nothing else differs — same mapper, same
     "id": "66a1b2c3d4e5f60718293a4b",
     "subject": "Parcel marked delivered but never arrived",
     "description": "The agent marked it delivered at 14:02 but nobody was home…",
+    "entity": {
+      "type": "PRODUCT",
+      "id": "66601122334455667788990a",
+      "vendorId": "6650aa11bb22cc33dd44ee55",
+      "label": "Plantain — 1 kg"
+    },
     "…": "…"
   }
 }
 ```
+
+#### Making `about` navigable
+
+| Field | Notes |
+|---|---|
+| **`entity.vendorId`** | Set for **`type: "PRODUCT"` only**, `null` on every other type — those are not products, not "unknown vendors". It is what unblocks the link: a product's detail route is `/vendors/:vendorId/products/:productId` and needs **two** ids, where the ticket carries one. There is no vendor-agnostic product read anywhere on this service |
+| **`entity.label`** | Something an operator recognises, where one read can supply it: the **order number** for `ORDER`, the **tracking number** for `SHIPMENT`, the **title** for `PRODUCT`. `null` for every other type and for a missing record. A convenience — never a substitute for the id, and never rendered in its place |
+
+Both are `null` when the record is gone. A deleted listing is exactly what a catalogue complaint
+tends to end in, so the ticket is served with no link rather than a fabricated one — and the
+product lookup deliberately does **not** filter `deletedAt`, so a soft-deleted listing still
+resolves and the ticket most worth reading is not the one with no link.
+
+At most **one** query runs, dispatched on the type. Of the eight remaining types, **four**
+(`USER`, `VENDOR`, `AGENT`, `AGENCY`) are resolved by the client from the type alone — each maps
+to a directory — and the other four have no administrative surface to link to: `BOOKING`,
+`DELIVERY`, `OTHER`, and **`CUSTOMER`, which has no directory on this service**. See the table
+under [The `entityType` vocabulary](#the-entitytype-vocabulary-is-closed-at-eleven).
 
 ### Errors
 
@@ -663,13 +741,91 @@ is that a note was added, and whether it was public.
 | | |
 |---|---|
 | **Permission** | `support.tickets.attachments.read` |
-| **Transport** | **delegated** |
+| **Transport** | **delegated**, plus one field this service adds — see `fileId` below |
 
 ### Response (200)
 
 jovi-mall's attachment list, passed through — `id`, `fileName`, `fileSize`, `mimeType`, `url`,
-`uploadedBy`, `uploadedByRole`, `createdAt`. The `url` is minted by jovi-mall's storage
-provider; do not cache it past its expiry.
+`uploadedBy`, `uploadedByRole`, `uploadedByActor`, `createdAt` — with `fileId` added by this
+service.
+
+| Field | Type | Notes |
+|---|---|---|
+| `fileId` | 24-hex string \| null | The jovi-mall **File** id behind the attachment — the same id `POST` takes, and the id to hand to [files.md](files.md)'s resolver for a `FileDetail`. `id` is the ATTACHMENT, not the file; the two are different documents and only `fileId` addresses the file. |
+
+`fileId` is **not** part of jovi-mall's payload. wi-admin reads it from the attachment row in
+the shared database and stamps it onto each row, because it needs no machinery to resolve —
+unlike `url`, which is why the rest of the row is delegated (ADR-018 D-4). Requesting it from
+jovi-mall would have been a release there; this was a one-service change.
+
+It is `null` only in a race — the attachment was deleted between jovi-mall answering and this
+service reading. The key is always present, so a client may read it unconditionally.
+
+### `uploadedByActor` — the uploader as a person, and the one role it cannot name
+
+**Undocumented on this page until 2026-08-26, and on the wire since the ticket module was
+built.** It is jovi-mall's resolved uploader summary, the same `ActorSummary` object the notes'
+`author` carries, produced by `TicketEnrichmentService.enrichAttachments`. Both `GET` and
+`POST` return it.
+
+| Field | Type | Notes |
+|---|---|---|
+| `user_id` | 24-hex string | The same value as the sibling `uploadedBy` |
+| `role` | `customer` · `vendor` · `agency` · `agent` · `admin` | The same value as the sibling `uploadedByRole` |
+| `name` | string | The uploader's display name — **or a placeholder, below**. For `vendor` / `agency` it is the business's, from the Store / Magazin |
+| `avatar` | `FileDetail` or `null` | Their picture, or the business logo. The shape in [files.md](files.md) § *What a resolved file looks like* — so its own `url` may be `null` |
+
+⚠ **`uploadedByActor` is snake_case inside**, unlike every ticket field around it. The ticket
+rows on this surface are **this service's** projection (`createdBy.userId`, camelCase); the
+attachment list is jovi-mall's own payload passed through, and its inner objects were never
+renamed. Read `uploadedByActor.user_id`, not `.userId`.
+
+`null` only when the row carries no uploader, which the schema makes required — treat it as
+"unknown", never as an error.
+
+#### ⚠ For `role: "admin"` the `name` is the literal `"Admin"`
+
+Never the administrator's name, and that is the case a dashboard most wants. An administrator
+has **no `users` row and no `admins` row in `jovi_mall`** (ADR-004 D-1, the synthetic actor):
+the id jovi-mall stores is the `X-Actor-Id` this service sent, an `admin_accounts._id` out of
+**this** database. jovi-mall's resolver looks it up in its own `admins` collection, matches
+nothing, and falls back to the capitalised role.
+
+The same fallback produces `"Customer"`, `"Vendor"`, `"Agency"` or `"Agent"` when a profile
+has been deleted — so **a `name` equal to the capitalised `role` is the signal that nothing
+resolved**, and it is the only signal there is. `avatar` is `null` in that case too.
+
+**The same placeholder appears on note authors**, for the same reason and with no other
+symptom: an administrator's note renders `author.name: "Admin"`.
+
+Resolving it would be **this service's** job, not jovi-mall's — `uploadedBy` is an
+`admin_accounts._id` and [`GET /administrators/:adminId`](administrators.md) resolves exactly
+that. It is deliberately not wired: that route needs `administrators.read`, and **Support does
+not hold it** (`tier-grants.ts`: *"no sight of the administrator directory"*) — Support being
+the tier that reads tickets. The write path *does* know the name, in `X-Actor-Name`, and drops
+it; a snapshot on the attachment row, like the one `assignment.admin` already carries, is what
+would close this. Ask for it rather than building a lookup Support cannot make.
+
+**For every other role `user_id` IS a `users._id`** and routes to
+[`GET /users/:userId`](users.md) behind `users.read`, which Support does hold.
+
+⚠ **The `url` is a permanent, unauthenticated public URL — it does not expire.** This page
+said the opposite until BR-010 ("do not cache it past its expiry"), and the correction matters
+in the unsafe direction: the old wording invited a reader to treat the link as
+self-limiting when nothing limits it.
+
+`url` here is `storage.getPublicUrl(key)` on the file's stored key, computed per request from
+the active provider. It is not a signed URL, it carries no expiry, and fetching it needs no
+session. Attachments land in `documents/` or `images/` — both **public** storage trees — so
+this is not a gap in this route but a property of how attachments are stored. See
+[files.md](files.md) § *Support-ticket attachments are public*.
+
+**Treat an attachment URL as a shareable secret.** Anyone it reaches can fetch the file
+indefinitely.
+
+Note this list is **not** a `FileDetail`: it is the attachment row's own shape, with `url` as
+a plain `string` and no `access` field. A `FileDetail` resolved from the same underlying file
+id via [files.md](files.md) would report `access: "public"` and the same URL.
 
 ---
 
@@ -687,6 +843,14 @@ provider; do not cache it past its expiry.
 
 **This service accepts no multipart bodies anywhere** — the upload happens against jovi-mall,
 and this endpoint attaches the resulting id. See [files.md](files.md).
+
+### Response (201)
+
+jovi-mall's enriched attachment, passed through — the same row the list returns, including
+[`uploadedByActor`](#uploadedbyactor--the-uploader-as-a-person-and-the-one-role-it-cannot-name).
+
+⚠ **`fileId` is NOT stamped on this response**, unlike the list. You already hold it — it is
+what you sent — so this is a difference to know rather than a gap to work around.
 
 ### Audit
 

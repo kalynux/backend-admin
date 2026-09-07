@@ -643,10 +643,24 @@ export const AUDIT_CATALOG = Object.freeze({
 
     // ═══ FILES — delegated to jovi-mall ══════════════════════════════════════
     //
-    // One action for three routes, and that is not an omission. Both reads on that mount
-    // are unaudited (ADR-006 D-5) — including `/orphans`, which enumerates but discloses nothing
-    // a file listing does not already say. The delete is the only thing there that changes
-    // state, and it is the only UNRECOVERABLE operation on this service's whole surface.
+    // Three actions for seven routes, and the four silences are each a decision.
+    //
+    // ⚠ This header read "one action for three routes" until BR-011, and was already wrong
+    // by one when BR-015 arrived — a count in a comment beside a table that grows. It is
+    // stated as a RULE below rather than a number, so the next addition does not have to
+    // remember to come back here.
+    //
+    // The rule: a READ on this mount is audited only when **the output IS the disclosure**
+    // (ADR-006 D-5's exception test). `files.content.read` passes it — the bytes of a
+    // delivery proof are the disclosure. `files.resolve`, `/orphans` and the media library
+    // all fail it: they answer a name, a size and an owner, which is metadata about a record
+    // the caller was already entitled to reach. The media library ENUMERATES, and the
+    // dashboard argued that alone should earn a row; that was weighed and declined (L-5,
+    // ADR-021 D-6) — `/orphans` already enumerates here unaudited, and auditing a browse
+    // surface dilutes the trail rather than deepening it.
+    //
+    // Every WRITE is audited, without an argument to have: the delete because it is
+    // unrecoverable, the upload because it creates a record and this service audits writes.
 
     /**
      * A hard delete: the row goes, then the object goes from storage.
@@ -667,6 +681,92 @@ export const AUDIT_CATALOG = Object.freeze({
         target: 'file',
         transport: 'delegated',
         summary: 'Permanently deleted an uploaded file — unrecoverable',
+    },
+
+    /**
+     * Opening a file's contents — **the second audited READ on this service's file
+     * surface, and the fourth overall** (BR-011).
+     *
+     * ── Why a read is audited at all ──────────────────────────────────────────
+     * "Reads are not actions" (ADR-006 D-5) holds everywhere else and for a good reason:
+     * a read leaves no state to reconstruct, so the permission gate is the whole control.
+     * The exceptions are all the same shape — **the output IS the disclosure** — and this
+     * is one of them. A delivery-proof photograph is a place, a time, usually a residence
+     * and sometimes a person, read by an administrator that person has no relationship
+     * with; a `digital/` file is a vendor's saleable product. For a disclosure, "who may"
+     * is not the interesting question. "Who did, and how often" is — an administrator
+     * opening forty proof photos in an afternoon is doing something other than answering
+     * tickets, and nothing else here would ever see it.
+     *
+     * That is not abstract: `files.content.read` is held by **tier 3 (Support)**,
+     * deliberately, and this row is the other half of that decision. Same trade, same
+     * shape, as `agents.tracking.read`.
+     *
+     * ── `auditedAttempt`, and the ordering IS the control ─────────────────────
+     * `transport: 'delegated'` — the bytes come from jovi-mall, so no `wi-admin`
+     * ClientSession can span the two. The intent commits FIRST and its failure is not
+     * caught, so with the audit store unreachable nothing is disclosed. A crash between
+     * the intent and the answer leaves a row at `attempted`, which read conservatively
+     * means the file may have been disclosed.
+     *
+     * ── What the row does NOT contain ─────────────────────────────────────────
+     * **No bytes, and no storage key.** It records THAT a file was opened, which file, and
+     * what it turned out to be (`mimeType`, `size`). Putting content anywhere near the
+     * audit store would make the trail itself the leak — the rule `payout-disclosure.ts`
+     * follows for account numbers and `tracking-disclosure.ts` follows for coordinates.
+     * The key is withheld for the separate D-10 reason: it is an internal locator that
+     * names the owner's tree and adds nothing to the record.
+     *
+     * ⚠ **Audited HERE and deliberately not in jovi-mall**, which is where the bytes
+     * actually live. That service authenticates a *service*, not a person — `X-Actor-Id`
+     * reaches it and is advisory by construction, since whoever holds the token could set
+     * it — so a row written there would attribute a disclosure to an unverifiable string.
+     * This is where the human is known. Same reasoning as ADR-020 D-5.
+     */
+    'files.content.read': {
+        permission: 'files.content.read',
+        target: 'file',
+        transport: 'delegated',
+        summary: 'Opened an uploaded file’s contents',
+    },
+
+    /**
+     * Putting a file ON the platform — the first write of its kind here (BR-015).
+     *
+     * ── Why it needs no argument, unlike the read above ───────────────────────
+     * It is a write. ADR-006 D-5's "reads are not actions" is the rule that needed the
+     * exception test; a write is on the other side of it by definition. What makes this one
+     * worth a note is not whether to record it but **what the row is FOR**.
+     *
+     * ── The row is the only place the administrator is named ──────────────────
+     * The file lands in jovi-mall stamped `ownerType: 'admin'`, `ownerId: <X-Actor-Id>` —
+     * a `wi_admin.admin_accounts._id` written into a column jovi-mall declares
+     * `ref: MODELS.USER`, where it resolves to nothing (ADR-004 D-1). jovi-mall audits
+     * nothing on this path and cannot: it authenticates a *service*, and `X-Actor-Id` is a
+     * header the token holder sets. So the trail on this side is not corroboration of a
+     * record kept elsewhere — it is the record. Same reasoning as ADR-020 D-5, and the same
+     * as `files.content.read` above.
+     *
+     * ── `auditedAttempt`, intent → outcome ───────────────────────────────────
+     * `transport: 'delegated'`: the bytes and the row land in jovi-mall's database over
+     * HTTP, which no `wi-admin` ClientSession can join. The intent commits BEFORE the body
+     * is streamed, so an upload that crashed mid-transfer leaves an `attempted` row — read
+     * conservatively, that means a file may exist. That is the honest reading: jovi-mall
+     * writes the `files` row only after the whole body arrives and the pipeline passes, but
+     * this service cannot see which side of that line a broken connection fell on.
+     *
+     * ⚠ **`target: 'file'` with `id: null` on the intent**, filled from the outcome. The
+     * id does not exist until jovi-mall has created it, and a row addressed to a
+     * placeholder would be worse than one addressed to nothing. The `after` payload carries
+     * the created ids, the byte counts and the resolved MIME types — never the CONTENT,
+     * which is the same rule the content read follows for the same reason: putting bytes
+     * near the audit store makes the trail the leak.
+     */
+    'files.upload': {
+        permission: 'files.upload',
+        target: 'file',
+        transport: 'delegated',
+        summary: 'Uploaded a file to the platform as the administration',
     },
 
     // ═══ MESSAGING — delegated to jovi-mall ══════════════════════════════════

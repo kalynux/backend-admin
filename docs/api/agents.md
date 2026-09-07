@@ -17,8 +17,9 @@ Design record: [`../ADR-009-DELIVERY-NETWORK.md`](../ADR-009-DELIVERY-NETWORK.md
 | `GET` | `/agents/:agentId/contract-history` | `agents.read` | direct read | — |
 | `GET` | `/agents/:agentId/activity` | `agents.read` **+** `audit.read` | direct read | — |
 | `GET` | `/agents/:agentId/tracking-policy` | `agents.read` | **delegated** | — |
-| `GET` | `/agents/:agentId/cod-allocation` | `agents.read` | **delegated** | — |
+| `GET` | `/agents/:agentId/cod-allocation` | `agents.read` **+** `agencies.read` | **delegated** | — |
 | `GET` | `/agents/:agentId/eligibility` | `agents.read` | **delegated** | — |
+| `GET` | `/agents/:agentId/assignability` | `agents.read` **+** `agencies.read` | **delegated** | — |
 | `GET` | `/agents/:agentId/tracking-presence` | `agents.tracking.read` | **geo-tracker** | — |
 | `GET` | `/agents/:agentId/live-position` | `agents.tracking.read` | **geo-tracker** | ✅ |
 | `PUT` | `/agents/:agentId/status` | `agents.status.set` | **delegated** | ✅ |
@@ -126,6 +127,7 @@ offline, or just full?"* unanswerable.
       },
       "trackingAllowed": true,
       "trustScore": 87,
+      "trustSource": "computed",
       "createdAt": "2025-12-01T09:00:00.000Z",
       "updatedAt": "2026-08-13T08:44:00.000Z"
     }
@@ -138,7 +140,8 @@ offline, or just full?"* unanswerable.
 |---|---|
 | `avatarFileId` | **An opaque id.** This service resolves no file URLs |
 | `operational.activeShipments` | The **authoritative** count — the one the accept path compare-and-sets on, not the recomputed label beside it |
-| `trustScore` | The COD trust score, `null` if never computed |
+| `trustScore` | The **effective** COD trust score — the pinned override when one exists, the computed score otherwise. `null` if never computed. Changed at Phase 6.J; see [the detail section](#️-codtrustscore-is-the-effective-score--this-changed-at-phase-6j) |
+| `trustSource` | `"override"` or `"computed"`. Display only — never branch on it. ⚠ The `trustScore` **sort** still orders by the computed score, because that is the indexed field |
 
 ---
 
@@ -208,7 +211,13 @@ Every list field, plus:
       "reportedAt": "2026-08-13T08:40:00.000Z"
     },
     "capacity": { "max": 4, "active": 2, "reconciledAt": "2026-08-13T08:00:00.000Z" },
-    "cod": { "trustScore": 87, "maxThreshold": 250000 },
+    "cod": {
+      "trustScore": 87,
+      "computedTrustScore": 87,
+      "trustSource": "computed",
+      "trustOverride": null,
+      "maxThreshold": 250000
+    },
     "trustSignals": {
       "onTimeRate": 0.94,
       "assignmentResponseRate": 0.88,
@@ -230,6 +239,33 @@ Every list field, plus:
   }
 }
 ```
+
+### ⚠️ `cod.trustScore` is the EFFECTIVE score — this changed at Phase 6.J
+
+An agent has a **computed** trust score and, sometimes, an **administrator's pinned override**
+that outranks it. Every gate in jovi-mall acts on the override when one exists (O-7).
+
+**This DTO used to report `cod.trust_score` alone**, so on exactly the agents where a human had
+overridden the machine, this screen showed the number the platform was *not* using — a support
+agent reading 35 beside a dispatch that had just succeeded had no way to explain it.
+
+| Field | Meaning |
+|---|---|
+| `trustScore` | **What every gate acts on.** The override's score when pinned, the computed score otherwise |
+| `computedTrustScore` | The derived score, always — what would apply if the override were released |
+| `trustSource` | `"override"` or `"computed"`. **For display only, never branch on it** |
+| `trustOverride` | `{ score, reason, setAt, setByName }` when pinned, else `null` |
+
+All four ship together on purpose: a screen showing only `trustScore` cannot tell an administrator
+that a human pinned it, nor what releasing it would do. The same four now appear on
+`GET /cod/holders` rows, which had the identical defect.
+
+> `SearchAgentsQuerySchema`'s `trustScore` **sort** still orders by the computed `cod.trust_score`,
+> because that is the indexed field. An overridden agent therefore sorts by the score that is not
+> being applied to them. Left as-is deliberately — an index on a nullable override sub-field to fix
+> a sort ordering is not worth the write cost — but do not describe that column as "effective".
+
+---
 
 ### ⚠️ `tracking.lastKnown` is a stale business mirror, not a live position
 
@@ -405,6 +441,13 @@ or `system`).
 | **Permission** | `agents.read` |
 | **Query / response** | Identical to [`GET /agencies/:agencyId/contract-history`](agencies.md#get-agenciesagencyidcontract-history) |
 
+Each row carries `agent: { id, name }`, exactly as the agency-side feed does. On **this** feed
+every row names the agent in the path, so the object is the same on all of them — it is carried
+anyway, because the two feeds share one shape and a client branching on which endpoint it called
+to know whether `agent` is present will get it wrong.
+
+⚠ `name`, **not** `businessName` — an agent is a person.
+
 ---
 
 ## `GET /agents/:agentId/activity`
@@ -454,14 +497,73 @@ jovi-mall's own tracking verdict — the exact function geo-tracker consumes.
 
 ## `GET /agents/:agentId/cod-allocation`
 
-The agent's COD pool, its per-contract slices, and the remaining headroom.
+The agent's COD pool, its per-contract slices, and the remaining headroom — the view to consult
+before changing either level.
 
 | | |
 |---|---|
-| **Permission** | `agents.read` |
-| **Transport** | Delegated |
+| **Permission** | `agents.read` **+** `agencies.read` |
+| **Transport** | **Delegated verdict, decorated locally** — see below |
 | **Parameters** | None |
+| **Pagination** | **None.** `contracts` is unpaginated and bounded by the agent's contract count, which is single digits |
 | **Errors** | `404 NOT_FOUND`, `502`/`503 SERVICE_DEPENDENCY_UNAVAILABLE` |
+
+`agencies.read` joined this route with the `agency` object below: the slices now carry an
+agency's business name **and its account status**, so `agents.read` alone would make this a
+second door onto the agency directory. It is the same dependency
+[`GET /agents/:agentId/contracts`](#get-agentsagentidcontracts) states for the same object, and
+**it costs nobody access** — grants are per tier, tier 2 is built as `union(SUPPORT, …)` and
+tier 1 holds everything, so all three tiers that hold `agents.read` hold `agencies.read`.
+
+### Why this one is delegated *and* mapped
+
+The arithmetic is jovi-mall's and stays there: `ALLOCATING_CONTRACT_STATUSES` is the judgement
+that `paused` and `suspended` contracts still hold headroom while `deactivated` ones do not, and
+a copy here would drift silently and report headroom that does not exist. What wi-admin adds is
+a **name**, which jovi-mall cannot produce — the business name lives on the Magazin, which this
+endpoint's subject there has no reason to join.
+
+### Response (200)
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "agentId": "6660112233445566778899aa",
+    "maxThreshold": 500000,
+    "allocated": 350000,
+    "headroom": 150000,
+    "contracts": [
+      {
+        "contractId": "6661aabbccddeeff00112233",
+        "agencyId": "665c0011223344556677889a",
+        "agency": {
+          "id": "665c0011223344556677889a",
+          "businessName": "Littoral Express Delivery",
+          "status": "active"
+        },
+        "status": "active",
+        "threshold": 200000,
+        "outstandingBalance": 45000
+      }
+    ]
+  }
+}
+```
+
+| Field | Notes |
+|---|---|
+| `maxThreshold` | The agent's **global** pool. Defaults to `0`, so a new agent can carry no COD at all until it is set |
+| `allocated` | Sum of `threshold` across the **allocating** contracts listed. `active`, `paused` and `suspended` all consume the pool — **pausing does not free capacity**, because the agent may still be holding that agency's cash. `pending` and `deactivated` do not, and are absent from `contracts` |
+| `headroom` | `maxThreshold - allocated`. Never negative |
+| `contracts[].status` | ⚠ **The CONTRACT's status** |
+| `contracts[].agency.status` | ⚠ **The AGENCY's account status** — `active` · `pending_verification` · `inactive`. The two sit side by side and mean different things: the first decides whether the slice consumes the pool, the second whether the agency may trade at all |
+| `contracts[].agency.businessName` | The Magazin's name. `null` where the Magazin has none — an agency mid-onboarding must still be identifiable by its id. **`null`, never `""`, and never `display_name`**, which is the agency's contact *person* |
+| `contracts[].agency` | `null` when the agency row is gone. The slice still consumes the pool, so the row is kept |
+
+> This endpoint had **no documented response shape at all** until BR-016 § 2, which is why the
+> dashboard's type was transcribed off the wire. `PUT /agents/:agentId/cod-threshold` answers
+> with this same shape.
 
 ---
 
@@ -495,6 +597,69 @@ reimplementation loses first, and the reason this read is delegated.
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | Missing `agencyId`, or an extra parameter |
 | 404 | `NOT_FOUND` | No such agent |
+| 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | |
+
+---
+
+## `GET /agents/:agentId/assignability`
+
+**Why can this agent not take this work?** — every gate, with the numbers behind each one.
+
+| | |
+|---|---|
+| **Permission** | `agents.read` **+** `agencies.read` |
+| **Transport** | Delegated |
+| **Audited** | No |
+
+### What this adds over `/eligibility`
+
+`/eligibility` answers only the **platform** half of the assignment question. There are two halves:
+
+| Family | Gates | Reachable before this endpoint |
+|---|---|---|
+| **platform** | banned · KYC · active · available · tracking allowed · device location · capacity | ✅ `/eligibility` |
+| **contract** | active contract · coverage region · per-shipment value ceiling · **COD exposure** | ❌ **nowhere** |
+
+The contract half is where the numbers are, and its absence had a concrete cost: an agency refused
+with `COD_AGENT_EXPOSURE_EXCEEDED` could read its own COD threshold off three screens in this
+service and could see **neither** the agent's actual exposure **nor** the trust multiplier that had
+halved that threshold. Support was looking at the wrong number with no way to know it.
+
+### Query parameters
+
+| Parameter | Type | Rules |
+|---|---|---|
+| `agencyId` | 24-hex | **Required** — the answer is pairwise, as with `/eligibility` |
+| `shipmentId` | 24-hex | **Optional.** Strict — no other parameter is accepted |
+
+`shipmentId` is optional deliberately. Support reaches this endpoint having been told *"I can't
+assign my agent"*, holding an agency and an agent and no shipment id; requiring one would make the
+diagnostic unreachable at the moment it is wanted. Without it the two shipment-scoped gates report
+`"skipped"` and the cash gate answers *"is this agent already at their limit for this agency?"*.
+
+### Response (200)
+
+jovi-mall's payload, passed through unmodified. Full field-by-field shape, the four gate statuses,
+the remedy vocabulary and a worked example are in **`jovi-mall/api-doc/admin/agents.md`** under
+`GET /internal/admin/agents/:agentId/assignability` — not restated here, per the rule that a
+delegated read is documented against its source rather than transcribed (BR-014).
+
+Three things a screen built on this must get right:
+
+1. **Exposure is agent-wide; the limit is per-contract.** `exposure.total` spans **every** agency the
+   agent serves — the cash is one physical pot — while `limit.contractThreshold` belongs only to
+   `agencyId`. Do not present the total as this agency's.
+2. **`contractThreshold` is not the limit.** `effectiveLimit` is: the threshold scaled by the trust
+   tier. Showing the threshold alone tells an operator the opposite of what the gate decided.
+3. **`assignable` is false only when a gate `failed`.** `skipped` and `not_applicable` do not.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Missing `agencyId`, a malformed id, or an extra parameter |
+| 404 | `NOT_FOUND` | No such agent |
+| 404 | (delegated) | No such shipment, or it belongs to a different agency than `agencyId` |
 | 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | |
 
 ---

@@ -4,9 +4,11 @@ import {
     dateRangeFields,
     dateRangeRule,
     idParam,
+    objectId,
     reasonText,
     searchTerm,
 } from '../../../core/validation/common.schemas';
+import { VENDOR_AGENCY_CONNECTION_SORT } from '../repositories/vendor-context.read.repository';
 import { AUDIT_ACTION_NAMES, AuditAction } from '../../audit/domain/audit.catalog';
 import { AUDIT_STATUSES } from '../../audit/domain/audit.types';
 
@@ -116,7 +118,54 @@ export const ListVendorProductsQuerySchema = listQuery(VENDOR_PRODUCT_SORT, '-cr
     mode: z.enum(PRODUCT_MODES).optional(),
     /** Only meaningful alongside `status=suspended`; harmless otherwise. */
     suspensionReason: z.enum(PRODUCT_SUSPENSION_REASONS).optional(),
+    /**
+     * Which agency's listings — matched against the **resolved** agency, so it means the
+     * same thing as the `deliveryAgency` column beside it (BR-018).
+     *
+     * The drill-down from `productCount` on `GET /vendors/:vendorId/agencies`: that number
+     * and `meta.total` on this filtered page are computed from one rule, so they cannot
+     * disagree. Without it a client's only route to the number was paging the entire
+     * catalogue and tallying by hand.
+     */
+    deliveryAgencyId: objectId.optional(),
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The vendor's delivery-agency connections (BR-018)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The six values of jovi-mall's `ConnectionStatus`, for documentation and for the tests.
+ *
+ * ⚠ **Deliberately NOT used as a `z.enum`, and that is the opposite call from
+ * `VENDOR_STATUSES` and `PRODUCT_STATUSES` above.** ADR-005 D-17: a vocabulary this
+ * service does not own gets validated for shape, not for membership — a copy here means a
+ * status added in jovi-mall is silently unfilterable until somebody remembers this file,
+ * and the failure mode of that drift is a filter matching nothing rather than an error.
+ * The four vocabularies pinned above are pinned because their filters are also rendered as
+ * fixed tabs; a relationship FSM is not, and the roster this endpoint mirrors
+ * (`ListRosterQuerySchema`) made the same call for the same reason.
+ *
+ * BR-018 said the dashboard "will render an unrecognised value rather than reject it",
+ * which is exactly D-17's client half.
+ */
+export const CONNECTION_STATUSES = [
+    'pending',
+    'active',
+    'rejected',
+    'withdrawn',
+    'paused_reapproval',
+    'terminated',
+] as const;
+
+export const ListVendorAgenciesQuerySchema = listQuery(
+    VENDOR_AGENCY_CONNECTION_SORT,
+    '-createdAt',
+    {
+        /** Bounded for shape, not membership — see `CONNECTION_STATUSES`. */
+        status: z.string().trim().min(1).max(40).optional(),
+    },
+);
 
 export const SuspendVendorSchema = z.object({
     reason: reasonText('A reason is required to suspend a vendor'),
@@ -198,3 +247,4 @@ export type RejectVendorKycBody = z.infer<typeof RejectVendorKycSchema>;
 export type SuspendVendorProductBody = z.infer<typeof SuspendVendorProductSchema>;
 export type UpdateVendorSettingsBody = z.infer<typeof UpdateVendorSettingsSchema>;
 export type ListVendorActivityQuery = z.infer<typeof ListVendorActivityQuerySchema>;
+export type ListVendorAgenciesQuery = z.infer<typeof ListVendorAgenciesQuerySchema>;

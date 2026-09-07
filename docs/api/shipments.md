@@ -128,7 +128,16 @@ Every list field, plus:
   "data": {
     "…all list fields…": "…",
 
-    "order": { "id": "6670…", "orderNumber": "ORD-2026-008841", "…": "…" },
+    "order": {
+      "id": "6670aabbccddeeff00112233",
+      "orderNumber": "ORD-2026-008841",
+      "paymentMethod": "cash_on_delivery",
+      "paymentStatus": "pending",
+      "fulfillmentStatus": "processing",
+      "customerId": "665f1c2a9b3e4a91c7d2e5f0",
+      "vendorId": "6650aa11bb22cc33dd44ee55",
+      "vendorName": "Douala Fresh Market"
+    },
 
     "assignment": {
       "state": "accepted",
@@ -180,8 +189,24 @@ Every list field, plus:
     "offers": [ { "…see the offers endpoint…": "…" } ],
 
     "items": [
-      { "orderItemId": "6670…40", "productId": "66601122334455667788990a",
-        "variantId": null, "quantity": 3 }
+      {
+        "orderItemId": "6670aabbccddeeff00112240",
+        "productId": "66601122334455667788990a",
+        "variantId": null,
+        "quantity": 3,
+        "title": "Plantain — 1 kg",
+        "price": 2500,
+        "currency": "XAF",
+        "image": {
+          "id": "6612aabbccddeeff00112233",
+          "key": "products/6660.../plantain-1kg.jpg",
+          "url": "https://cdn.example.com/products/6660.../plantain-1kg.jpg",
+          "access": "public",
+          "mimeType": "image/jpeg",
+          "size": 84213,
+          "originalName": "plantain.jpg"
+        }
+      }
     ],
 
     "deliveryProofFileId": "6675aabbccddeeff00112233",
@@ -203,7 +228,22 @@ Every list field, plus:
 | `cod.codeLocked` | Too many wrong code attempts |
 | `rejection.by.source` | **Says which database the id resolves in.** An `admin` id resolves in neither the platform database nor as a platform user |
 | `statusHistory[].byRole` | `agent`, `agency`, `admin` or `system` |
+| **`order.vendorName`** | The vendor's **business name** — `stores.name`. ⚠ **Not the same source as [`GET /orders`](orders.md#get-orders)'s `vendorName`**, which is `vendors.display_name`, the vendor's *personal* name. The two fields share a name and answer different questions; this one is the business, which is what an operator recognises the shop by. `null` where the vendor has no Store row (mid-onboarding) — **never `display_name` substituted in** |
+| **`items[].title` / `price` / `currency`** | The **sale's** terms for that line, joined from the order's item snapshot on `orderItemId`. Snapshotted upstream precisely so they cannot drift, which is why they come from the order line and not from the catalogue — and why they are `null` when the order line is gone rather than refreshed |
+| **`items[].image`** | The primary image, **variant-preferred**, resolved exactly as [`GET /orders/:orderId`](orders.md#get-ordersorderid)'s `items[].image` — so the two screens cannot show different pictures of one parcel. `null` is ordinary. **Gate rendering on all three of `access === 'public'`, `url !== null` and `mimeType.startsWith('image/')`** |
 | **`tracking.outbox`** | **Outbox health, not a trackability verdict.** How many events for this shipment are still pending or have failed, and when the last one went out |
+
+#### Why the item row grew
+
+A shipment item was the thinnest row on the platform — `orderItemId`, `productId`, `variantId`,
+`quantity` — on the screen an operator opens mid-dispute. `6670aabbccddeeff00112240 × 3` is not
+a description of a parcel. All four additions are batched for the whole array: the titles are
+one read of the order document these items already belong to, and the images are the same three
+reads the order detail makes, however many lines the shipment has.
+
+**Linking needs no field beyond these.** `order.vendorId` + `items[].productId` is a complete
+`/vendors/:vendorId/products/:productId` address, and `order.id` + `items[].orderItemId` is a
+complete deep link into the order's items tab.
 
 #### Why `tracking.outbox` is worth a panel
 

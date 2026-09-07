@@ -86,6 +86,35 @@ export class AdminAccountRepository {
         return AdminAccountModel().findById(adminId).session(session ?? null);
     }
 
+    /**
+     * Display names for a page of administrator ids, batched (BR-015).
+     *
+     * ⚠ **The one owner type on the media library that resolves in THIS database.** A file
+     * uploaded by an administrator carries `ownerType: 'admin'` and an `ownerId` that is a
+     * `wi_admin.admin_accounts._id` — written into a jovi-mall column declared
+     * `ref: MODELS.USER`, where it dereferences to nothing (ADR-004 D-1). jovi-mall cannot
+     * name that owner and never will; this method is the only thing that can.
+     *
+     * ── The projection is two fields, and it is not decoration ────────────────
+     * `admin_accounts` is the credential collection — `password_hash`, `mfa_secret`,
+     * `failed_attempts`, `locked_until`. Every other read of it on this service goes through
+     * a mapper that strips those; this one is a name lookup feeding a file listing, so it
+     * names the two columns it wants rather than loading documents and picking.
+     *
+     * `.lean()` because nothing here needs a document — and a Mongoose document carries the
+     * whole row into memory regardless of what the caller then reads off it.
+     */
+    async findDisplayNamesByIds(adminIds: string[]): Promise<Map<string, string | null>> {
+        const ids = adminIds.filter((id) => Types.ObjectId.isValid(id));
+        if (ids.length === 0) return new Map();
+
+        const rows = await AdminAccountModel()
+            .find({ _id: { $in: ids } }, { _id: 1, display_name: 1 })
+            .lean();
+
+        return new Map(rows.map((row) => [String(row._id), row.display_name ?? null]));
+    }
+
     /** Backs the bootstrap CLI's refusal to create a second first-administrator. */
     async countByTier(tier: AdminTier): Promise<number> {
         return AdminAccountModel().countDocuments({ tier });

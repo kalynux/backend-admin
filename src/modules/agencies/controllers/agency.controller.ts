@@ -11,10 +11,20 @@ import { AuditRepository } from '../../audit/repositories/audit.repository';
 import { ListAuditQuery } from '../../audit/validators/audit.validator';
 import * as gateway from '../gateways/agency.gateway';
 import { AgencyReadModel, AgencyReadRepository } from '../repositories/agency.read.repository';
-import { ContractEventReadRepository } from '../repositories/contract-event.read.repository';
+import { ContractEventReadRepository, distinctAgentIds } from '../repositories/contract-event.read.repository';
 import { ContractReadRepository } from '../repositories/contract.read.repository';
 import { toContractEventDto, toRosterEntryDto } from '../read-models/contract.dto';
 import { AgencyPoliciesDto, toAgencyPoliciesDto } from '../read-models/agency-policies.dto';
+/**
+ * The contract-history feed names agents, and this is the name-only read of them.
+ *
+ * Imported from the agents module rather than declared here for the reason that repository
+ * states: `delivery_agents` holds `legal_identity`, `payout_details` and device telemetry,
+ * so a second projection of it declared next door is a second thing to get right. Same
+ * direction the roster's own `$lookup` already takes, and the same direction
+ * `agent.controller.ts` imports this module's validators.
+ */
+import { AgentReadRepository } from '../../agents/repositories/agent.read.repository';
 import { VendorConnectionReadRepository } from '../../vendors/repositories/vendor-context.read.repository';
 import {
     DeactivateAgencyBody,
@@ -52,6 +62,7 @@ import {
 const agencies = new AgencyReadRepository();
 const contracts = new ContractReadRepository();
 const contractEvents = new ContractEventReadRepository();
+const agents = new AgentReadRepository();
 const audit = new AuditRepository();
 /**
  * Reached for one number: how many vendor connections a policy bump has left waiting.
@@ -308,6 +319,12 @@ export class AgencyController {
      *
      * It is also the only one of the two with any history in it today: jovi-mall's audit
      * logger is a console stub, so every deactivation before this phase is unrecoverable.
+     *
+     * ── The agent's NAME, resolved after the page is cut (BR-016 § 1) ─────────
+     * This is the agency's view of the relationship, so every row names an agent the reader
+     * does not already know — and `agentId` alone made the table a column of 24-hex ids. The
+     * lookup runs on the page that came back, never on the matched set, so it touches at
+     * most `limit` distinct agents however deep the history goes.
      */
     static contractHistory = asyncHandler(async (req: Request, res: Response) => {
         const query = req.query as unknown as ListContractEventsQuery;
@@ -326,7 +343,13 @@ export class AgencyController {
             },
         );
 
-        sendPaginated(res, page.items.map(toContractEventDto), toPageMeta(page.total, page.page, page.limit));
+        const agentNames = await agents.findNamesByIds(distinctAgentIds(page.items));
+
+        sendPaginated(
+            res,
+            page.items.map((event) => toContractEventDto(event, agentNames)),
+            toPageMeta(page.total, page.page, page.limit),
+        );
     });
 
     /**

@@ -47,7 +47,10 @@ Of the **110** permissions in [permission.catalog.ts](../src/modules/authorizati
 > module rather than a module to create.
 
 The 21 permissions cover **35 legacy endpoints**, listed row-by-row in
-[legacy-endpoint-map.ts](../src/modules/authorization/domain/legacy-endpoint-map.ts):
+`src/modules/authorization/domain/legacy-endpoint-map.ts` — **which no longer exists.** It was
+deleted at the close-out this plan describes (commit `1a3e46a`, "Phase 5 Parts D–E"), once
+`LEGACY_ENDPOINT_COUNT` reached 0. The link is left unlinked rather than repaired: the table below
+is now the record, and there is nothing upstream to point at.
 
 | Family | Permissions | Legacy rows | jovi-mall source |
 |---|---:|---:|---|

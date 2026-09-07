@@ -25,6 +25,31 @@
  *   4. **The audit row is written for the delete**, with the file as its target — the only
  *      unrecoverable operation on this service's whole surface.
  *
+ * ── BR-015 added two more, and § 6 is the one this suite now exists for most ──
+ *
+ *   5. **The URL this service builds IS the one jovi-mall returns** (§ 6). Decision L-3
+ *      reversed ADR-009 D-6 and put URL construction here, so `STORAGE_PROVIDER` and
+ *      `STORAGE_LOCAL_URL` now live in TWO deployments and **nothing compares them** — the
+ *      property every cross-service secret on this platform has. A mismatch fails no boot,
+ *      logs nothing, and produces URLs that 404 on a screen full of thumbnails.
+ *
+ *      ⚠ `test:files` § 8 diffs the two `storage-trees.ts` files offline and is a different
+ *      check answering a different question: it proves the two SOURCES agree, and this
+ *      proves the two ANSWERS do. **Neither implies the other** — a correct tree map with a
+ *      wrong `STORAGE_LOCAL_URL` passes the first and fails this.
+ *
+ *   6. **The media library actually runs** (§ 7). It is the one read on this mount that is
+ *      NOT delegated: a direct read of `jovi_mall.files` joined to `file_references`, with
+ *      owner names resolved across five role collections plus this service's own
+ *      `admin_accounts`. Mongo validates an aggregation pipeline at EXECUTION time, so no
+ *      offline suite can prove the usage `$group` is even legal — only a real one can.
+ *
+ * ⚠ **`POST /files/upload` is NOT covered here.** It takes a `multipart/form-data` body and
+ * `call()` sends JSON; exercising it needs a multipart client and bytes jovi-mall's sniffing
+ * pipeline will accept. Everything this service owns about it is asserted offline
+ * (`test:files` §§ 4, 6, 9); the round trip is not asserted anywhere, and the first real
+ * upload is the first proof the proxy streams correctly. Stated so the gap is known.
+ *
  * ── What it needs ─────────────────────────────────────────────────────────────
  *   Mongo (both connections — it plants a fixture in `jovi_mall.files` directly)
  *   Redis (sessions)
@@ -63,6 +88,8 @@ import { AuditLogModel } from '../../src/modules/audit/models/audit-log.model';
 import { hash } from '../../src/modules/admin-identity/domain/password.service';
 import { AdminTier } from '../../src/modules/admin-identity/domain/admin-identity.types';
 import { COLLECTIONS } from '../../src/infra/platform/collections';
+import { toFileDetail } from '../../src/infra/storage/file-detail';
+import { publicUrlsAreConfigured } from '../../src/infra/storage/public-url';
 
 const t = suite('files — live');
 
@@ -84,6 +111,28 @@ const KEY_KEPT = 'vendors/6a11000000000000000000ff/verify-files-kept-d4e5f6.png'
 
 const ORPHAN_ID = new ObjectId('6a11000000000000000000f1');
 const KEPT_ID = new ObjectId('6a11000000000000000000f2');
+
+/**
+ * Two more fixtures, for the L-3 parity check and the media library (BR-015).
+ *
+ * ⚠ **Their TREES are the whole point, and the two existing fixtures cannot serve.** Both
+ * of those live under `vendors/`, which is not in `STORAGE_TREE_VISIBILITY` at all — so
+ * both resolve PRIVATE by the fail-closed rule and both sides answer `url: null`. A parity
+ * assertion between two nulls passes while proving nothing about URL construction, which is
+ * the one thing decision L-3 put in this service.
+ *
+ * `images/` is a real public tree and the one an administrator's own upload lands in;
+ * `shipments/` is a real private one. Between them they exercise both branches of
+ * `toFileDetail` against jovi-mall's answer for the same row.
+ */
+const KEY_PUBLIC = 'images/2026/08/verify-files-public-a1b2c3.png';
+const KEY_PRIVATE = 'shipments/2026/08/verify-files-private-d4e5f6.jpg';
+
+const PUBLIC_ID = new ObjectId('6a11000000000000000000f3');
+const PRIVATE_ID = new ObjectId('6a11000000000000000000f4');
+
+/** Every fixture this suite plants in `jovi_mall.files`, for one cleanup list. */
+const FIXTURE_FILE_IDS = [ORPHAN_ID, KEPT_ID, PUBLIC_ID, PRIVATE_ID];
 
 /** 30 days old, so it is comfortably past both the 24-hour floor and the 7-day default. */
 const CREATED_AT = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -210,6 +259,36 @@ async function jovi(path: string): Promise<{ status: number; body: any }> {
 }
 
 /**
+ * jovi-mall's `POST /files/resolve` — the OTHER producer of a `FileDetail` (BR-015 · L-3).
+ *
+ * ⚠ **This is the whole of the live half of the L-3 containment, and it proves something
+ * the offline drift check structurally cannot.** `test:files` § 8 diffs the two source
+ * files and proves they AGREE; that says nothing about whether this service's construction
+ * actually MATCHES, because agreement on the classification table does not imply agreement
+ * on the URL built from it — a wrong `STORAGE_LOCAL_URL`, a provider set to something else,
+ * or a divergence in how the key is joined would all pass that diff. Neither check implies
+ * the other, and this is the only one that compares OUTPUT.
+ */
+async function joviResolve(fileIds: string[]): Promise<{ status: number; body: any }> {
+    const base = process.env.JOVI_MALL_BASE_URL ?? '';
+    const response = await fetch(`${base}/api/internal/admin/files/resolve`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Service-Token': process.env.JOVI_MALL_SERVICE_TOKEN ?? '',
+            'X-Actor-Id': '6a11000000000000000000aa',
+            'X-Actor-Name': 'verify-files',
+            Accept: 'application/json',
+        },
+        body: JSON.stringify({ fileIds }),
+    });
+    const text = await response.text();
+    let body: any;
+    try { body = JSON.parse(text); } catch { body = text; }
+    return { status: response.status, body };
+}
+
+/**
  * A `files` row, written on the raw driver.
  *
  * The Mongoose schema lives in jovi-mall and applies `timestamps` and the `BaseSchemaFields`
@@ -219,7 +298,7 @@ async function jovi(path: string): Promise<{ status: number; body: any }> {
  * `deletedAt: null` and no `file_references` row is what makes it an orphan:
  * `FileRepositoryMongo.findOrphans` takes the complement of the referenced set.
  */
-function fileDoc(id: ObjectId, key: string, originalName: string) {
+function fileDoc(id: ObjectId, key: string, originalName: string, orphanedAt: Date | null = null) {
     return {
         _id: id,
         key,
@@ -229,7 +308,15 @@ function fileDoc(id: ObjectId, key: string, originalName: string) {
         originalName,
         ownerType: 'vendor',
         ownerId: new ObjectId('6a11000000000000000000ff'),
-        orphanedAt: null,
+        /**
+         * ⚠ **Set by hand, and it must agree with the `file_references` rows planted beside
+         * it** (BR-015). jovi-mall's reference layer maintains this field — non-null means
+         * "the live reference count is 0" — and this connection applies none of that logic.
+         * The media library's `usage=used|unused` filter reads exactly this column, so a
+         * fixture whose stamp contradicts its own reference rows would make that filter look
+         * broken when it is the data that is wrong.
+         */
+        orphanedAt,
         deletedAt: null,
         purgeAt: null,
         createdAt: CREATED_AT,
@@ -239,8 +326,8 @@ function fileDoc(id: ObjectId, key: string, originalName: string) {
 
 async function cleanupPlatform(): Promise<void> {
     const db = platformDb();
-    await db.collection(COLLECTIONS.FILE).deleteMany({ _id: { $in: [ORPHAN_ID, KEPT_ID] } });
-    await db.collection('file_references').deleteMany({ fileId: { $in: [ORPHAN_ID, KEPT_ID] } });
+    await db.collection(COLLECTIONS.FILE).deleteMany({ _id: { $in: FIXTURE_FILE_IDS } });
+    await db.collection('file_references').deleteMany({ fileId: { $in: FIXTURE_FILE_IDS } });
 }
 
 async function cleanupAdmin(): Promise<void> {
@@ -287,21 +374,62 @@ async function main(): Promise<number> {
         await make(EMAIL_ADMIN, 'Verify Files Admin', 2);
         await make(EMAIL_SUPPORT, 'Verify Files Support', 3);
 
-        // The orphan, and a control file that is REFERENCED and must never appear.
+        // The orphan, a control file that is REFERENCED and must never appear, and the two
+        // tree fixtures the L-3 parity check and the media library need (BR-015).
         await platformDb().collection(COLLECTIONS.FILE)
             .insertMany([
                 fileDoc(ORPHAN_ID, KEY_ORPHAN, 'verify-files-orphan.png'),
                 fileDoc(KEPT_ID, KEY_KEPT, 'verify-files-kept.png'),
+                fileDoc(PUBLIC_ID, KEY_PUBLIC, 'verify-files-public.png'),
+                // No reference rows below, so it is genuinely an orphan and the `usage=unused`
+                // filter has something true to find.
+                fileDoc(PRIVATE_ID, KEY_PRIVATE, 'verify-files-private.jpg', CREATED_AT),
             ] as never[]);
+        /**
+         * ⚠ **The field names here were WRONG until BR-015, and the error was invisible.**
+         * This row carried `ownerType`/`ownerId` where `IFileReference` declares
+         * `entityType`/`entityId`. The orphan query it was written for matches on `fileId`
+         * alone, so it kept `KEPT_ID` out of the listing exactly as intended and nothing
+         * failed — while the row described no entity at all. The media library's usage join
+         * projects `entityType`, `entityId` and `field`, so it is the first reader that
+         * would have noticed, by reporting `undefined` in every reference cell.
+         *
+         * (`ownerType`/`ownerId` DO exist on that model, denormalised from the file's
+         * uploader for per-owner aggregates — which is exactly why the mistake reads as
+         * plausible. They are not the entity.)
+         */
         await platformDb().collection('file_references').insertOne({
             fileId: KEPT_ID,
-            ownerType: 'product',
-            ownerId: new ObjectId('6a11000000000000000000fe'),
+            entityType: 'product',
+            entityId: new ObjectId('6a11000000000000000000fe'),
             field: 'images',
             deletedAt: null,
             createdAt: CREATED_AT,
             updatedAt: CREATED_AT,
         } as never);
+        // The public fixture is referenced twice, by two different entities, so the media
+        // library has a row whose `referenceCount` is more than one and whose `usage` join
+        // has to group rather than merely find.
+        await platformDb().collection('file_references').insertMany([
+            {
+                fileId: PUBLIC_ID,
+                entityType: 'ticket',
+                entityId: new ObjectId('6a11000000000000000000fc'),
+                field: 'attachments',
+                deletedAt: null,
+                createdAt: CREATED_AT,
+                updatedAt: CREATED_AT,
+            },
+            {
+                fileId: PUBLIC_ID,
+                entityType: 'product',
+                entityId: new ObjectId('6a11000000000000000000fd'),
+                field: 'media',
+                deletedAt: null,
+                createdAt: CREATED_AT,
+                updatedAt: CREATED_AT,
+            },
+        ] as never[]);
 
         const app = createApp();
         server = await new Promise<Server>((resolve) => {
@@ -480,6 +608,201 @@ async function main(): Promise<number> {
         });
         t.assert('exactly ONE succeeded row — the two refusals left none', () => succeededRows === 1);
 
+
+        // ─────────────────────────────────────────────────────────────────────
+        t.section('6. L-3 parity — the URL this service builds IS jovi-mall\'s');
+
+        /**
+         * ⚠ **The only check that proves the two deployments actually agree**, and the
+         * reason decision L-3 was allowed at all.
+         *
+         * L-3 reversed ADR-009 D-6 and put URL construction in this service, which means
+         * `STORAGE_PROVIDER` and `STORAGE_LOCAL_URL` now exist in TWO deployments. Nothing
+         * anywhere compares one side's value against the other's — the property every
+         * cross-service secret on this platform has — so a mismatch is **silent**: it fails
+         * no boot, logs nothing, and produces URLs that 404 on a screen full of thumbnails,
+         * which reads as "the files are gone" rather than as a configuration fault.
+         *
+         * `test:files` § 8 covers the other half offline by diffing the tree map against
+         * jovi-mall's source. **Neither implies the other.** That check proves the two
+         * FILES agree; this one proves the two ANSWERS do, which is what a client sees.
+         */
+        const localDetail = (id: ObjectId, key: string) => toFileDetail({
+            id: id.toHexString(),
+            key,
+            mimeType: 'image/png',
+            size: 20_480,
+            originalName: 'verify-files.png',
+        });
+
+        /**
+         * Asserted rather than skipped past. A wi-admin with no reproducible
+         * `STORAGE_PROVIDER` answers `url: null` for every file — which is the correct
+         * INERT behaviour and a broken media library, and it would make every comparison
+         * below fail for a reason that has nothing to do with drift. Failing here names the
+         * two variables instead.
+         */
+        t.assert('this deployment can build URLs at all — STORAGE_PROVIDER is set here', () =>
+            publicUrlsAreConfigured());
+
+        const resolved = await joviResolve([PUBLIC_ID.toHexString(), PRIVATE_ID.toHexString()]);
+
+        t.assert('jovi-mall resolved both fixtures', () =>
+            resolved.status === 200 && Array.isArray(resolved.body?.data?.files)
+            && resolved.body.data.files.length === 2);
+
+        const theirs = new Map<string, { url: string | null; access: string }>(
+            (resolved.body?.data?.files ?? []).map(
+                (f: { id: string; url: string | null; access: string }) => [f.id, { url: f.url, access: f.access }],
+            ),
+        );
+
+        const theirPublic = theirs.get(PUBLIC_ID.toHexString());
+        const theirPrivate = theirs.get(PRIVATE_ID.toHexString());
+        const ourPublic = localDetail(PUBLIC_ID, KEY_PUBLIC);
+        const ourPrivate = localDetail(PRIVATE_ID, KEY_PRIVATE);
+
+        /**
+         * ⚠ **The premise, asserted before the comparison.** If jovi-mall answered `null` for
+         * the public fixture too, every assertion below would pass by comparing two nulls
+         * and prove nothing — the same trap § 1 avoids by checking the storage key IS
+         * present upstream before checking it is absent here.
+         */
+        t.assert('jovi-mall really does return a URL for the public tree', () =>
+            typeof theirPublic?.url === 'string' && theirPublic.url.length > 0);
+
+        t.assert('the PUBLIC url is byte-identical to jovi-mall\'s', () =>
+            ourPublic.url === theirPublic?.url);
+
+        t.assert('...and so is `access`', () =>
+            ourPublic.access === theirPublic?.access && ourPublic.access === 'public');
+
+        /**
+         * The private branch. Both sides must answer `null` — and this assertion is weaker
+         * than it looks on its own, which is why it sits after the one above: two services
+         * that both fail to build any URL would also pass it.
+         */
+        t.assert('the PRIVATE file resolves to url null on BOTH sides', () =>
+            ourPrivate.url === null && theirPrivate?.url === null);
+
+        t.assert('...and to `authorized` on both', () =>
+            ourPrivate.access === 'authorized' && theirPrivate?.access === 'authorized');
+
+        // ─────────────────────────────────────────────────────────────────────
+        t.section('7. The media library over the wire (BR-015)');
+
+        /**
+         * The library is the one read on this mount that is NOT delegated (L-1): it reads
+         * `jovi_mall.files` and `file_references` directly and resolves owner names across
+         * five role collections plus this service's OWN `admin_accounts`. Three things only
+         * a live run proves — that the aggregation actually RUNS (Mongo validates a pipeline
+         * at execution time, not at compile time), that the usage join groups rather than
+         * duplicating rows, and that the tier split holds on the wire rather than only in
+         * the grant table.
+         *
+         * ⚠ Every result is awaited BEFORE its assertion. `t.assert` takes a synchronous
+         * `() => boolean` and the harness refuses a Promise outright, because a Promise is
+         * truthy and an `async` assertion would pass unconditionally forever.
+         */
+        const libraryAsAdmin = await get(admin, '/api/v1/files/library?search=verify-files&limit=100');
+        const libraryAsSupport = await get(support, '/api/v1/files/library');
+
+        t.assert('an Admin may browse the library', () => libraryAsAdmin.status === 200);
+
+        t.assert('...and Support may NOT — the same line /orphans draws', () =>
+            libraryAsSupport.status === 403);
+
+        const libraryRows: any[] = Array.isArray(libraryAsAdmin.body?.data)
+            ? libraryAsAdmin.body.data
+            : [];
+
+        const publicRow = libraryRows.find((r) => r.id === PUBLIC_ID.toHexString());
+
+        t.assert('the planted public fixture is in the page', () => publicRow !== undefined);
+
+        /**
+         * ⚠ The usage join, against real rows. Two references on one file must produce ONE
+         * row with a count of two — not two rows, which is what a `$lookup` + `$unwind`
+         * would produce and what a naive fix for a missing count would introduce.
+         */
+        t.assert('usage groups: two references, one row, count 2', () =>
+            libraryRows.filter((r) => r.id === PUBLIC_ID.toHexString()).length === 1
+            && publicRow?.usage?.referenceCount === 2
+            && publicRow?.usage?.references?.length === 2);
+
+        t.assert('a reference names its entity and its field', () => {
+            const ticket = publicRow?.usage?.references?.find(
+                (r: { entityType: string }) => r.entityType === 'ticket',
+            );
+            return ticket?.field === 'attachments'
+                && ticket?.entityId === '6a11000000000000000000fc'
+                && ticket?.label === null;
+        });
+
+        /**
+         * The owner name, resolved across a collection boundary. The fixture is owned by a
+         * `vendors._id` that exists in no `stores` row, so the honest answer is `null` —
+         * **never `''` and never the id** (ADR-005). That the type and id still travel is
+         * what lets a screen render "vendor · 6a11…ff" rather than an empty cell.
+         */
+        t.assert('an unresolvable owner reports type and id, and a null name', () =>
+            publicRow?.owner?.type === 'vendor'
+            && publicRow?.owner?.id === '6a11000000000000000000ff'
+            && publicRow?.owner?.name === null);
+
+        t.assert('the row carries the L-3 url and access, matching § 6', () =>
+            publicRow?.access === 'public' && publicRow?.url === ourPublic.url);
+
+        /**
+         * `meta` declares the reference cap and whether URLs can be built here at all —
+         * both asked for by BR-015 so a client is not left inferring them from the rows.
+         */
+        t.assert('meta declares the reference cap and the URL configuration', () =>
+            typeof libraryAsAdmin.body?.meta?.referenceSampleCap === 'number'
+            && libraryAsAdmin.body.meta.referenceSampleCap > 0
+            && libraryAsAdmin.body.meta.publicUrlsConfigured === true
+            && typeof libraryAsAdmin.body.meta.total === 'number');
+
+        /**
+         * The `usage` filter against real `orphanedAt` stamps. The private fixture has no
+         * reference rows and a non-null stamp; the public one has two and a null stamp.
+         */
+        const unusedPage = await get(
+            admin, '/api/v1/files/library?search=verify-files&usage=unused&limit=100',
+        );
+        const unusedIds: string[] = (unusedPage.body?.data ?? []).map((r: { id: string }) => r.id);
+
+        t.assert('`usage=unused` finds the orphan fixture and not the referenced one', () =>
+            unusedPage.status === 200
+            && unusedIds.includes(PRIVATE_ID.toHexString())
+            && !unusedIds.includes(PUBLIC_ID.toHexString()));
+
+        /**
+         * The entity filter, backed by the `{ entityType, entityId, deletedAt }` index. A
+         * pair naming an entity nothing references must answer an EMPTY page rather than the
+         * whole library — the `[]`-versus-`null` distinction the offline suite pins on the
+         * filter builder, proved here end to end.
+         */
+        const entityHit = await get(admin, '/api/v1/files/library?entityType=ticket&entityId=6a11000000000000000000fc');
+        const entityMiss = await get(admin, '/api/v1/files/library?entityType=ticket&entityId=6a11000000000000000000ab');
+        const entityHitIds: string[] = (entityHit.body?.data ?? []).map((r: { id: string }) => r.id);
+
+        t.assert('`entityType`/`entityId` narrows to that entity', () =>
+            entityHit.status === 200 && entityHitIds.includes(PUBLIC_ID.toHexString()));
+
+        t.assert('...and an entity nothing references answers an EMPTY page', () =>
+            entityMiss.status === 200 && (entityMiss.body?.data ?? []).length === 0);
+
+        /**
+         * ⚠ **The upload is deliberately NOT verified here, and that is a gap worth stating
+         * rather than hiding.** `POST /api/v1/files/upload` takes a `multipart/form-data`
+         * body and this suite's `call()` helper sends JSON; exercising it needs a multipart
+         * client and a real byte payload that jovi-mall's sniffing pipeline will accept as
+         * an image. What IS covered offline is every part of it this service owns — the
+         * content-type gate, the byte ceiling, the audit spec and the declared limits
+         * (`test:files` §§ 4, 6, 9). What nothing on this side covers is the round trip, so
+         * the first real upload is the first proof that the proxy streams correctly.
+         */
         return t.finish();
     } finally {
         try { await cleanupPlatform(); } catch { /* best effort */ }

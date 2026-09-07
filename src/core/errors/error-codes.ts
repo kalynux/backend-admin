@@ -372,6 +372,64 @@ export const ERROR_CODES = Object.freeze({
      */
     FILE_DELETE_NOT_CONFIRMED: 'FILE_DELETE_NOT_CONFIRMED',
 
+    /**
+     * The deployment's storage provider cannot serve file contents at all (BR-011).
+     *
+     * ⚠ **A CONFIGURATION state, not an outage, and the two must be distinguishable** —
+     * that is the entire reason this is its own code rather than a
+     * `SERVICE_DEPENDENCY_UNAVAILABLE`. jovi-mall's `getDownloadStream` is implemented on
+     * the `local` provider and throws on `firebase` and `cloudinary`, so on those
+     * deployments the answer is a permanent "this platform cannot show private files"
+     * rather than "try again". A client that cannot tell them apart either shows a retry
+     * button that will never work, or sends an operator hunting an incident that is not
+     * happening.
+     *
+     * Raised at **409**, so the derived category is `business_rule` and the message
+     * survives the boundary filter — an `external_service` 5xx would have its message
+     * replaced by the registry default and its `details` dropped, losing the provider
+     * name that says *why*.
+     *
+     * Arrives from jovi-mall as `details.platformCode = 'STORAGE_DOWNLOAD_NOT_SUPPORTED'`
+     * on a `PLATFORM_OPERATION_REJECTED`, and is re-raised under this name by the file
+     * gateway. Branch on `error.code`.
+     */
+    FILE_CONTENT_NOT_SUPPORTED: 'FILE_CONTENT_NOT_SUPPORTED',
+
+    /**
+     * `POST /files/upload` was sent something that is not `multipart/form-data` (BR-015).
+     *
+     * ⚠ **This is the one refusal on the upload route that no schema could express**, and
+     * it is why it is a code rather than a `VALIDATION_ERROR`. This service does not PARSE
+     * multipart (ADR-021 D-2) — the body is piped to jovi-mall unread — so there is no
+     * parsed body for Zod to validate and nothing to report a field path against. What can
+     * be checked is the `Content-Type`, and it must be, because the failure it prevents is
+     * silent: a JSON body forwarded to jovi-mall's multer produces "no files uploaded" from
+     * a service the caller never addressed, with jovi-mall's vocabulary and none of the
+     * context.
+     *
+     * Raised at **415**, the status that names the cause. A 400 would be indistinguishable
+     * from the body being malformed, which is a different fix.
+     */
+    FILE_UPLOAD_NOT_MULTIPART: 'FILE_UPLOAD_NOT_MULTIPART',
+
+    /**
+     * The upload body exceeds **this service's** declared ceiling (`ADMIN_UPLOAD_MAX_BYTES`).
+     *
+     * ⚠ **Not jovi-mall's limit, and the difference is the point.** jovi-mall sizes its
+     * per-request ceiling by ROLE and an administrator's figure there is 2 GB — a number
+     * chosen for a surface an administrator no longer reaches. wi-admin declares its own,
+     * sized for what an administrator actually uploads (blog imagery, ticket attachments),
+     * and refuses BEFORE the hop so a doomed 2 GB body is never streamed across it.
+     *
+     * Enforced twice, deliberately: on `Content-Length` when the client sends one, and on
+     * the bytes as they flow when it does not. A chunked upload has no length to check, and
+     * a ceiling that only reads a header is a ceiling any client can decline to declare.
+     *
+     * `details` carries `maxBytes` so a client can render the limit rather than restate a
+     * constant that may drift. Raised at **413**.
+     */
+    FILE_UPLOAD_TOO_LARGE: 'FILE_UPLOAD_TOO_LARGE',
+
     // ── CONTENT / EDITORIAL ───────────────────────────────────────────────────
     //
     // The `BLOG_` prefix is jovi-mall's, and it is kept deliberately. Ownership of

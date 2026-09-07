@@ -114,6 +114,16 @@ class RoleProfileRepository extends PlatformReadRepository<RoleProfileDocument> 
     findForUser(userId: ObjectId): Promise<RoleProfileDocument | null> {
         return this.findOneBy({ user_id: userId } as Filter<RoleProfileDocument>);
     }
+
+    /** Display names for a page of role-entity ids, batched. One query, never one per row. */
+    async findNamesByIds(ids: ObjectId[]): Promise<Map<string, string | null>> {
+        if (ids.length === 0) return new Map();
+        const rows = await this.findBy({ _id: { $in: ids } } as Filter<RoleProfileDocument>, {
+            projection: { _id: 1, name: 1 },
+            limit: ids.length,
+        });
+        return new Map(rows.map((row) => [row._id.toString(), row.name ?? null]));
+    }
 }
 
 const REPOSITORIES: Readonly<Record<UserRoleName, RoleProfileRepository>> = Object.freeze(
@@ -127,6 +137,37 @@ const REPOSITORIES: Readonly<Record<UserRoleName, RoleProfileRepository>> = Obje
 
 export function isUserRoleName(value: string): value is UserRoleName {
     return value in ROLE_SOURCES;
+}
+
+/**
+ * Customer display names for a page of `customers._id` values (BR-015).
+ *
+ * ── Why it lives here rather than beside its one caller ───────────────────────
+ * The media library resolves a file's owner name across five role collections, and
+ * `customers` is one of them. Declaring a second projection of that collection next to the
+ * files module would be a second thing to get right: `customers` carries `saved_addresses`
+ * (with geocoded coordinates on a person's home) and `saved_payment_methods`, and this file
+ * already exists precisely to keep one narrow whitelist per role. Same reasoning as
+ * `AgentReadRepository.findNamesByIds`, which is here for the same collection-ownership
+ * reason on the richest document of the lot.
+ *
+ * ── Deliberately NOT generic over `UserRoleName` ──────────────────────────────
+ * The obvious shape is `findRoleEntityNames(role, ids)`, and it would be a trap. `vendors`
+ * and `delivery_agencies` carry `display_name`, which is the CONTACT PERSON — their
+ * business name lives on `stores` / `agency_magazins`, and a generic helper returning the
+ * contact would print a human's name in a column headed "Vendor". Both of those already
+ * have a correct resolver on their own module's repository, so this one is narrowed to the
+ * role that has no such split.
+ *
+ * ⚠ **The id space is `customers._id`, not `users._id`,** and the distinction is load-bearing
+ * for the caller. jovi-mall's upload path stamps `ownerId` from `req.auth.role_entity._id`
+ * — the Customer document — for every role. Its own `GET /api/files` then scopes a customer
+ * to `ownerId: userId`, the USER id, which is a pre-existing mismatch on that side (a
+ * customer cannot list their own uploads there). Nothing here is affected: the library reads
+ * the value the uploader actually wrote.
+ */
+export async function findCustomerNamesByIds(ids: ObjectId[]): Promise<Map<string, string | null>> {
+    return REPOSITORIES.customer.findNamesByIds(ids);
 }
 
 /**

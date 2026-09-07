@@ -19,7 +19,7 @@ to a single owner. The Accounts screen is therefore built on the only list-shape
 - **No sorting** — *"the platform ranks these itself, over rows this service never sees, so a `sort`
   parameter would be a promise it cannot keep."*
 - **No search.**
-- **Response shape is undocumented.** [`money.md`](../../admin/api/money.md) gives the endpoint no
+- **Response shape is undocumented.** [`money.md`](../../api/money.md) gives the endpoint no
   response block, and wi-admin's own gateway types it `PlatformPage<unknown>`
   (`money.gateway.ts:203-214`). `money.controller.ts:239-242` answers with `sendPlatformPage(...)` —
   a verbatim pass-through. The dashboard traced the real shape end to end in jovi-mall's
@@ -32,7 +32,7 @@ Each row: `{ ownerType, ownerId, pending, available, reserve, requested, currenc
 
 1. **No owner name.** `listPayouts`, immediately below `listEarningsAccounts` in the same controller,
    calls `hydrateOwnerNames`. This one does not. So the directory shows ObjectIds.
-2. **No totals, anywhere.** [`accounts.md`](../../admin/api/accounts.md) states it as a design rule:
+2. **No totals, anywhere.** [`accounts.md`](../../api/accounts.md) states it as a design rule:
    *"No grand total exists, at any level."*
 
 ## The distinction this request turns on
@@ -91,7 +91,7 @@ No grand total across the four fields, in keeping with the existing rule.
 ```
 
 The **business** name where there is one (a Store, a Magazin), the contact name where there is not,
-`null` where neither resolves — the same rule [`billing.md`](../../admin/api/billing.md) already
+`null` where neither resolves — the same rule [`billing.md`](../../api/billing.md) already
 documents for `owner.name` on a subscription, and the same join `hydrateOwnerNames` already performs
 for payouts.
 

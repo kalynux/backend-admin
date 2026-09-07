@@ -95,7 +95,22 @@ export interface AgentReadModel extends Document {
          */
         last_place?: { label?: string; source?: string; resolved_at?: Date } | null;
     };
-    cod?: { trust_score?: number; max_threshold?: number };
+    /**
+     * `trust_override` is the ADMINISTRATOR's pinned score, and it OUTRANKS `trust_score`
+     * at every gate in jovi-mall (O-7). Projecting only the computed one — which is what
+     * this read model did until Phase 6.J — means every screen here reports a number the
+     * platform is not using, on precisely the agents where a human decided it should not.
+     */
+    cod?: {
+        trust_score?: number;
+        max_threshold?: number;
+        trust_override?: {
+            score?: number;
+            reason?: string;
+            set_at?: Date;
+            set_by_name?: string | null;
+        } | null;
+    };
     trust_signals?: {
         on_time_rate?: number | null;
         assignment_response_rate?: number | null;
@@ -153,6 +168,12 @@ const AGENT_LIST_PROJECTION = {
     'capacity.active_shipment_count': 1,
     'tracking.allowed': 1,
     'cod.trust_score': 1,
+    // The pinned score travels with the computed one EVERYWHERE, list included. A row
+    // showing 35 next to a dispatch that succeeded is the confusion this closes.
+    'cod.trust_override.score': 1,
+    'cod.trust_override.reason': 1,
+    'cod.trust_override.set_at': 1,
+    'cod.trust_override.set_by_name': 1,
     onboarding_step: 1,
     created_at: 1,
     updated_at: 1,
@@ -236,6 +257,8 @@ const AGENT_DETAIL_EXTRAS = {
     'last_known_tracking_state.last_place.source': 1,
     'last_known_tracking_state.last_place.resolved_at': 1,
     'cod.max_threshold': 1,
+    // The detail projection extends the list one, which already carries `trust_score` and
+    // the four `trust_override` paths.
     'trust_signals.on_time_rate': 1,
     'trust_signals.assignment_response_rate': 1,
     'trust_signals.completed_shipments': 1,
