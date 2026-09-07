@@ -19,6 +19,10 @@ export const REDACTED_PATHS = [
     'req.headers.authorization',
     'req.headers.cookie',
     'req.headers["x-service-token"]',
+    // ADR-022. The automation layer's shared secret, and it arrives on the ONE route that
+    // logs a request from a caller with no identity — so nothing else in the pipeline
+    // would have redacted it on the way past.
+    'req.headers["x-automation-token"]',
     'res.headers["set-cookie"]',
     // Credential-shaped fields anywhere in a logged payload, at any depth
     '*.password',

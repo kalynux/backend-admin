@@ -365,4 +365,22 @@ apiV1.use('/messaging', messagingRoutes);
 import { contractRoutes } from '../modules/agencies/routes/contract.routes';
 apiV1.use('/contracts', contractRoutes);
 
+/**
+ * The automation layer's failure feed (ADR-022) — the READ half.
+ *
+ * Its own prefix rather than a path under `/system`, and the reason is the subject rather
+ * than tidiness. Everything on `/system` is this platform's own machinery: its database,
+ * its workers, its outbox, its errors. This is a THIRD-PARTY runtime — n8n — reporting on
+ * itself, and the two answer differently to the same outage: `/system` says whether
+ * jovi-mall is up, this says whether customers stopped getting replies. During the incident
+ * that produced this module those were opposite answers, because the bot degraded
+ * gracefully and every execution reported success.
+ *
+ * ⚠ The WRITE half is deliberately not here. It is `/api/internal/automation/failures`,
+ * outside the versioned surface entirely, because it answers to a shared secret rather
+ * than to an administrator — see `automation-internal.routes.ts`.
+ */
+import { automationRoutes } from '../modules/automation/routes/automation.routes';
+apiV1.use('/automation', automationRoutes);
+
 export { apiV1 };

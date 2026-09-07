@@ -371,6 +371,38 @@ const EnvSchema = z
         GEO_TRACKER_DATA_BASE_URL: z.string().url().optional(),
         GEO_TRACKER_ADMIN_TOKEN: z.string().min(1).optional(),
         GEO_TRACKER_DATA_TIMEOUT_MS: positiveInt.default(4_000),
+
+        /**
+         * ── AUTOMATION FAILURE REPORTS (ADR-022) ─────────────────────────────
+         *
+         * The credential the n8n automation layer presents on
+         * `POST /api/internal/automation/failures`. **This is the only inbound service
+         * caller this service has**, and the only route reachable without an
+         * administrator identity apart from `/health`.
+         *
+         * ⚠ Shared across a service boundary under **the same name** — n8n's reporter
+         * workflow reads `$env.AUTOMATION_REPORT_TOKEN`. It is the sixth such shared value
+         * on this platform and the first whose other side is not one of the three
+         * backends. Nothing compares the two, so a MISMATCH is silent on the wire and
+         * surfaces only as failure reports that stop arriving — which looks exactly like
+         * "nothing is failing". `docs/RUNBOOK.md` § Rotation is the procedure.
+         *
+         * Optional, and **inert when unset**: the door answers
+         * `503 AUTOMATION_DOOR_UNCONFIGURED` and the read surface reports
+         * `configured: false`, the same posture as the two geo-tracker doors above. A
+         * deployment with no automation layer is a supported posture, not a misconfiguration.
+         */
+        AUTOMATION_REPORT_TOKEN: z.string().min(MIN_SECRET_LENGTH).optional(),
+
+        /**
+         * How long a failure report survives.
+         *
+         * Deliberately short beside `ADMIN_AUDIT_RETENTION_DAYS`. These rows are
+         * operational telemetry about a machine, not a record of an administrator's act —
+         * see the model header for why that difference is what permits an unconditional
+         * TTL here when `approval-request.model.ts` refuses one outright.
+         */
+        ADMIN_AUTOMATION_RETENTION_DAYS: positiveInt.default(30),
     })
     .superRefine((env, ctx) => {
         // A base URL without a token would produce calls jovi-mall rejects at the guard,

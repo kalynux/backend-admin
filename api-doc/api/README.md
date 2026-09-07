@@ -38,6 +38,7 @@ the dashboard's behalf and returns the result in its own envelope.
 | [accounts.md](accounts.md) | `/accounts` — one party's status, balances, activity, payouts, credits, cash ledger |
 | [system.md](system.md) | `/system` — health, dependencies, workers, queues, metrics, config, error journal |
 | [dev-tools.md](dev-tools.md) | `/dev-tools` — feature flags, worker triggers, outbox replay, maintenance mode |
+| [automation.md](automation.md) | `/automation` — the customer bot's own failures. **A successful execution can still be a failure** — read the ⚠ before building a screen on it |
 | [content.md](content.md) | `/content` — the marketing blog: article drafts, translations, the publish lifecycle, bylines |
 | [notifications.md](notifications.md) | `/notifications` — the administrator inbox and preferences |
 | [files.md](files.md) | `/files` — resolving a `*FileId` into a name, a type and a URL, plus the orphan listing and the permanent delete |

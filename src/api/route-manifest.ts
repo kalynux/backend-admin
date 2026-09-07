@@ -7,6 +7,7 @@ import { PermissionName } from '../modules/authorization/domain/permission.catal
 import { requireAdmin, requireAdminAllowingMfaEnrolment } from './middlewares/authenticate.middleware';
 import { requireAnyPermission, requirePermission } from './middlewares/authorize.middleware';
 import { requireCsrfToken } from './middlewares/csrf.middleware';
+import { requireServiceToken } from './middlewares/service-token.middleware';
 import { AuditAction } from '../modules/audit/domain/audit.catalog';
 import { logger } from '../core/logging/logger';
 import { emittedInScope, withEmissionScope } from '../modules/audit/domain/audit-emission';
@@ -123,11 +124,26 @@ export type RouteAccess =
      * handful of routes that exist to finish or abandon enrolment.
      */
     | { kind: 'mfa-enrolment'; reason: string }
+    /**
+     * A CREDENTIALED NON-PERSON (ADR-022). No administrator identity, no tier, no
+     * permission — a shared secret proving the caller is a configured machine.
+     *
+     * ── Why this is a kind of its own and not `public` ────────────────────────
+     * A service-token route is not public, and calling it public would put a credentialed
+     * endpoint in `PUBLIC_ROUTE_ALLOWLIST` — a list whose whole value is that reading it
+     * tells you exactly what the world can reach. It is not `self` or `permission` either:
+     * both of those begin with `requireAdmin`, and there is no administrator here.
+     *
+     * Restricted to `SERVICE_ROUTE_ALLOWLIST` for the same reason `public` is restricted:
+     * opening this door is a two-file change that shows up in a diff as exactly that.
+     */
+    | { kind: 'service'; reason: string }
     | { kind: 'permission'; permissions: readonly PermissionName[]; mode: 'all' | 'any' };
 
 export const publicRoute = (reason: string): RouteAccess => ({ kind: 'public', reason });
 export const selfService = (reason: string): RouteAccess => ({ kind: 'self', reason });
 export const mfaEnrolment = (reason: string): RouteAccess => ({ kind: 'mfa-enrolment', reason });
+export const serviceToken = (reason: string): RouteAccess => ({ kind: 'service', reason });
 
 export const permission = (...permissions: PermissionName[]): RouteAccess => ({
     kind: 'permission',
@@ -152,6 +168,25 @@ export const PUBLIC_ROUTE_ALLOWLIST: ReadonlySet<string> = new Set([
     'POST /api/v1/auth/login',
     'POST /api/v1/auth/mfa/verify',
     'POST /api/v1/auth/refresh',
+]);
+
+/**
+ * The complete list of routes reachable by a machine holding a shared secret rather than
+ * by an administrator (ADR-022).
+ *
+ * Keyed `METHOD /full/path`, mirroring `PUBLIC_ROUTE_ALLOWLIST` exactly. It holds ONE
+ * entry and the intent is that it keeps holding one: this service's identity model is
+ * "administrators, graded by tier", and every service caller added here is a caller that
+ * model does not describe.
+ *
+ * The bound to point the next "just one more machine endpoint" request at: a service
+ * route may only WRITE something a machine observed about itself. It may never read
+ * platform data, because there is no tier to grade the answer by — which is the whole
+ * reason the read half of this feature sits on `/api/v1/automation` behind three
+ * permissions instead.
+ */
+export const SERVICE_ROUTE_ALLOWLIST: ReadonlySet<string> = new Set([
+    'POST /api/internal/automation/failures',
 ]);
 
 /**
@@ -182,6 +217,20 @@ export const PUBLIC_ROUTE_ALLOWLIST: ReadonlySet<string> = new Set([
  * changes what this service does in future rather than a record of having looked.
  */
 export const NO_AUDIT_ROUTE_ALLOWLIST: ReadonlySet<string> = new Set([
+    /**
+     * ── ADR-022 adds the sixth, and it is a different kind of thing ───────────
+     * The five below are an administrator's own inbox hygiene. This one has no
+     * administrator at all: it is a machine reporting that it failed.
+     *
+     * The audit trail is defined as "the append-only record of every administrator
+     * action" and its actor field expects a person. A row here would have to invent one,
+     * and inventing an actor in an audit trail is worse than omitting the row — it makes
+     * the trail's central claim false. The report is itself a durable record in
+     * `admin_automation_failures`; what is not recorded is an administrator having done
+     * something, because none did.
+     */
+    'POST /api/internal/automation/failures',
+
     'POST /api/v1/notifications/read-all',
     'PATCH /api/v1/notifications/:notificationId/read',
     'PATCH /api/v1/notifications/:notificationId/unread',
@@ -199,6 +248,16 @@ interface RouteDefinitionBase {
     validate?: { body?: ZodTypeAny; query?: ZodTypeAny; params?: ZodTypeAny };
     /** Prefix this router is mounted at, for the manifest's full path. */
     mountedAt: string;
+    /**
+     * The API prefix this router hangs off. Defaults to `/api/v1` — the dashboard surface,
+     * and every route on the service but one.
+     *
+     * `/api/internal` is the exception (ADR-022): a machine door, outside the versioned
+     * contract because nothing there is a promise to a dashboard. It is a field rather
+     * than a hardcoded string so the manifest's full paths stay true, which is what the
+     * two allowlists and the boot assertion are keyed on.
+     */
+    apiPrefix?: '/api/v1' | '/api/internal';
 }
 
 /**
@@ -248,8 +307,8 @@ export function resetRouteManifest(): void {
     manifest.length = 0;
 }
 
-function joinPath(mountedAt: string, path: string): string {
-    const base = `/api/v1${mountedAt}`;
+function joinPath(prefix: string, mountedAt: string, path: string): string {
+    const base = `${prefix}${mountedAt}`;
     if (path === '/') return base;
     return `${base}${path}`;
 }
@@ -262,6 +321,10 @@ function gateFor(access: RouteAccess): RequestHandler[] {
             return [requireAdmin];
         case 'mfa-enrolment':
             return [requireAdminAllowingMfaEnrolment];
+        // Note what is absent: `requireAdmin`. A service caller is not a person, and
+        // nothing downstream may treat it as one — see the middleware's header.
+        case 'service':
+            return [requireServiceToken];
         case 'permission':
             return [
                 requireAdmin,
@@ -330,7 +393,7 @@ function auditProbe(audit: RouteAudit, label: string): RequestHandler {
  *   });
  */
 export function defineRoute(router: Router, definition: RouteDefinition): void {
-    const fullPath = joinPath(definition.mountedAt, definition.path);
+    const fullPath = joinPath(definition.apiPrefix ?? '/api/v1', definition.mountedAt, definition.path);
 
     if (definition.access.kind === 'permission' && definition.access.permissions.length === 0) {
         throw createAppError(
@@ -452,14 +515,27 @@ export function assertRouteManifestComplete(app: Express): void {
         if (route.access.kind === 'public' && !PUBLIC_ROUTE_ALLOWLIST.has(key)) {
             problems.push(`${key} declares public access but is not in PUBLIC_ROUTE_ALLOWLIST`);
         }
+
+        // Same shape, same reason (ADR-022). Without this, adding a second machine door
+        // would be a one-word edit inside a route file rather than a visible decision.
+        if (route.access.kind === 'service' && !SERVICE_ROUTE_ALLOWLIST.has(key)) {
+            problems.push(`${key} declares service-token access but is not in SERVICE_ROUTE_ALLOWLIST`);
+        }
+
+        // The converse, which `public` does not need because `/api/v1` is scanned whole:
+        // an `/api/internal` route that forgot `serviceToken()` would declare some
+        // administrator gate on a path no administrator can reach, and look merely broken.
+        if (route.fullPath.startsWith('/api/internal') && route.access.kind !== 'service') {
+            problems.push(`${key} is on /api/internal but does not declare serviceToken() access`);
+        }
     }
 
     for (const registered of collectRegisteredRoutes(app)) {
-        // Only `/api/v1` is in scope. `/health` sits outside it deliberately — mounted
-        // before the rate limiter so an orchestrator can always reach it, and exposing
-        // nothing that needs a decision.
+        // `/api/v1` and `/api/internal` are both in scope. `/health` sits outside them
+        // deliberately — mounted before the rate limiter so an orchestrator can always
+        // reach it, and exposing nothing that needs a decision.
         const path = registered.slice(registered.indexOf(' ') + 1);
-        if (!path.startsWith('/api/v1')) continue;
+        if (!path.startsWith('/api/v1') && !path.startsWith('/api/internal')) continue;
 
         if (!declared.has(registered)) {
             problems.push(`${registered} was registered without defineRoute() — it declares no access rule`);

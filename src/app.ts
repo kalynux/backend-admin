@@ -24,6 +24,7 @@ import { assertDualControlHandlersRegistered } from './modules/dual-control/doma
 import { assertAuditCatalogValid } from './modules/audit/domain/audit.catalog';
 import { installAuditDenialSink } from './modules/audit/domain/audit.writer';
 import { apiV1 } from './api';
+import { apiInternal } from './api/internal';
 
 /**
  * Express application assembly.
@@ -130,6 +131,12 @@ export function createApp(): Express {
 
     // ── 10. Versioned API ─────────────────────────────────────────────────────
     app.use('/api/v1', apiV1);
+
+    // ── 10a. Machine API — the one non-administrator caller (ADR-022) ─────────
+    // After the limiter, unlike `/health`: a burst of failure reports during an outage is
+    // exactly when a ceiling is worth having, and the limiter fails open when Redis is
+    // down so it cannot refuse a report for an unrelated reason.
+    app.use('/api/internal', apiInternal);
 
     // ── 10b. Every route declared who may call it ─────────────────────────────
     // Immediately after mounting, and before the 404 handler, because it inspects what

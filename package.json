@@ -21,6 +21,7 @@
     "test:foundation": "ts-node scripts/test/test-foundation.ts",
     "test:contract": "ts-node scripts/test/test-api-contract.ts",
     "test:audit": "ts-node scripts/test/test-audit.ts",
+    "test:automation": "ts-node scripts/test/test-automation.ts",
     "test:auth": "ts-node scripts/test/test-auth.ts",
     "test:authz": "ts-node scripts/test/test-authz.ts",
     "test:data-access": "ts-node scripts/test/test-data-access.ts",

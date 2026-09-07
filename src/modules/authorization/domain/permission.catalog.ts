@@ -416,6 +416,25 @@ export const PERMISSION_CATALOG = Object.freeze({
         summary: "Look up an error a vendor, agency, agent or customer hit, by its reference",
     },
 
+    /**
+     * ADR-022 — the Support rung of the automation-failure ladder.
+     *
+     * In the `support` family so `allInFamily('support')` sweeps it into tier 3, and the
+     * strict-nesting assertion carries it to 2 and 1. Same mechanism as
+     * `support.errors.lookup` directly above, and for the same reason: tier 3's grants are
+     * an explicit list, so a `system.*` name would not reach it.
+     *
+     * What it grants is the thinnest view in the projection — a channel, a kind and a
+     * timestamp. "The bot did not reply to me" is a ticket, and an agent who cannot see
+     * that the automation layer was degraded escalates it to somebody who knows less about
+     * it than they do. What they deliberately do NOT get is the machine detail, which on a
+     * support call is not a secret so much as a false lead.
+     */
+    'support.automation.lookup': {
+        family: 'support', action: 'read', phase: 22,
+        summary: 'See whether the customer bot was degraded on a channel, and when',
+    },
+
     'support.tickets.read': {
         family: 'support', action: 'read', phase: 5, scope: 'tickets',
         summary: 'View support tickets',
@@ -1074,6 +1093,29 @@ export const PERMISSION_CATALOG = Object.freeze({
     'system.maintenance.read': {
         family: 'system', action: 'read', phase: 14,
         summary: 'View whether the platform is in a maintenance window',
+    },
+
+    /**
+     * ADR-022 — the Admin rung of the automation-failure ladder.
+     *
+     * The FAMILY is the enforcement mechanism, exactly as it is for `system.errors.read`
+     * below. `tier-grants.ts` gives tier 2 `allInFamily('system')`, so an Admin picks this
+     * up automatically and tier 3 does not — Support gets `support.automation.lookup`,
+     * which is a genuinely narrower view rather than a smaller page of the same one.
+     *
+     * Deliberately NOT `system.health.read`. That permission's summary is "database, cache
+     * and downstream service health", and a failure feed is neither: it names workflows,
+     * nodes and the messages they produced. Somebody who should see whether Redis is up
+     * does not automatically need to read the automation layer's internals.
+     *
+     * ⚠ It stops short of the stack trace, which is tier 1 only via
+     * `developer_tools.logs.read`. That split is the reason this feature needs two new
+     * names: the boot assertion refuses the `developer_tools` family to any tier but 1, so
+     * a single name covering all three rungs is not expressible.
+     */
+    'system.automation.read': {
+        family: 'system', action: 'read', phase: 22,
+        summary: 'Investigate automation-layer failures — which workflow, which node, what it reported',
     },
 
     /**

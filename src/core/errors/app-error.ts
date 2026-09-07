@@ -132,6 +132,13 @@ export const DEFAULT_MESSAGES: Partial<Record<ErrorCode, string>> = {
     [ERROR_CODES.TRACKING_DOOR_UNCONFIGURED]: 'Live tracking reads are not configured on this deployment',
     [ERROR_CODES.TRACKING_DOOR_REFUSED]: 'The tracking service refused this read',
     [ERROR_CODES.TRACKING_DOOR_UNAVAILABLE]: 'The tracking service is unavailable — please try again',
+
+    // Automation failure reports (ADR-022). Read by an operator debugging a reporter node,
+    // never by a dashboard — the inbound door has no human caller.
+    [ERROR_CODES.AUTOMATION_REPORT_TOKEN_INVALID]: 'The automation report credential was refused',
+    [ERROR_CODES.AUTOMATION_REPORT_MALFORMED]: 'This is not a failure report this service can store',
+    [ERROR_CODES.AUTOMATION_DOOR_UNCONFIGURED]:
+        'Automation failure reporting is not configured on this deployment',
     [ERROR_CODES.ACCOUNT_OWNER_NOT_FOUND]: 'No vendor, agency or agent with this id',
     [ERROR_CODES.PAYOUT_NOT_PENDING]: 'This payout request has already been resolved',
     [ERROR_CODES.CONTRACT_NOT_FOUND]: 'No agent–agency contract with this id',

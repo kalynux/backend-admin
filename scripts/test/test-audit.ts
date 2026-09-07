@@ -924,6 +924,10 @@ t.section('12. Audit coverage — the assertion that would have caught this phas
  * assertion reads, so these assertions check what Express will actually serve.
  */
 import '../../src/api';
+// The machine surface registers separately — it is not mounted under `/api/v1` (ADR-022),
+// so importing only `src/api` leaves its one route out of the manifest and every assertion
+// about it passes vacuously.
+import '../../src/api/internal';
 import { assertAuditCoverageComplete } from '../../src/api/audit-coverage';
 import {
     NO_AUDIT_ROUTE_ALLOWLIST,
@@ -978,14 +982,54 @@ const EXPECTED_NO_AUDIT_ROUTES = [
     'PATCH /api/v1/notifications/:notificationId/unread',
     'POST /api/v1/notifications/:notificationId/archive',
     'POST /api/v1/notifications/:notificationId/unarchive',
+
+    /**
+     * ── ADR-022 adds the sixth, on a DIFFERENT ground from the five above ─────
+     * The five are an administrator's own inbox hygiene: a person acted, and the act was
+     * too trivial to record. This one has no person at all — it is the n8n automation
+     * layer reporting that it failed, over the one route on this service reachable
+     * without an administrator identity.
+     *
+     * The trail is defined as "the append-only record of every administrator action" and
+     * its actor field expects one. A row here would have to invent an actor, and an
+     * invented actor in an audit trail is worse than an absent row: it makes the trail's
+     * central claim false. The report is itself durable in `admin_automation_failures`;
+     * what goes unrecorded is an administrator having done something, because none did.
+     */
+    'POST /api/internal/automation/failures',
 ];
 
-t.assert('NO_AUDIT_ROUTE_ALLOWLIST holds exactly the five inbox-hygiene routes', () =>
+t.assert('NO_AUDIT_ROUTE_ALLOWLIST holds exactly the expected set', () =>
     NO_AUDIT_ROUTE_ALLOWLIST.size === EXPECTED_NO_AUDIT_ROUTES.length
     && EXPECTED_NO_AUDIT_ROUTES.every((route) => NO_AUDIT_ROUTE_ALLOWLIST.has(route)));
 
-t.assert('every allowlisted route is a notification route — nothing else opted out', () =>
-    [...NO_AUDIT_ROUTE_ALLOWLIST].every((route) => route.includes('/notifications/')));
+/**
+ * Through Phase 13 this read "every allowlisted route is a notification route", and that
+ * was the whole rule because inbox hygiene was the only thing that had ever opted out.
+ *
+ * ADR-022 makes it two grounds, and the assertion is widened to name BOTH rather than
+ * loosened to a count. The property being defended is unchanged: an ordinary business
+ * write can never appear here. It must be a read receipt on your own inbox, or a route
+ * with no administrator to attribute anything to.
+ */
+t.assert('every allowlisted route is inbox hygiene or the actor-less machine door', () =>
+    [...NO_AUDIT_ROUTE_ALLOWLIST].every((route) =>
+        route.includes('/notifications/') || route.startsWith('POST /api/internal/')));
+
+/**
+ * The second half of that rule, and the one that actually binds: a machine door may opt
+ * out of the trail only because it has no actor — so it must genuinely be a service route.
+ * Without this, `/api/internal/` becomes a prefix anybody can use to skip the audit.
+ */
+t.assert('the allowlisted machine door really is a serviceToken route', () =>
+    [...NO_AUDIT_ROUTE_ALLOWLIST]
+        .filter((route) => route.startsWith('POST /api/internal/'))
+        .every((route) =>
+            routeManifest().some(
+                (declared) =>
+                    `${declared.method.toUpperCase()} ${declared.fullPath}` === route
+                    && declared.access.kind === 'service',
+            )));
 
 t.assert('the preference write is NOT allowlisted — configuration is audited', () =>
     ![...NO_AUDIT_ROUTE_ALLOWLIST].some((route) => route.includes('/preferences')));

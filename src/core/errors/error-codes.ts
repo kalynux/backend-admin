@@ -268,6 +268,39 @@ export const ERROR_CODES = Object.freeze({
     /** geo-tracker could not be reached, or did not answer in time. Retry; report nothing. */
     TRACKING_DOOR_UNAVAILABLE: 'TRACKING_DOOR_UNAVAILABLE',
 
+    // ── AUTOMATION FAILURE REPORTS (ADR-022) ──────────────────────────────────
+    //
+    // The inbound half — the first credentialed non-administrator caller this service has.
+    // Both are returned to n8n, never to a dashboard, so their audience is an operator
+    // reading a reporter node's response body rather than a person.
+
+    /**
+     * The shared secret is missing, malformed or wrong.
+     *
+     * One code for all three, the `ADMIN_AUTH_INVALID_CREDENTIALS` reasoning applied to a
+     * service caller: splitting "no header" from "wrong value" tells an unauthenticated
+     * prober which half of the credential it got right.
+     */
+    AUTOMATION_REPORT_TOKEN_INVALID: 'AUTOMATION_REPORT_TOKEN_INVALID',
+
+    /**
+     * The body is not a failure report this service can store.
+     *
+     * Distinct from the token code because the remedies are different people: that one is
+     * an operator's env var, this one is the reporter workflow's node parameters.
+     */
+    AUTOMATION_REPORT_MALFORMED: 'AUTOMATION_REPORT_MALFORMED',
+
+    /**
+     * The door is closed — `AUTOMATION_REPORT_TOKEN` is unset, so this deployment accepts
+     * no failure reports.
+     *
+     * A 503 rather than a 404, for the reason `TRACKING_DOOR_UNCONFIGURED` gives: the route
+     * exists and the capability is built, and answering "no such endpoint" would send
+     * somebody looking for a missing deploy.
+     */
+    AUTOMATION_DOOR_UNCONFIGURED: 'AUTOMATION_DOOR_UNCONFIGURED',
+
     // ── MONEY / ACCOUNTS (Phase 11) ───────────────────────────────────────────
 
     /**

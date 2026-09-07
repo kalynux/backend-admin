@@ -167,7 +167,7 @@ export interface PermissionSpec {
      * a permission for an unbuilt endpoint is the POINT of writing the catalog now, so
      * Phase 5 and 6 consume a decided policy instead of inventing one per endpoint.
      */
-    phase: 3 | 3.5 | 5 | 6 | 7 | 9 | 11 | 12 | 14 | 15 | 16;
+    phase: 3 | 3.5 | 5 | 6 | 7 | 9 | 11 | 12 | 14 | 15 | 16 | 22;
 }
 
 /** The four flags that make a permission too sharp to be granted by a wildcard. */
