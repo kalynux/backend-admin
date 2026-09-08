@@ -75,7 +75,21 @@ export async function hash(password: string): Promise<string> {
     const policy = checkPasswordPolicy(password);
     if (!policy.ok) {
         throw createAppError(ERROR_CODES.ADMIN_AUTH_PASSWORD_WEAK, 422, undefined, {
-            problems: policy.problems,
+            // ⚠ THE WIRE KEY IS `failedRules`, AND IT MUST NOT BE RENAMED BACK TO `problems`.
+            //
+            // `problems` is on `detail-policy.ts`'s always-dropped internal-key list, and
+            // correctly so: it is the payload the nineteen boot-time assertions attach, a
+            // full internal diagnostic naming permissions, actions and route paths. The
+            // deny-list is keyed on the KEY NAME, not on where it was thrown, so attaching
+            // the field under that name here silently deleted these four user-safe strings
+            // at the boundary — an administrator got a bare refusal and no way to tell
+            // which rule they broke, while the contract page promised the server names them.
+            //
+            // The local `PasswordPolicyResult.problems` keeps its name on purpose: it is an
+            // internal shape read by the bootstrap CLI, never a wire key. This mapping is
+            // the whole fix. Do not widen the deny-list to rescue the old name — that list
+            // is what keeps the boot diagnostics from reaching a client.
+            failedRules: policy.problems,
         });
     }
     return bcrypt.hash(password, BCRYPT_COST);

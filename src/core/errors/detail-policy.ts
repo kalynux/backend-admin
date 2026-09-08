@@ -125,9 +125,11 @@ function pickKeys(
  * `undefined` rather than `{}` or `null` — ADR-005 D-9 requires `details` to be omitted
  * entirely when absent, and `test:contract` asserts `!('details' in error)`.
  *
- * `platformCode` and `platformStatus` are preserved through the scrub on purpose: they are
- * the dashboard's only handle on WHY jovi-mall refused a delegated write, and neither is
- * internal to us — the code is a published contract and the status was already sent.
+ * `platformCode`/`platformStatus` (jovi-mall) and `upstreamCode`/`upstreamStatus`
+ * (geo-tracker) are preserved through the scrub on purpose: they are the dashboard's only
+ * handle on WHY a delegated call was refused, and none is internal to us — each code is a
+ * published contract and each status was already sent. See the branch below for the test a
+ * key must pass before it joins them.
  */
 export function projectDetails(
     category: ErrorCategory,
@@ -136,17 +138,35 @@ export function projectDetails(
     if (details === undefined || details === null) return undefined;
 
     if (category === ERROR_CATEGORIES.INTERNAL || category === ERROR_CATEGORIES.EXTERNAL_SERVICE) {
-        // The one exception to "nothing survives": a delegated 5xx keeps the two fields that
-        // say WHERE it failed. Without them a dashboard cannot tell "jovi-mall is down" from
+        // The one exception to "nothing survives": a delegated 5xx keeps the fields that say
+        // WHERE it failed. Without them a dashboard cannot tell "jovi-mall is down" from
         // "wi-admin is down", and both are 502s from the caller's side.
+        //
+        // TWO PAIRS, ONE PER UPSTREAM, AND THEY ARE DELIBERATELY NOT INTERCHANGEABLE.
+        // `platformCode`/`platformStatus` are jovi-mall's, everywhere in this service — the
+        // audit table stores the first as `platform_code` and `platform.client.ts` is its
+        // only producer. `upstreamCode`/`upstreamStatus` are geo-tracker's, attached by
+        // `agents/domain/tracking-disclosure.ts`. Collapsing the second pair onto the first
+        // would make a geo-tracker refusal read as a jovi-mall one, which is the exact
+        // confusion this allowlist exists to prevent.
+        //
+        // ⚠ This is an ALLOWLIST, and adding a key to it is a disclosure decision. All four
+        // qualify on one test and nothing here should be added that fails it: each carries a
+        // PUBLISHED error code or an HTTP status the caller was already sent. Neither is
+        // internal narrative. An upstream's `message`, `body` or `stack` never qualifies —
+        // `upstream`, `upstreamBody` and `upstreamError` are on the deny-list above for that
+        // reason, and the near-identical names are not an oversight.
         const platformCode = details.platformCode;
         const platformStatus = details.platformStatus;
-        if (typeof platformCode === 'string' || typeof platformStatus === 'number') {
-            return {
-                ...(typeof platformCode === 'string' && { platformCode }),
-                ...(typeof platformStatus === 'number' && { platformStatus }),
-            };
-        }
+        const upstreamCode = details.upstreamCode;
+        const upstreamStatus = details.upstreamStatus;
+        const projectedUpstream = {
+            ...(typeof platformCode === 'string' && { platformCode }),
+            ...(typeof platformStatus === 'number' && { platformStatus }),
+            ...(typeof upstreamCode === 'string' && { upstreamCode }),
+            ...(typeof upstreamStatus === 'number' && { upstreamStatus }),
+        };
+        if (Object.keys(projectedUpstream).length > 0) return projectedUpstream;
         return undefined;
     }
 

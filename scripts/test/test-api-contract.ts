@@ -15,6 +15,8 @@
  * Run: npm run test:contract
  */
 import { z } from 'zod';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { Request, Response } from 'express';
 import { suite, throws } from './_assert';
 import {
@@ -459,6 +461,98 @@ t.assert('a blank reason is refused', () => !reasonText('why?').safeParse('   ')
 t.assert('the endpoint’s own message is used', () => {
     const result = reasonText('A reason is required to suspend an administrator').safeParse('');
     return !result.success && result.error.issues[0].message.includes('suspend an administrator');
+});
+
+// ─── 11. The detail boundary — what a caller actually receives ────────────────
+
+/**
+ * Three refusals whose `details` were silently deleted at the boundary, and the two rules
+ * that must keep deleting everything else.
+ *
+ * All three were the SAME defect and none was visible from the throw site: the filter is
+ * keyed on the KEY NAME and on the category, so a field named for its meaning at the point
+ * it is raised can be dropped for a reason belonging to a different feature entirely. The
+ * password form attached `problems`, which is the boot assertions' internal diagnostic and
+ * is dropped from every category; the tracking door attached `upstreamCode`, which the
+ * `external_service` branch did not recognise. In both cases the contract page promised a
+ * detail the client could never receive.
+ *
+ * These assertions render through the REAL global handler, so they fail if either the throw
+ * site or the policy moves — which is the pairing that was missing when the defects landed.
+ */
+t.section('11. Error details — what survives the boundary, and what must not');
+
+t.assert('a weak password names the rules it broke', () => {
+    const err = createAppError(ERROR_CODES.ADMIN_AUTH_PASSWORD_WEAK, 422, undefined, {
+        failedRules: ['must be at least 12 characters', 'is too common'],
+    });
+    const details = errorOf(render(err)).details as Record<string, unknown> | undefined;
+    return Array.isArray(details?.failedRules) && details.failedRules.length === 2;
+});
+
+t.assert('…but `problems` is STILL dropped — the deny-list was not widened to rescue it', () => {
+    const err = createAppError(ERROR_CODES.ADMIN_AUTH_PASSWORD_WEAK, 422, undefined, {
+        problems: ['must be at least 12 characters'],
+    });
+    return !('details' in errorOf(render(err)));
+});
+
+t.assert('the password throw site attaches failedRules, not problems', () => {
+    const source = readFileSync(
+        join(__dirname, '../../src/modules/admin-identity/domain/password.service.ts'),
+        'utf8',
+    );
+    const thrown = source.slice(source.indexOf('ADMIN_AUTH_PASSWORD_WEAK'));
+    return thrown.includes('failedRules: policy.problems') && !/^\s*problems: policy/m.test(thrown);
+});
+
+t.assert('a refused tracking read carries geo-tracker’s own code', () => {
+    const err = createAppError(ERROR_CODES.TRACKING_DOOR_REFUSED, 502, undefined, {
+        upstreamCode: 'SERVICE_SCOPE_FORBIDDEN',
+        upstreamStatus: 403,
+    });
+    const details = errorOf(render(err)).details as Record<string, unknown> | undefined;
+    return details?.upstreamCode === 'SERVICE_SCOPE_FORBIDDEN' && details.upstreamStatus === 403;
+});
+
+t.assert('jovi-mall’s pair still survives too — the two upstreams stay distinguishable', () => {
+    const err = createAppError(ERROR_CODES.PLATFORM_OPERATION_REJECTED, 502, undefined, {
+        platformCode: 'ORDER_NOT_FOUND',
+        platformStatus: 404,
+    });
+    const details = errorOf(render(err)).details as Record<string, unknown> | undefined;
+    return details?.platformCode === 'ORDER_NOT_FOUND' && details.platformStatus === 404;
+});
+
+t.assert('an upstream MESSAGE never survives — the allowlist stayed narrow', () => {
+    const err = createAppError(ERROR_CODES.TRACKING_DOOR_REFUSED, 502, undefined, {
+        upstreamCode: 'SERVICE_SCOPE_FORBIDDEN',
+        upstreamMessage: 'agent 64f… is outside scope agent:position',
+        upstream: { host: 'geo-tracker.internal' },
+    });
+    const details = errorOf(render(err)).details as Record<string, unknown>;
+    return details.upstreamCode === 'SERVICE_SCOPE_FORBIDDEN'
+        && !('upstreamMessage' in details)
+        && !('upstream' in details);
+});
+
+t.assert('the tracking throw site still uses the allowlisted key names', () => {
+    const source = readFileSync(
+        join(__dirname, '../../src/modules/agents/domain/tracking-disclosure.ts'),
+        'utf8',
+    );
+    return source.includes('upstreamCode: result.code') && source.includes('upstreamStatus: result.status');
+});
+
+t.assert('a malformed automation report is its own code, not generic validation', () => {
+    const err = createAppError(ERROR_CODES.AUTOMATION_REPORT_MALFORMED, 400, undefined, {
+        fields: [{ path: 'workflowId', message: 'Required', code: 'invalid_type' }],
+    });
+    const error = errorOf(render(err));
+    const details = error.details as Record<string, unknown> | undefined;
+    return error.code === ERROR_CODES.AUTOMATION_REPORT_MALFORMED
+        && error.category === 'validation'
+        && Array.isArray(details?.fields);
 });
 
 process.exit(t.finish());

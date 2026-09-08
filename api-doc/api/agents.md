@@ -832,20 +832,31 @@ decision, and every poll is an audit row.
 The three are separate codes because each is fixed by a different person. Do not collapse them
 into "tracking unavailable" on the screen.
 
-> ### ⚠️ The `502` carries **no `details`**, and its message is the generic one
+> ### The `502` names WHICH refusal, under `details.upstreamCode`
 >
 > The throw site attaches `{ upstreamCode, upstreamStatus }` — geo-tracker's own
-> `SERVICE_SCOPE_FORBIDDEN` / `SERVICE_TOKEN_INVALID` / `SERVICE_DOOR_NOT_CONFIGURED` — and the
-> boundary drops both. `TRACKING_DOOR_REFUSED` is raised at **502**, which is category
-> `external_service`, and that category keeps **only** `platformCode` and `platformStatus`
-> (`admin/src/core/errors/detail-policy.ts:139-150`). Neither key is present, so `details` is
-> omitted entirely — and the same rule replaces the thrown message with the registry default
-> *"The tracking service refused this read"*.
+> `SERVICE_SCOPE_FORBIDDEN` / `SERVICE_TOKEN_INVALID` / `SERVICE_DOOR_NOT_CONFIGURED`, plus the
+> status it answered with — and **both now reach you**. Branch on `upstreamCode`: a missing
+> scope is fixed in geo-tracker's `GEO_TRACKER_ADMIN_SCOPES`, a drifted secret is an operator's
+> rotation, and a closed door is a deployment state. They are three different people.
 >
-> **What a client can act on is the code and the status, nothing finer.** Render *"the tracking
-> service refused this read — ask an operator to check the data door"* and stop there; the
-> distinction between the three upstream causes is visible only in geo-tracker's own logs and in
-> wi-admin's server-side log line. Verified 2026-09-08 and reported to the backend as a defect.
+> ⚠️ **The message is still the registry default** *"The tracking service refused this read"*,
+> and nothing beyond those two keys survives — `external_service` replaces the thrown message in
+> every environment, and an upstream `message`, body or stack is never disclosed
+> (`admin/src/core/errors/detail-policy.ts`). So render your own copy from `upstreamCode`; do not
+> show `error.message` and expect it to be specific.
+>
+> ⚠️ **This changed on 2026-09-08.** Until then the `external_service` rule kept only
+> `platformCode`/`platformStatus` (jovi-mall’s pair), so `upstreamCode` was dropped and `details`
+> was omitted entirely. `upstreamCode`/`upstreamStatus` are now a **second, separate pair** in
+> that allowlist — one per upstream, deliberately not interchangeable, so a geo-tracker refusal
+> never reads as a jovi-mall one. Pinned by `npm run test:contract` § 11.
+>
+> **What a client can act on is `upstreamCode`, `upstreamStatus` and the code itself.** Render a
+> line per cause — a missing scope, a drifted secret, a closed door — rather than one generic
+> *"tracking unavailable"*; that collapse is exactly what the three separate codes exist to
+> prevent. wi-admin also logs the refusal server-side, and geo-tracker records it as
+> `geotracker_service_reads_total{scope,outcome}`.
 
 ---
 

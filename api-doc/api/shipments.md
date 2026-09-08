@@ -366,13 +366,13 @@ Both are inert when the door is not configured, answering `503 TRACKING_DOOR_UNC
 | 503 | `TRACKING_DOOR_UNCONFIGURED` | **This deployment has no data door.** Not an outage — a configuration state |
 | 503 | `TRACKING_DOOR_UNAVAILABLE` | geo-tracker unreachable, or too slow |
 
-> ⚠ **The `502` carries no `details` and a generic message.** The throw site attaches
-> `{ upstreamCode, upstreamStatus }`, and the boundary's `external_service` rule keeps only
-> `platformCode`/`platformStatus` — so the object empties and `details` is omitted, and the
-> message becomes the registry default *"The tracking service refused this read"*. **You cannot
-> tell the three upstream causes apart from the response.** Same behaviour, same reason, as the
+> ⚠ **The `502` names which refusal, but its message stays generic.** The throw site attaches
+> `{ upstreamCode, upstreamStatus }` — geo-tracker's own code and status — and since 2026-09-08
+> the boundary's `external_service` rule preserves that pair alongside jovi-mall's
+> `platformCode`/`platformStatus`. **Branch on `upstreamCode`** to tell the three upstream causes
+> apart. The **message** is still replaced by the registry default *"The tracking service refused
+> this read"*, and nothing else survives the scrub. Same behaviour, same reason, as the
 > agent-scoped half — see [agents.md](agents.md).
-
 ---
 
 ## `GET /shipments/:shipmentId/tracking-trail`

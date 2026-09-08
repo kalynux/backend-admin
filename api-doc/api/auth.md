@@ -1,6 +1,6 @@
 # `/auth` — administrator authentication
 
-**Verified against source on 2026-09-08** — all eleven routes, their access kinds and their audit declarations against `admin-identity/routes/auth.routes.ts`; every request schema against `admin-identity/validators/auth.validator.ts`; the eight lifetime/limit defaults against `admin/src/config/env.ts:87-139`; the two rate-limit buckets against `api/middlewares/auth-rate-limit.middleware.ts`; the password policy against `admin-identity/domain/password.service.ts:30-71`; and the `422` detail exposure against `core/errors/detail-policy.ts:74,132`.
+**Verified against source on 2026-09-08** — all eleven routes, their access kinds and their audit declarations against `admin-identity/routes/auth.routes.ts`; every request schema against `admin-identity/validators/auth.validator.ts`; the eight lifetime/limit defaults against `admin/src/config/env.ts:87-139`; the two rate-limit buckets against `api/middlewares/auth-rate-limit.middleware.ts`; the password policy against `admin-identity/domain/password.service.ts:30-71`; and the `422` detail exposure against `core/errors/detail-policy.ts` + `password.service.ts:75-95` (the detail key is now `failedRules`; pinned by `test:contract` § 11).
 
 Base path: `/api/v1/auth`
 
@@ -517,18 +517,35 @@ Enforced where a password is **set** — never where one is checked:
 - not on the common-password list (nine literal entries, `password.service.ts:40`)
 - not a single repeated character
 
-> ### ⚠️ The `422` does **not** tell you which rule broke
+> ### The `422` names the rules you broke — under `details.failedRules`
 >
-> The throw site attaches `details.problems` — an array of phrases like *"must be at least 12
-> characters"* — and **the boundary drops it**. `problems` is on the always-dropped internal-key
-> list (`admin/src/core/errors/detail-policy.ts:74`, where it exists to suppress the boot
-> assertions' diagnostic payload), and it is dropped in **every** category. After the scrub the
-> object is empty, so `details` is omitted from the envelope entirely.
+> The throw site attaches `details.failedRules`: an array of phrases completing *"your password
+> …"*, one per rule that failed — `"must be at least 12 characters"`, `"is too common"`,
+> `"cannot be a single repeated character"`. Render them as a list.
 >
-> **What a client actually receives is `422 ADMIN_AUTH_PASSWORD_WEAK` with the fixed message
-> "Password does not meet the minimum requirements" and no `details`.** State the four rules on
-> the form up front and validate the length client-side; do not build a UI that waits for the
-> server to name the failure. Verified 2026-09-08 — reported to the backend as a defect.
+> ```json
+> {
+>   "success": false,
+>   "requestId": "req_01J...",
+>   "error": {
+>     "code": "ADMIN_AUTH_PASSWORD_WEAK",
+>     "message": "Password does not meet the minimum requirements",
+>     "statusCode": 422,
+>     "category": "business_rule",
+>     "details": { "failedRules": ["must be at least 12 characters", "is too common"] }
+>   }
+> }
+> ```
+>
+> Only the **failed** rules appear, so the array is never empty on a 422 and never lists all
+> four. Still state the policy on the form up front and validate the length client-side — this
+> is the server confirming a refusal, not the only place the rules are published.
+>
+> ⚠️ **The key is `failedRules`, not `problems`, and the difference is not cosmetic.** Until
+> 2026-09-08 the throw site used `problems`, which is on the boundary’s always-dropped
+> internal-key list (it is the boot assertions’ diagnostic payload) and is dropped in **every**
+> category — so the object emptied, `details` was omitted, and a client received the fixed
+> message and nothing else. If you built a form against that behaviour, the details now arrive.
 
 ### Response (200)
 
@@ -548,7 +565,7 @@ Every **other** session is ended; the caller keeps theirs.
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | Missing field, or the new password equals the current one |
 | 401 | `ADMIN_AUTH_INVALID_CREDENTIALS` | `currentPassword` is wrong |
-| 422 | `ADMIN_AUTH_PASSWORD_WEAK` | Policy failure. ⚠ **No `details` arrive** — see the box above |
+| 422 | `ADMIN_AUTH_PASSWORD_WEAK` | Policy failure. `details.failedRules` lists the rules that broke — see the box above |
 | 429 | `RATE_LIMIT_EXCEEDED` | |
 
 ### Audit

@@ -6,8 +6,16 @@
 `admin/src/core/errors/detail-policy.ts:132-176`. Three rows said `platformCode` arrives on a
 forwarded **403** or **429**; it does not, because those two categories are the only ones with a
 closed key allowlist. Corrected in place. Two further rows over-promised `details`:
-`ADMIN_AUTH_PASSWORD_WEAK` (its `problems` key is on the always-dropped list) and
+`ADMIN_AUTH_PASSWORD_WEAK` (its `problems` key was on the always-dropped list) and
 `RATE_LIMIT_EXCEEDED` (the two `/auth/*` buckets attach none).
+
+**Amended again 2026-09-08 (third pass)** — two of those over-promises were **fixed in the code
+rather than documented away**, so two rows below have changed meaning:
+`ADMIN_AUTH_PASSWORD_WEAK` now attaches `failedRules` (not `problems`) and the list reaches the
+client; `TRACKING_DOOR_REFUSED` now keeps `upstreamCode`/`upstreamStatus`, which joined
+`platformCode`/`platformStatus` in the `external_service` allowlist as a second, separate pair —
+one per upstream, deliberately not interchangeable. `AUTOMATION_REPORT_MALFORMED` is also raised
+now. All three are pinned by `npm run test:contract` § 11.
 
 The error contract is shared across all three backend services (wi-admin, jovi-mall,
 geo-tracker). One envelope, one nine-value taxonomy, one exposure rule.
@@ -248,7 +256,7 @@ logs.
 | `ADMIN_AUTH_MFA_ALREADY_ENROLLED` | 409 | `conflict` | Re-enrolling would silently invalidate the live authenticator. |
 | `ADMIN_AUTH_MFA_NOT_ENROLLED` | 409 | `conflict` | Two-factor is not set up. |
 | `ADMIN_AUTH_CSRF_INVALID` | 403 | `authentication` | Missing or mismatched `X-CSRF-Token`. The remedy is a fresh token, not a different permission. |
-| `ADMIN_AUTH_PASSWORD_WEAK` | 422 | `business_rule` | The new password fails policy. ⚠ **No `details` arrive.** The throw site attaches `details.problems`, and `problems` is on the always-dropped internal-key list above — so the scrub empties the object and `details` is omitted. The client gets the fixed message *"Password does not meet the minimum requirements"* and nothing more. The four rules are in [auth.md](auth.md#password-policy); state them on the form. |
+| `ADMIN_AUTH_PASSWORD_WEAK` | 422 | `business_rule` | The new password fails policy. **`details.failedRules` names the rules that broke** — an array of phrases completing *"your password …"*, e.g. `["must be at least 12 characters", "is too common"]`. Only the failed rules appear, so it is never empty on a 422 and never lists all four. ⚠ The key is `failedRules`; it was `problems` until 2026-09-08, and `problems` is on the always-dropped internal-key list above, so the array never reached a client. The four rules are also in [auth.md](auth.md#password-policy); state them on the form regardless. |
 
 ### Authorization — `AUTHZ_*`
 
@@ -329,7 +337,7 @@ the geo-tracker clients never throw, so a door failure fails the **request** onl
 | Code | Status | Category | Meaning |
 |---|---|---|---|
 | `TRACKING_DOOR_UNCONFIGURED` | 503 | `external_service` | **This deployment has no data door** — `GEO_TRACKER_DATA_BASE_URL` / `GEO_TRACKER_ADMIN_TOKEN` are unset. The door is **optional by design**, so this is a configuration state and not an incident: say "live tracking is not enabled here", not "something went wrong". Probe it without disclosing anything (and without writing an audit row) via the `configured` flag on the tracking reads. |
-| `TRACKING_DOOR_REFUSED` | 502 | `external_service` | geo-tracker answered **and refused** — typically a capability missing from `GEO_TRACKER_ADMIN_SCOPES`, or a rejected `reason`. The remedy is geo-tracker's scope configuration. ⚠ **No `details` reach the client.** The throw site attaches `{ upstreamCode, upstreamStatus }` and the `external_service` rule above keeps only `platformCode`/`platformStatus`, so the object empties and `details` is omitted — and the message is replaced by the registry default. A client can act on the code and the status, nothing finer. |
+| `TRACKING_DOOR_REFUSED` | 502 | `external_service` | geo-tracker answered **and refused** — typically a capability missing from `GEO_TRACKER_ADMIN_SCOPES`, or a rejected `reason`. **`details.upstreamCode` carries geo-tracker's own code verbatim**, with `details.upstreamStatus`: `SERVICE_SCOPE_FORBIDDEN` (this credential lacks the scope), `SERVICE_TOKEN_INVALID` (the shared secret has drifted), `SERVICE_DOOR_NOT_CONFIGURED` (geo-tracker's half is closed). Branch on it — each is a one-line fix by a different person, and a single "tracking unavailable" makes all three look like an outage. ⚠ The **message** is still replaced by the registry default, as for every `external_service` code, and nothing else survives: an upstream `message` or body never does. The pair reached the client only from 2026-09-08 — before that the `external_service` rule kept `platformCode`/`platformStatus` alone and this row correctly said no `details` arrived. |
 | `TRACKING_DOOR_UNAVAILABLE` | 503 | `external_service` | geo-tracker could not be **reached** — timeout, connection refused, unparseable answer. The only one of the three that is an incident. Retry. |
 
 > ⚠ **A read that emits coordinates writes its audit row BEFORE the disclosure, and does not
@@ -425,7 +433,7 @@ can return**, and a registry that quietly omits a family is how the dashboard's
 |---|---|---|---|
 | `AUTOMATION_DOOR_UNCONFIGURED` | 503 | `external_service` | `AUTOMATION_REPORT_TOKEN` is unset, so this deployment accepts no failure reports. A 503 rather than a 404 for the reason `TRACKING_DOOR_UNCONFIGURED` gives: the route exists and the capability is built. The read side reports the same state as `configured: false` — see [automation.md](automation.md). |
 | `AUTOMATION_REPORT_TOKEN_INVALID` | 401 | `authentication` | The shared secret is missing, malformed or wrong. **One code for all three**, the `ADMIN_AUTH_INVALID_CREDENTIALS` reasoning applied to a service caller: splitting "no header" from "wrong value" tells an unauthenticated prober which half it got right. |
-| `AUTOMATION_REPORT_MALFORMED` | — | — | Declared and **raised by nothing today.** The reporter's body is validated by Zod, so a bad report is an ordinary `400 VALIDATION_ERROR`. Kept because the two failures have different remedies — the token is an operator's env var, the body is the reporter workflow's node parameters — and the split is worth having when a hand-written check lands. **Do not write a client branch on it.** |
+| `AUTOMATION_REPORT_MALFORMED` | 400 | `validation` | The report cannot be filed or deduplicated — in practice `workflowId` is missing, or `kind` is absent or not one of the two values. `details.fields` lists the offending paths. Distinct from `AUTOMATION_REPORT_TOKEN_INVALID` because the remedies are different people: that one is an operator's env var, this one is the reporter workflow's node parameters. **Narrow by design** — every other field is optional, because an Error Trigger's payload varies by how the run died and losing an incident to protect a field nobody reads is the worse trade. Raised from 2026-09-08; before that a malformed report was a generic `400 VALIDATION_ERROR`. |
 
 ### Infrastructure and configuration
 
