@@ -1,5 +1,7 @@
 # `/contracts` — one agent↔agency contract
 
+**Verified against source on 2026-09-08** — the four routes and their guards against the live route manifest, and every `details.platformCode` value against jovi-mall's `src/core/error-codes.ts` (`CONTRACT_REQUEST_ALREADY_PENDING` was named here and does not exist; the real code is `CONTRACT_STATUS_REQUEST_ALREADY_PENDING`).
+
 Four routes: the full terms of one contract, and the three administrative interventions
 that may be performed on it.
 
@@ -196,7 +198,7 @@ Legal from `pending`, `active`, `paused` and `suspended`.
 | 400 | `VALIDATION_ERROR` | Missing or short `reason`; an unknown key in the body (the schema is strict, so an attempt to send `terms` is a 400 rather than a silent no-op) |
 | 404 | `CONTRACT_NOT_FOUND` | No such contract |
 | 403 | `AUTHZ_PERMISSION_DENIED` | |
-| 409 | `PLATFORM_OPERATION_REJECTED` | jovi-mall refused. `details.platformCode` is `CONTRACT_INVALID_TRANSITION` (wrong `from` status), `CONTRACT_TRANSITION_NOT_PERMITTED`, or `CONTRACT_REQUEST_ALREADY_PENDING` |
+| 409 | `PLATFORM_OPERATION_REJECTED` | jovi-mall refused. `details.platformCode` is `CONTRACT_INVALID_TRANSITION` (wrong `from` status), `CONTRACT_TRANSITION_NOT_PERMITTED`, or `CONTRACT_STATUS_REQUEST_ALREADY_PENDING` |
 
 ### Audit
 

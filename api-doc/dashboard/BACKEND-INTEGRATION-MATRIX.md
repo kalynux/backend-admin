@@ -1,7 +1,21 @@
 # Backend Integration Matrix
 
 **Phase 0 — discovery only. No code was written.**
-Date: 2026-08-13 · Source of truth: `docs/admin/api/` (21 files) · Service: `wi-admin`, port **8033**, base path **`/api/v1`**
+Date: 2026-08-13 · Source of truth: `admin/api-doc/api/` (27 files today; 21 when this was written) · Service: `wi-admin`, port **8033**, base path **`/api/v1`**
+
+> ⚠ **This is a dated snapshot, not a live reference.** Re-checked 2026-09-08: **three of its
+> platform-wide rules have since been reversed**, and each is quoted from a page that has
+> itself been corrected. The endpoint tables below are still broadly right; the three rules are
+> not, and they are the ones a client bakes in once and never revisits.
+>
+> | This page says | What is true now |
+> |---|---|
+> | *"No multipart anywhere"* (§ platform rules) | **`POST /files/upload` accepts a `multipart/form-data` body**, capped at 32 MiB (`ADMIN_UPLOAD_MAX_BYTES`), since BR-015 / ADR-021 on 2026-08-26. The **1 MB** ceiling belongs to `express.json` and does not apply there |
+> | *"wi-admin has **no data door into geo-tracker**"* (§ agents) | **It has one** — scoped, purpose-bound and audited — since ADR-020 on 2026-08-22. `tracking.lastKnown` is still a stale mirror and still must not be rendered as a live marker, but `GET /agents/:agentId/live-position` is now the live answer |
+> | *"`GET /money/payouts/:id/destination` is the one audited **read**"* | **Four reads are audited**: that one, `GET /agents/:agentId/live-position`, `GET /shipments/:shipmentId/tracking-trail` and `GET /files/:fileId/content` |
+>
+> Every path written here as `docs/admin/api/…` is the pre-2026-09-08 layout. The contract now
+> lives at `admin/api-doc/api/`, mirrored in the dashboard at `api-doc/admin/api/`.
 
 Every endpoint, permission and field below was read out of `docs/admin/api/`. Nothing is inferred.
 Where a module needs something the contract does not provide, it is listed as a **gap**, not filled in.
@@ -296,7 +310,12 @@ the point is a person's residence and is not projected), `kyc`, `ban`, `tracking
 > `isStale` is computed on read: **`true` when the report is older than 2 minutes**, or absent.
 > **Render as "last seen", never as a live marker on a map** — a live marker would simply stop moving
 > and nobody would be told. The authoritative answer is `GET /agents/:agentId/tracking-policy`.
-> wi-admin has **no data door into geo-tracker**.
+> ⛔ ~~wi-admin has **no data door into geo-tracker**.~~ **Reversed on 2026-08-22 (ADR-020).**
+> There is now a scoped, audited one: `GET /agents/:agentId/live-position` (a live coordinate,
+> `reason` required, one audit row per call) and `GET /agents/:agentId/tracking-presence`, plus
+> `GET /shipments/:shipmentId/{tracking-trail,tracking-events}`. The sentence above this one is
+> unaffected and still holds: `tracking.lastKnown` remains a stale business mirror and must not
+> be drawn as a live marker. See [`../api/agents.md`](../api/agents.md).
 
 **The three delegated verdict reads** are the platform's own answers and are never recomputed here:
 - `tracking-policy` → `{ trackingAllowed, denyReason? }` where `denyReason` ∈
@@ -1263,8 +1282,8 @@ filters `createdAt`, **not `completedAt`**, so `pending`/`failed` rows are not s
 | **`404` is the denial** for out-of-scope records — a 403 on an id would confirm the id exists |
 | **`X-Request-Id`** | Send it, it is echoed back and exposed to browsers. Surface it in generic error toasts |
 | **Rate limits** | Global 3000/min/IP; per-identity 2400 (T1) / 1800 (T2) / 1200 (T3) per minute; **credential routes 10/min/IP**. All `429 RATE_LIMIT_EXCEEDED` with `details.retryAfterSeconds` and `draft-7` headers |
-| **Body** | JSON, **1 MB max**, `413 REQUEST_BODY_TOO_LARGE`. **No multipart anywhere.** Endpoints marked *strict* reject unknown fields with a `400` |
-| **Audit** | Every mutation is audited before it answers, in the same transaction. A `2xx` on a write means the audit row committed. The five inbox-hygiene routes are the deliberate exception; `GET /money/payouts/:id/destination` is the one audited **read** |
+| **Body** | JSON, **1 MB max**, `413 REQUEST_BODY_TOO_LARGE`. Endpoints marked *strict* reject unknown fields with a `400`. ⛔ ~~No multipart anywhere.~~ **`POST /files/upload` takes one** (since 2026-08-26), with its own **32 MiB** ceiling; the 1 MB limit is `express.json`'s and never sees that request |
+| **Audit** | Every mutation is audited before it answers, in the same transaction. A `2xx` on a write means the audit row committed. The five inbox-hygiene routes are the deliberate exception. ⛔ **Four reads are audited**, not one: `GET /money/payouts/:id/destination`, `GET /agents/:agentId/live-position`, `GET /shipments/:shipmentId/tracking-trail`, `GET /files/:fileId/content` |
 | **Delegated failures** | `PLATFORM_OPERATION_REJECTED` at jovi-mall's original status with its code in **`details.platformCode`** — branch on that, not on `error.code`. `SERVICE_DEPENDENCY_UNAVAILABLE` (502/503) means no answer came back |
 
 ---

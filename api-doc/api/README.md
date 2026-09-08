@@ -1,5 +1,10 @@
 # wi-admin API — the frontend contract
 
+**Verified against source on 2026-09-08** — the endpoint and route-group counts, the permission
+total, the three public routes, the four audited reads and the multipart/body-size rules, each
+re-derived by booting the route manifest and reading `admin/src/config/env.ts`,
+`admin/src/app.ts` and `admin/src/modules/files/routes/file.routes.ts`.
+
 **This directory is the official contract for admin-dashboard development.** Everything the
 dashboard may call is here: every path, every guard, every field, every failure. If a
 behaviour is not written down here, it is not promised.
@@ -18,7 +23,7 @@ the dashboard's behalf and returns the result in its own envelope.
 | [../FRONTEND-CHANGELOG-phase-2-3.md](../FRONTEND-CHANGELOG-phase-2-3.md) | **What readiness Phases 2 and 3 changed for this dashboard.** No endpoint changed; Tracking Allow became reliable, the database screen's permanent phantom index drift is gone, and there is still no geo-tracker data door |
 | [../FRONTEND-CHANGELOG-phase-4-5.md](../FRONTEND-CHANGELOG-phase-4-5.md) | **What readiness Phases 4 and 5 changed for this dashboard — the largest instalment so far.** 🔴 Every note this service created was filed **public**; an expired approval was still approvable; `resolvedByUserId` → `resolvedBy`. Plus **three new modules** (`content`, `files` orphans + permanent delete, `messaging`), a deleted `GET /audit/legacy`, and the deleted `customers.*` permissions |
 | [errors.md](errors.md) | The complete error-code registry, the nine categories, and the exposure rule |
-| [permissions.md](permissions.md) | All 116 permissions, the three administrator levels, and the grant matrix |
+| [permissions.md](permissions.md) | All 118 permissions, the three administrator levels, and the grant matrix |
 | [health.md](health.md) | `/health/live`, `/health/ready` — unversioned probes |
 | [auth.md](auth.md) | `/auth` — login, MFA, refresh, sessions, own password |
 | [administrators.md](administrators.md) | `/administrators` — administrator management, levels, suspension, sessions |
@@ -44,19 +49,28 @@ the dashboard's behalf and returns the result in its own envelope.
 | [files.md](files.md) | `/files` — resolving a `*FileId` into a name, a type and a URL, plus the orphan listing and the permanent delete |
 | [messaging.md](messaging.md) | `/messaging` — one Telegram message to one connected account. Not a broadcast |
 
-**230 versioned endpoints** across 23 route groups, plus 2 unversioned health probes.
+**237 versioned endpoints** across **24** route groups, plus 2 unversioned health probes.
 
-Counted from a live `createApp()` boot, not from this table — re-counted 2026-08-22, when it
-rose by four: the geo-tracker data door (Phase 6.I / ADR-020) added
-`/agents/:agentId/{tracking-presence,live-position}` and
-`/shipments/:shipmentId/{tracking-trail,tracking-events}`. The route-group count is unchanged;
-they landed inside two existing groups. ⚠ The figure was **225 and stale by one** before that
-re-count, which is what a number written by hand next to a number produced by a boot does.
+Counted from the live route manifest, not from this table — re-counted **2026-09-08**. ⚠ **The
+figure stood at "230 across 23" and was stale by seven**, which is what a number written by hand
+beside a number produced by a boot does; it has now been stale twice, so **derive it rather than
+quoting it.** The route group is the 24th because ADR-022 added `/automation`.
 
-It fell by one at Phase 5 Part D:
-`GET /audit/legacy` — the interim feed of administrative actions still performed ON jovi-mall —
-was deleted with the legacy surface it reported on. The route group count is unchanged because
-that feed was a **second** router on `/audit`, beside the real one.
+There is **one further route that is not on this surface at all** and that the dashboard must
+never call: `POST /api/internal/automation/failures`, which the n8n automation layer uses to
+report itself and which answers to a shared secret rather than to an administrator. It is
+outside `/api/v1` deliberately — see [automation.md](automation.md).
+
+Two earlier movements, kept because they explain the shape:
+
+- It rose by four on 2026-08-22 when the geo-tracker data door (Phase 6.I / ADR-020) added
+  `/agents/:agentId/{tracking-presence,live-position}` and
+  `/shipments/:shipmentId/{tracking-trail,tracking-events}`. The route-group count did not move;
+  they landed inside two existing groups.
+- It fell by one at Phase 5 Part D, when `GET /audit/legacy` — the interim feed of administrative
+  actions still performed ON jovi-mall — was deleted with the legacy surface it reported on. The
+  route-group count did not move there either, because that feed was a **second** router on
+  `/audit`, beside the real one.
 
 ---
 
@@ -431,11 +445,27 @@ reaches one, the number is wrong. The credential ceiling is a security boundary 
 | Rule | Value |
 |---|---|
 | Content type | `application/json` (also `application/x-www-form-urlencoded`) |
-| Maximum size | **1 MB** → `413 REQUEST_BODY_TOO_LARGE` |
+| Maximum size | **1 MB** → `413 REQUEST_BODY_TOO_LARGE` — **except `POST /files/upload`, see below** |
 | Malformed JSON | `400 REQUEST_BODY_INVALID` |
 | Unsupported charset/encoding | `415 REQUEST_MEDIA_TYPE_UNSUPPORTED` |
 | Unknown fields | Stripped by default; endpoints marked **strict** reject them with `400` |
-| File uploads | **Not supported anywhere.** This service accepts no multipart bodies. |
+| File uploads | **One route accepts a `multipart/form-data` body: `POST /files/upload`.** Every other route accepts none. |
+
+⚠ **This table said "File uploads: not supported anywhere; this service accepts no multipart
+bodies" until 2026-09-08, and it had been false since 2026-08-26** (BR-015 · ADR-021 D-2). The
+sentence it replaced is still true in its narrow form and is the one to keep in mind: **wi-admin
+never *parses* a multipart body.** `POST /files/upload` pipes the raw request through to
+jovi-mall unread — no multer, no busboy, no new dependency — so nothing here validates a field
+name or a file count, and jovi-mall's own upload policy is what refuses a bad file.
+
+Two consequences for a client:
+
+- **The 1 MB ceiling does not apply on that route.** It belongs to `express.json`, which is
+  content-type gated and never sees a multipart request. The route declares its own limit,
+  `ADMIN_UPLOAD_MAX_BYTES`, default **32 MiB** — a whole-request figure covering multipart
+  framing, not a per-file one. jovi-mall caps an image well below that.
+- **An upload ask elsewhere is still an ask for ids plus a resolution route.** One route
+  gained a body; the rule did not go away. See [files.md](files.md).
 
 Path ids are validated at the edge: a malformed id is `400 VALIDATION_ERROR` ("Not a valid
 agent id"), not a 404.
@@ -453,8 +483,13 @@ transaction as the change. Three consequences for a client:
 1. A `2xx` on a write means the audit row committed. There is no "succeeded but unrecorded".
 2. Five inbox-hygiene routes are deliberately **not** audited (mark read/unread/archive/
    unarchive/read-all) — see [notifications.md](notifications.md).
-3. One **read** is audited, because the disclosure is the action:
-   `GET /money/payouts/:payoutId/destination`.
+3. **Four reads are audited**, because on each of them the disclosure *is* the action:
+   `GET /money/payouts/:payoutId/destination`, `GET /agents/:agentId/live-position`,
+   `GET /shipments/:shipmentId/tracking-trail` and `GET /files/:fileId/content`. On all four the
+   row commits **before** the disclosure and its failure is not caught — with the audit store
+   down, nothing is disclosed. ⚠ This page said *one* until 2026-09-08; the other three landed
+   with the geo-tracker data door and the file-bytes route. See
+   [permissions.md](permissions.md#four-reads-are-audited-and-three-of-them-are-held-by-support).
 
 Audit rows are queryable at `/api/v1/audit` — see [audit.md](audit.md).
 

@@ -1,5 +1,7 @@
 # `/automation` — what the customer bot reported about its own failures
 
+**Verified against source on 2026-09-08** — both routes, their three-permission `any` guard, the two enums, the query bounds and the tier projection, against `admin/src/modules/automation/{routes,validators,domain,controllers}/`.
+
 Base path: `/api/v1/automation`
 
 What an operator needs to answer *"is the customer bot working?"* — a question `/system` cannot
@@ -39,8 +41,20 @@ down — usually jovi-mall. A wall of `execution_failed` is the bot itself.
 
 ## `GET /automation/failures`
 
-Query: `workflowId`, `kind`, `channel`, `windowHours` (1–720, default 24), `limit` (1–200,
-default 50). No cursor — this is a monitoring surface, not an export, and the rows expire.
+| Query parameter | Type | Default | Bounds |
+|---|---|---|---|
+| `workflowId` | string | — | 1–64 characters. The **id**, never the name |
+| `kind` | enum | — | `execution_failed` · `degraded_turn` |
+| `channel` | enum | — | `telegram` · `whatsapp` · **`unknown`** |
+| `windowHours` | integer | `24` | 1 – 720 (30 days) |
+| `limit` | integer | `50` | 1 – 200 |
+
+Anything outside those bounds is a `400 VALIDATION_ERROR`. There is **no cursor and no `meta`** —
+this is a monitoring surface, not an export, and the rows expire.
+
+⚠ **`channel: "unknown"` is a real value and a filter must offer it.** It is the stored default,
+and an `execution_failed` report has no envelope to read a channel out of — so a dropdown offering
+only Telegram and WhatsApp hides most of the *died-outright* rows, which are the more urgent half.
 
 **The response is graded by the caller's tier**, and `view` names which grading you got. That
 field is not decoration: without it a Support agent reading a two-field row cannot tell *"there is
@@ -63,7 +77,7 @@ understood.
         "channel": "whatsapp",
         // tier 2 and 1 only, from here down
         "workflowId": "vvbouV2136P5weCs",
-        "workflowName": "wi-mall-core",
+        "workflowName": "UP-wi-mall-core",
         "executionId": "902",
         "nodeName": "sync identity",
         "errorMessage": "timeout of 20000ms exceeded",
@@ -100,7 +114,7 @@ and no identifier, so there is nothing to withhold.
     "groups": [
       {
         "workflowId": "vvbouV2136P5weCs",
-        "workflowName": "wi-mall-core",
+        "workflowName": "UP-wi-mall-core",
         "kind": "degraded_turn",
         "channel": "whatsapp",
         "count": 47,
@@ -128,6 +142,16 @@ Surface it in the UI; do not render an empty list as "all healthy".
 
 ## Coverage is an allowlist
 
-Only workflows with `wi-mall-failure-reporter` set as their `errorWorkflow` report at all — nine
+Only workflows with `UP-wi-mall-failure-reporter` set as their `errorWorkflow` report at all — nine
 today (ADR-022 D-8). **A new bot workflow is invisible until somebody wires it.** If a workflow you
 expect to see never appears, check that before concluding it is healthy.
+
+## Naming — match on `workflowId`, never `workflowName`
+
+Every workflow belonging to this backend is named `UP-wi-mall-…` on the instance, which is why the
+examples above read `UP-wi-mall-core`. **Do not key a filter, a label map or a dashboard route off
+that string.** It is a display name a human can change in one click, and it has already changed
+twice: `tg-adapter` → `wi-mall-tg-adapter` → `UP-wi-mall-tg-adapter`, both on 2026-09-07.
+
+`workflowId` is the stable identifier and did not change through either rename. The
+`?workflowId=` query filter takes the id, not the name.

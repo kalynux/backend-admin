@@ -4,9 +4,22 @@
 
 > ⚠ **This is a dated snapshot, not a live reference.** Figures below were measured on
 > 2026-08-13 and several have moved since — the permission count reads **110 across 21
-> families** here and is **116 across 20** today. Deliberately not rewritten: it records what
+> families** here and is **118 across 20** today. Deliberately not rewritten: it records what
 > was known at Phase 0. For current numbers use [`../api/permissions.md`](../api/permissions.md)
 > and [`../api/authorization.md`](../api/authorization.md).
+>
+> ⛔ **Four conclusions on this page have since been REVERSED, and three of them told the
+> dashboard to delete something it now needs.** Checked 2026-09-08:
+>
+> | This page says | What is true now |
+> |---|---|
+> | *"wi-admin accepts no multipart bodies anywhere"* → drop `files.service.ts`, `MediaPicker`, `MediaGallery` (§ 1) | **`POST /files/upload` takes a `multipart/form-data` body**, capped at `ADMIN_UPLOAD_MAX_BYTES` (32 MiB), since BR-015 / ADR-021 on 2026-08-26. wi-admin still never *parses* one — it pipes it through unread — but the route exists and the media library is built. See [`../api/files.md`](../api/files.md) |
+> | *"wi-admin has no data door into geo-tracker"* → drop `leaflet` (§ 1) | **It has one**, scoped and audited, since ADR-020 on 2026-08-22: `GET /agents/:agentId/live-position` and three siblings. See [`../api/agents.md`](../api/agents.md) |
+> | *`users.password.reset` is catalogued with no route* (D6, § 8) | **Built during Phase 17.** The four permissions still without a route are `users.sessions.revoke`, `users.roles.manage`, `notifications.manage` and `developer_tools.webhooks.redeliver` |
+> | *"the permission count is 110 across 21 families"* | **118 across 20.** It has moved four times; derive it, do not quote it |
+>
+> Every path this page writes as `docs/admin/api/…` is the pre-2026-09-08 layout. The contract
+> now lives at `admin/api-doc/api/`, mirrored in the dashboard at `api-doc/admin/api/`.
 Date: 2026-08-13 · Reference dashboard: `frontend/vendor-dash` · Cross-checked against `frontend/agency-dash`
 
 Everything below was read out of the two sibling repositories and `docs/admin/`. Where a thing does

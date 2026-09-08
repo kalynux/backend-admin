@@ -1,5 +1,7 @@
 # Errors
 
+**Verified against source on 2026-09-08** — all **88** registry codes reconciled against `admin/src/core/errors/error-codes.ts` (85 were documented; the three `AUTOMATION_*` codes were missing and are now here), and the status→category table against `admin/src/core/errors/`.
+
 The error contract is shared across all three backend services (wi-admin, jovi-mall,
 geo-tracker). One envelope, one nine-value taxonomy, one exposure rule.
 
@@ -400,6 +402,22 @@ since the send is delegated to jovi-mall. Branch on `platformCode`, not on `erro
 | Code | Status | Category | Meaning |
 |---|---|---|---|
 | `NOTIFICATION_NOT_FOUND` | 404 | `not_found` | The only code this surface raises. Also covers "exists, addressed to someone else" and "exists, but your level no longer holds the permission it is gated on" — both 404 rather than 403, deliberately. |
+
+### Automation door — `AUTOMATION_*`
+
+⚠ **None of these three can reach the dashboard, and that is the only reason they were missing
+from this page until 2026-09-08.** They are raised on `POST /api/internal/automation/failures` —
+the n8n reporter's door, outside `/api/v1`, authenticated by a shared secret rather than by an
+administrator (ADR-022). The audience for the message is an operator reading a reporter node's
+response body. They are listed here because this section claims to be **every code the service
+can return**, and a registry that quietly omits a family is how the dashboard's
+`error-catalog.test.ts` goes red for a reason nobody can find.
+
+| Code | Status | Category | Meaning |
+|---|---|---|---|
+| `AUTOMATION_DOOR_UNCONFIGURED` | 503 | `external_service` | `AUTOMATION_REPORT_TOKEN` is unset, so this deployment accepts no failure reports. A 503 rather than a 404 for the reason `TRACKING_DOOR_UNCONFIGURED` gives: the route exists and the capability is built. The read side reports the same state as `configured: false` — see [automation.md](automation.md). |
+| `AUTOMATION_REPORT_TOKEN_INVALID` | 401 | `authentication` | The shared secret is missing, malformed or wrong. **One code for all three**, the `ADMIN_AUTH_INVALID_CREDENTIALS` reasoning applied to a service caller: splitting "no header" from "wrong value" tells an unauthenticated prober which half it got right. |
+| `AUTOMATION_REPORT_MALFORMED` | — | — | Declared and **raised by nothing today.** The reporter's body is validated by Zod, so a bad report is an ordinary `400 VALIDATION_ERROR`. Kept because the two failures have different remedies — the token is an operator's env var, the body is the reporter workflow's node parameters — and the split is worth having when a hand-written check lands. **Do not write a client branch on it.** |
 
 ### Infrastructure and configuration
 

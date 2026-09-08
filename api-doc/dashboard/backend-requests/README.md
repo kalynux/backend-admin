@@ -11,14 +11,22 @@ Companion to the two registers already in this folder:
 | [`DATA-EXPOSURE-REGISTER.md`](../DATA-EXPOSURE-REGISTER.md) | What the API provides that perhaps it should not, or should provide differently |
 | **this folder** | What the API does **not** provide that an operator has asked for |
 
-Opened 2026-08-17, from a round of operator requests across eleven screens.
+Opened 2026-08-17, from a round of operator requests across eleven screens. **Three rounds have run
+since**, and every one of them is closed — see the index below.
 
-`docs/admin/` is a **verbatim copy** of `backend/admin/docs/` and is read-only here. Nothing in this
-folder edits it; corrections to the contract belong upstream and get re-copied.
+The dashboard keeps a **verbatim copy** of this folder and is read-only on that side. Nothing there
+edits it; corrections to the contract belong upstream and get re-copied. ⚠ **The copy was
+re-shaped on 2026-09-08 when this repository split `docs/` into `api-doc/` (the contract) and
+`docs/` (the reasoning).** Older notes in this folder that say `docs/admin/api/…` or
+`docs/admin/docs/…` are describing the layout before that split; the contract now lives at
+`admin/api-doc/`, mirrored in the dashboard at `api-doc/admin/`, and the design records at
+`admin/docs/`, mirrored at `api-doc/docs/`.
 
 ---
 
 ## The index
+
+### Round one — opened 2026-08-17, from a pass over eleven built screens
 
 | # | Request | Blocking screen | Frontend state |
 |---|---|---|---|
@@ -36,12 +44,41 @@ One operator ask produced no request: **Money → Allocations** turned out to be
 `GET /money/earnings/allocations/:allocationId` exists and is fully rendered. What was missing there
 was the pager, which is now always on screen.
 
+**Answered:** [`RESPONSE-2026-08-17.md`](RESPONSE-2026-08-17.md).
+
+### Round two — opened 2026-08-24, from reading backend source while building
+
+Not operator asks. Every one of these came out of the dashboard reading wi-admin's source and
+finding a contract page that disagreed with it.
+
+| # | Request | Answered in |
+|---|---|---|
+| [BR-010](BR-010-filedetail-url-and-access.md) | `FileDetail` declares `url: string` and omits `access` entirely | [`RESPONSE-2026-08-24.md`](RESPONSE-2026-08-24.md) |
+| [BR-011](BR-011-admin-image-viewing.md) | Administrators can see no private image anywhere in the platform | [`RESPONSE-2026-08-24.md`](RESPONSE-2026-08-24.md) |
+| [BR-012](BR-012-documentation-corrections.md) | Two contract pages disagree with the service they describe | [`RESPONSE-2026-08-24.md`](RESPONSE-2026-08-24.md) |
+| [BR-013](BR-013-permission-count-prose.md) | `permissions.md`'s prose counts were not re-counted when `files.content.read` landed | [`RESPONSE-2026-08-25.md`](RESPONSE-2026-08-25.md) |
+| [BR-014](BR-014-content-wire-shapes.md) | `/content` publishes no response shapes, and the one hint in the docs is misleading | [`RESPONSE-2026-08-25.md`](RESPONSE-2026-08-25.md) |
+
+⚠ **BR-010's answer has since been overtaken.** `access` was confirmed in 2026-08-24 as a closed
+set of two; `quota_blocked` is a third value and is live in both services. The current contract is
+[`files.md`](../../api/files.md), not that response.
+
+### Round three — opened 2026-08-25, from an operator pass over eight detail screens
+
+| # | Request | Answered in |
+|---|---|---|
+| [BR-015](BR-015-media-library.md) | A media library, and an upload path for administrators | [`RESPONSE-2026-08-26.md`](RESPONSE-2026-08-26.md) |
+| [BR-016](BR-016-names-on-reference-rows.md) | Six places that return an id where an operator needs a name | [`RESPONSE-2026-08-26.md`](RESPONSE-2026-08-26.md) |
+| [BR-017](BR-017-order-and-shipment-item-media.md) | Product images and titles on order and shipment items | [`RESPONSE-2026-08-26.md`](RESPONSE-2026-08-26.md) |
+| [BR-018](BR-018-vendor-agency-connections.md) | A vendor's delivery-agency connections, as rows rather than counts | [`RESPONSE-2026-08-26.md`](RESPONSE-2026-08-26.md) |
+| [BR-019](BR-019-contract-clarifications.md) | Four things the contract leaves undecided that a client now has to decide | [`RESPONSE-2026-08-26.md`](RESPONSE-2026-08-26.md) |
+
 ---
 
 ## The rules every request inherits
 
 Stated once here so no document repeats them. All from
-[`docs/admin/api/README.md`](../../api/README.md) and
+[`admin/api-doc/api/README.md`](../../api/README.md) and
 [ADR-005](../../../docs/ADR-005-API-CONTRACT.md).
 
 - **Wire fields are `camelCase`.** Both databases are `snake_case`; the translation happens in

@@ -1,6 +1,6 @@
 # Permissions and administrator levels
 
-**Verified against source on 2026-09-08** — the 116 permissions, the 20 families and all three tier totals (116 / 99 / 30), against `admin/src/modules/authorization/domain/permission.catalog.ts` and `tier-grants.ts` at HEAD.
+**Verified against source on 2026-09-08** — the 118 permissions, the 20 families, all three tier totals (118 / 101 / 31), the four unrouted `†` names and both composite-guard counts (17 `all`-mode, 3 `any`-mode), each re-derived by *executing* `admin/src/modules/authorization/domain/permission.catalog.ts`, `tier-grants.ts` and the live route manifest at HEAD rather than by reading them.
 
 This is the complete authorization policy. It is **static code**, not data: there are no
 per-administrator overrides, no policy collections, and nothing is editable at runtime.
@@ -17,9 +17,9 @@ Design records: [`../../docs/ADR-003-GRANULAR-PERMISSIONS.md`](../../docs/ADR-00
 
 | Level (`tier`) | Label | Holds | Shape of the job |
 |---|---|---|---|
-| **1** | Developer | 116 of 116 | Everything, including the developer tools and every escalation-flagged action |
-| **2** | Admin | 99 of 116 | The operational tier — runs the platform day to day, including the money |
-| **3** | Support | 30 of 116 | Ticket work, the lookups needed to answer a ticket, and editorial write on articles and bylines. Nothing financial, nothing destructive, and publishing stays a level above |
+| **1** | Developer | 118 of 118 | Everything, including the developer tools and every escalation-flagged action |
+| **2** | Admin | 101 of 118 | The operational tier — runs the platform day to day, including the money |
+| **3** | Support | 31 of 118 | Ticket work, the lookups needed to answer a ticket, and editorial write on articles and bylines. Nothing financial, nothing destructive, and publishing stays a level above |
 
 A level is an administrator's **entire** authorization state. `tier` appears on the profile
 returned by `GET /auth/me`.
@@ -119,17 +119,24 @@ carries `financial`, because its *output* is the material a fraudulent payout in
 built from. `money.earnings.read` and `cod.overview.read` are unflagged and belong that way —
 do not reach for `financial` merely because a read concerns money.
 
-### Three reads are audited, and two of them are held by Support
+### Four reads are audited, and three of them are held by Support
 
 "Reads are not actions" is the rule, and it holds because a read leaves no state behind — so the
 permission gate is the whole control and a row per read would be volume with nothing to say.
-**Three permissions break it**, all for the same reason: their *output* **is** the disclosure.
+**Four permissions break it**, all for the same reason: their *output* **is** the disclosure.
 
-| Permission | What it discloses | Held by Support |
-|---|---|:-:|
-| `money.payouts.destination.read` | A beneficiary's account number | no (`financial`) |
-| `agents.tracking.read` | Where a person is, right now | **yes** |
-| `shipments.tracking.read` | Where a person went, over one delivery | **yes** |
+| Permission | Route | What it discloses | Held by Support |
+|---|---|---|:-:|
+| `money.payouts.destination.read` | `GET /money/payouts/:payoutId/destination` | A beneficiary's account number | no (`financial`) |
+| `agents.tracking.read` | `GET /agents/:agentId/live-position` | Where a person is, right now | **yes** |
+| `shipments.tracking.read` | `GET /shipments/:shipmentId/tracking-trail` | Where a person went, over one delivery | **yes** |
+| `files.content.read` | `GET /files/:fileId/content` | The bytes of a private file — a delivery-proof photograph, a vendor's saleable digital product | **yes** |
+
+⚠ **The permission is audited on the disclosing route only, not everywhere it is accepted.**
+`agents.tracking.read` also opens `GET /agents/:agentId/tracking-presence` and
+`shipments.tracking.read` also opens `GET /shipments/:shipmentId/tracking-events`; neither emits
+a coordinate, and neither writes a row. Four permissions, four audited routes — see the § on
+`files` below for why `files.library.read` is *not* the fifth.
 
 For a disclosure, "who *may*" is not the interesting question; **"who *did*, and how often"** is.
 An administrator who unmasks forty positions in an afternoon is doing something other than
@@ -147,7 +154,7 @@ record were one decision, not two. See [ADR-020](../../docs/ADR-020-ADMIN-DATA-D
 ## The matrix
 
 ● granted  ·  not granted  ·  **†** = catalogued policy with **no endpoint built yet**
-(**4** of 116 permissions — down from 27, and the four that remain each have a written reason
+(**4** of 118 permissions — down from 27, and the four that remain each have a written reason
 below. The policy is decided ahead of the surface, deliberately.)
 
 ### `agents`
@@ -225,6 +232,7 @@ below. The policy is decided ahead of the surface, deliberately.)
 | Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
 |---|---|:-:|:-:|:-:|---|---|
 | `support.errors.lookup` | read | ● | ● | ● | — | Look up an error a vendor, agency, agent or customer hit, by its reference |
+| `support.automation.lookup` | read | ● | ● | ● | — | See whether the customer bot was degraded on a channel, and when — the narrowest of the three views of the automation failure feed |
 | `support.tickets.read` | read | ● | ● | ● | scoped:tickets | View support tickets |
 | `support.tickets.create` | write | ● | ● | ● | — | Open a support ticket on someone’s behalf |
 | `support.tickets.update` | write | ● | ● | ● | scoped:tickets | Edit a ticket’s subject, body, status or priority |
@@ -423,6 +431,7 @@ size cap still apply to it.
 | `system.metrics.read` | read | ● | ● | · | — | View the platform service's operational metrics, including per-route request volumes |
 | `system.maintenance.read` | read | ● | ● | · | — | View whether the platform is in a maintenance window |
 | `system.errors.read` | read | ● | ● | · | — | Investigate platform errors, including the internal message and unmasked details |
+| `system.automation.read` | read | ● | ● | · | — | Investigate automation-layer failures — which workflow, which node, what it reported |
 
 ### `developer_tools`
 
@@ -466,7 +475,7 @@ name is not the same kind of thing as an ungranted one.
 
 ## Composite guards
 
-**Fifteen** endpoints require **more than one** permission (`all` mode) because they compose
+**Seventeen** endpoints require **more than one** permission (`all` mode) because they compose
 data from two or three domains. A caller missing any one of them is refused.
 
 | Endpoint | Requires |
@@ -478,6 +487,8 @@ data from two or three domains. A caller missing any one of them is refused.
 | `GET /agencies/:agencyId/agents` | `agencies.read` + `agents.read` |
 | `GET /agents/:agentId/activity` | `agents.read` + `audit.read` |
 | `GET /agents/:agentId/contracts` | `agents.read` + `agencies.read` |
+| `GET /agents/:agentId/cod-allocation` | `agents.read` + `agencies.read` |
+| `GET /agents/:agentId/assignability` | `agents.read` + `agencies.read` |
 | `GET /contracts/:contractId` | `agencies.read` + `agents.read` |
 | `GET /orders/:orderId/activity` | `orders.read` + `audit.read` |
 | `GET /shipments/:shipmentId/activity` | `shipments.read` + `audit.read` |
@@ -499,16 +510,28 @@ to see it. (This row was missing from the table until BR-012, and the count abov
 "Thirteen". admin-dash's own `ROUTE-MAP.md` and `MIGRATION-2026-08.md` § 8 — authored in
 `frontend/admin-dash/api-doc/`, not part of this tree — were both already right.)
 
-### The one `any`-mode guard
+### The three `any`-mode guards
 
-`GET /system/errors` accepts **any** of `developer_tools.logs.read`, `system.errors.read`,
-`support.errors.lookup` — and returns a *different projection* per level. See
-[system.md](system.md).
+Three endpoints accept **any** of three permissions and return a *different projection* per
+level. The permission does not decide whether you get an answer; it decides how much of the
+answer you see.
 
-**This one is not counted in the fifteen above**: fifteen `all`-mode guards plus this single
-`any`-mode one, sixteen in all. `GET /vendors/:vendorId/agencies` is the fifteenth, added by
-BR-018. ⚠ A page written before that says *fifteen* meaning "fourteen `all`-mode plus the
-`any`-mode one" — the same claim about a set one endpoint smaller.
+| Endpoint | Accepts any of | Contract |
+|---|---|---|
+| `GET /system/errors` | `developer_tools.logs.read`, `system.errors.read`, `support.errors.lookup` | [system.md](system.md) |
+| `GET /automation/failures` | `developer_tools.logs.read`, `system.automation.read`, `support.automation.lookup` | [automation.md](automation.md) |
+| `GET /automation/summary` | `developer_tools.logs.read`, `system.automation.read`, `support.automation.lookup` | [automation.md](automation.md) |
+
+**These three are not counted in the seventeen above**: seventeen `all`-mode guards plus three
+`any`-mode ones, **twenty** composite guards in all.
+
+⚠ **This count has been stale three separate times, so derive it rather than quoting it.** It
+read *"Thirteen"* until BR-012 added `GET /contracts/:contractId`; *"fourteen `all`-mode plus the
+`any`-mode one"* until BR-018 added `GET /vendors/:vendorId/agencies`; and *"fifteen … sixteen in
+all"* until this re-count, which found that `GET /agents/:agentId/cod-allocation` and
+`GET /agents/:agentId/assignability` had never been listed and that the automation pair had landed
+since. Every composite guard is a `permission(a, b)` or `anyPermission(a, b, c)` argument at a
+`defineRoute` call site, so the live route manifest can be counted instead of read.
 
 ---
 

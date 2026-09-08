@@ -351,7 +351,7 @@ being shown it"*, and would escalate a resolved incident.
         "at": "2026-08-13T09:14:02.331Z",
         "requestId": "8f14c2a0-6b3e-4a91-9c7d-2e5f0a1b3c4d",
         "category": "external_service",
-        "code": "PAYMENT_GATEWAY_TIMEOUT",
+        "code": "PAYMENT_INITIATION_FAILED",
         "statusCode": 502,
         "method": "POST",
         "routeGroup": "/api/payments",
