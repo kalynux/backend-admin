@@ -5,6 +5,11 @@ total, the three public routes, the four audited reads and the multipart/body-si
 re-derived by booting the route manifest and reading `admin/src/config/env.ts`,
 `admin/src/app.ts` and `admin/src/modules/files/routes/file.routes.ts`.
 
+**Amended 2026-09-08 (second pass)** — the rate-limit table was wrong in two ways, both checked
+against `admin/src/api/middlewares/auth-rate-limit.middleware.ts`: `/auth/refresh` has its **own**
+bucket at **60/min** (`ADMIN_REFRESH_RATE_LIMIT_MAX`), not the 10/min credential one, and neither
+`/auth/*` bucket attaches `details.retryAfterSeconds`.
+
 **This directory is the official contract for admin-dashboard development.** Everything the
 dashboard may call is here: every path, every guard, every field, every failure. If a
 behaviour is not written down here, it is not promised.
@@ -424,14 +429,21 @@ There is no idempotency-key mechanism. Two properties matter instead:
 
 ## Rate limits
 
-Two layers, both `429 RATE_LIMIT_EXCEEDED` with `details.retryAfterSeconds`, and both carrying
-`draft-7` standard headers (`RateLimit`, `RateLimit-Policy`).
+**Four buckets**, all answering `429 RATE_LIMIT_EXCEEDED` and all carrying `draft-7` standard
+headers (`RateLimit`, `RateLimit-Policy`).
 
-| Layer | Scope | Window | Default ceiling |
-|---|---|---|---|
-| **A — global** | Per IP, before the routers | 60 s | 3000 req (`ADMIN_RATE_LIMIT_ANON`) |
-| **B — identity** | Per administrator, at the tail of the auth gate | 60 s | tier 1 **2400** / tier 2 **1800** / tier 3 **1200** |
-| **Credential** | Per IP, on `/auth/login`, `/auth/mfa/verify`, `/auth/refresh`, `/auth/password` | 60 s | **10** (`ADMIN_AUTH_RATE_LIMIT_MAX`) |
+| Layer | Scope | Window | Default ceiling | `details.retryAfterSeconds` |
+|---|---|---|---|:-:|
+| **A — global** | Per IP, before the routers | 60 s | 3000 req (`ADMIN_RATE_LIMIT_ANON`) | ✅ |
+| **B — identity** | Per administrator, at the tail of the auth gate | 60 s | tier 1 **2400** / tier 2 **1800** / tier 3 **1200** | ✅ |
+| **Credential** | Per IP, on `/auth/login`, `/auth/mfa/verify`, `/auth/password` | 60 s | **10** (`ADMIN_AUTH_RATE_LIMIT_MAX`) | ❌ |
+| **Refresh** | Per IP, on `/auth/refresh` **alone** | 60 s | **60** (`ADMIN_REFRESH_RATE_LIMIT_MAX`) | ❌ |
+
+⚠ **`/auth/refresh` is not in the credential bucket**, and the two auth buckets send **no**
+`details` at all — only the message *"Too many authentication attempts"*. A refresh presents a
+token the caller already holds, so it is not a guess; sharing the login ceiling meant a few tab
+reloads produced a `429` that clients could not tell from a dead session, and signed live
+operators out. See [auth.md](auth.md).
 
 `/health/*` is mounted **before** the limiter and is never throttled.
 

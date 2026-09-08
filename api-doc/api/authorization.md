@@ -1,5 +1,7 @@
 # `/permissions` and `/approvals` — the policy and the four-eyes queue
 
+**Verified against source on 2026-09-08** — all eight routes and their guards against the live route manifest; the permission and tier totals re-derived by running the catalog and grant table (118 · 118 / 101 / 31, not 116 · 116 / 99 / 30); the `Approval` shape against `dual-control/domain/approval.service.ts:36-73`; the four queueing conditions against the three `DualControlSpec`s in `authorization/domain/permission.catalog.ts:44-113`; and every error code against its throw site.
+
 Two small route groups that together let a dashboard render itself correctly: what the caller
 may do, and what is waiting for a second signature.
 
@@ -65,7 +67,7 @@ Every permission that exists, with its metadata.
         "phase": 5
       }
     ],
-    "total": 116
+    "total": 118
   }
 }
 ```
@@ -73,14 +75,14 @@ Every permission that exists, with its metadata.
 | Field | Type | Notes |
 |---|---|---|
 | `families[]` | array | The 20 families in declaration order, each listing its permission names |
-| `permissions[]` | array | All 116 permissions |
+| `permissions[]` | array | All 118 permissions |
 | `permissions[].action` | `"read"` \| `"write"` \| `"approve"` | |
 | `permissions[].summary` | string | Written for an administrator, not an engineer — safe to render in a UI |
 | `permissions[].financial` etc. | boolean | The four sensitivity flags. **The dual-control *predicate* is never exposed** — only whether one exists |
 | `permissions[].scoped` | boolean | Whether reads behind it are additionally narrowed row-by-row |
 | `permissions[].phase` | number | The build phase. Includes permissions whose endpoints are **not built yet**, so the dashboard can be written against the finished vocabulary rather than a moving one |
 
-4 of the 116 have no endpoint yet — see the `†` markers in [permissions.md](permissions.md).
+4 of the 118 have no endpoint yet — see the `†` markers in [permissions.md](permissions.md).
 
 ---
 
@@ -113,8 +115,8 @@ from.**
 }
 ```
 
-`permissions` is the resolved set for the caller's **current** level — re-read on every
-request, so it reflects a demotion immediately.
+`permissions` is the resolved set for the caller's **current** level, **sorted alphabetically** —
+re-read on every request, so it reflects a demotion immediately.
 
 Call this after login and again after any `/auth/refresh` that follows a level change.
 
@@ -138,15 +140,17 @@ you move someone from Support to Admin.
   "success": true,
   "data": {
     "tiers": [
-      { "tier": 1, "label": "Developer", "permissions": ["administrators.create", "…"], "total": 116 },
-      { "tier": 2, "label": "Admin",     "permissions": ["agencies.read", "…"],          "total": 99  },
-      { "tier": 3, "label": "Support",   "permissions": ["agencies.read", "…"],          "total": 30  }
+      { "tier": 1, "label": "Developer", "permissions": ["administrators.create", "…"], "total": 118 },
+      { "tier": 2, "label": "Admin",     "permissions": ["agencies.read", "…"],          "total": 101 },
+      { "tier": 3, "label": "Support",   "permissions": ["agencies.read", "…"],          "total": 31  }
     ]
   }
 }
 ```
 
-`permissions` is sorted alphabetically within each level.
+`permissions` is sorted alphabetically within each level. **These three totals move**: they were
+116 / 99 / 30 two rounds ago and are 118 / 101 / 31 today. Read them from this response, never from
+a constant — and if you need the numbers for prose, derive them with `npm run authz:matrix`.
 
 ---
 
@@ -359,6 +363,7 @@ The `Approval`, now `status: "withdrawn"`, with the message `"Withdrawn"`.
 
 | Status | Code | When |
 |---|---|---|
+| 400 | `VALIDATION_ERROR` | `approvalId` is not 24-hex |
 | 403 | `AUTHZ_PERMISSION_DENIED` | Not your request |
 | 404 | `AUTHZ_APPROVAL_NOT_FOUND` | |
 | 409 | `AUTHZ_APPROVAL_ALREADY_RESOLVED` | Already decided |

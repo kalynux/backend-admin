@@ -1,5 +1,7 @@
 # `/audit` — the audit trail
 
+**Verified against source on 2026-09-08** — all seven routes and their guards against the live route manifest; every query parameter, the 92-day span cap and the required export range against `audit/validators/audit.validator.ts`; the action, target-type, status and transport vocabularies re-derived by running the catalog (**114** actions and **23** target types, not 80 and 22 — `file` was missing) and `PERMISSION_FAMILIES` (**20**, not 21); the subject-class map against `audit/domain/audit-subject.ts:19-43`; and the retention default against `admin/src/config/env.ts:182`.
+
 Base path: `/api/v1/audit`
 
 Every administrator action, who did it, to what, and how it ended. Rows are **immutable** and
@@ -37,7 +39,7 @@ an audit trail people cannot see their own entry in is one they have no way to c
 | Level | Sees |
 |---|---|
 | 1 Developer, 2 Admin | Every row |
-| 3 Support | Rows whose subject is a **platform actor or record** (users, vendors, agencies, agents, customers, orders, shipments, remittances, deposits, discrepancies, payouts, tickets, articles, plans) — **plus anything they did themselves** |
+| 3 Support | Rows whose subject is a **platform actor or record** (users, vendors, agencies, agents, customers, orders, shipments, remittances, deposits, discrepancies, payouts, tickets, articles, plans, **files**) — **plus anything they did themselves** |
 
 Rows classed `internal` — administrators, admin sessions, approval requests, audit exports,
 feature flags, workers, maintenance windows — are invisible to Support. Without that narrowing,
@@ -69,8 +71,8 @@ ordering nobody reads a trail in. Filter by those instead.
 | Parameter | Type | Notes |
 |---|---|---|
 | `actorId` | 24-hex | The administrator who performed the action |
-| `action` | enum | One of **80** catalogued action names. Get the list from `GET /audit/actions` |
-| `actionFamily` | enum | One of the 21 permission families |
+| `action` | enum | One of the catalogued action names — **114 on 2026-09-08, and this number moves every phase**. Get the list from `GET /audit/actions` rather than hardcoding it |
+| `actionFamily` | enum | One of the **20** permission families |
 | `status` | enum | `attempted` \| `succeeded` \| `failed` \| `denied` \| `queued` |
 | `targetType` | enum | See the target-type list below |
 | `targetId` | string | 1–128 characters. **Not** validated as an ObjectId — a target may be a session UUID or a composite key |
@@ -88,8 +90,11 @@ naming the valid values, rather than a filter that silently matches nothing.
 #### `targetType` values
 
 `user`, `vendor`, `agency`, `agent`, `customer`, `order`, `shipment`, `remittance`, `deposit`,
-`discrepancy`, `payout`, `ticket`, `article`, `plan`, `administrator`, `admin_session`,
+`discrepancy`, `payout`, `ticket`, `article`, `plan`, `file`, `administrator`, `admin_session`,
 `approval_request`, `audit_export`, `feature_flag`, `worker`, `maintenance_window`, `none`
+
+**23 values.** An unrecognised value stored in a row falls back to `none`, which classifies as
+`internal` — so an unclassifiable row is withheld from Support rather than leaked to them.
 
 ### Example request
 
@@ -231,7 +236,7 @@ it by collecting 400s.
         "summary": "Mark a payout request as paid — records that money has left the platform"
       }
     ],
-    "total": 80
+    "total": 114
   }
 }
 ```

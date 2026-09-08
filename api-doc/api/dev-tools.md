@@ -1,5 +1,7 @@
 # `/dev-tools` — the operations writes
 
+**Verified against source on 2026-09-08** — all nine routes, their guards and which three carry the `dev_tools.enabled` gate against `dev-tools/routes/dev-tools.routes.ts` and the live route manifest; every request body — the 10-character `reason` floor, the `workerKey` pattern, the `7`–`365` prune window, `status: "sent"` as a literal, the 1–1440 maintenance bound and both `confirm` echoes — against `dev-tools/validators/dev-tools.validator.ts`; the two-flag catalog against `dev-tools/domain/feature-flag.catalog.ts:40-77`; and the response messages against `dev-tools/controllers/dev-tools.controller.ts:45-140`.
+
 Base path: `/api/v1/dev-tools`
 
 Feature flags, worker triggers, outbox replay and prune, cache flush, and maintenance mode.

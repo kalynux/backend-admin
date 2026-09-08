@@ -1,5 +1,7 @@
 # Admin dashboard — what Phase 2 and Phase 3 changed
 
+**Verified against source on 2026-09-08** — a dated changelog, left as history; every route and permission it names checked against the live route manifest and the permission catalog.
+
 Your slice of Phases **2** (Deployability) and **3** (Cross-service correctness) of
 [`PRODUCTION-READINESS/10-IMPLEMENTATION-PLAN.md`](../../PRODUCTION-READINESS/10-IMPLEMENTATION-PLAN.md).
 

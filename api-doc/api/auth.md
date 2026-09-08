@@ -1,5 +1,7 @@
 # `/auth` — administrator authentication
 
+**Verified against source on 2026-09-08** — all eleven routes, their access kinds and their audit declarations against `admin-identity/routes/auth.routes.ts`; every request schema against `admin-identity/validators/auth.validator.ts`; the eight lifetime/limit defaults against `admin/src/config/env.ts:87-139`; the two rate-limit buckets against `api/middlewares/auth-rate-limit.middleware.ts`; the password policy against `admin-identity/domain/password.service.ts:30-71`; and the `422` detail exposure against `core/errors/detail-policy.ts:74,132`.
+
 Base path: `/api/v1/auth`
 
 Login, two-factor, session rotation, session listing and self-service password change. These
@@ -23,10 +25,24 @@ closed — a fourth public route requires editing a boot-checked allowlist.
 No endpoint on this surface requires a permission — every route acts on the caller's own
 identity, and requiring a permission would let a level be locked out of its own account.
 
-**Rate limiting:** `/login`, `/mfa/verify`, `/refresh` and `/password` sit behind the strict
-credential limiter — **10 requests per IP per minute** (`ADMIN_AUTH_RATE_LIMIT_MAX`),
-Redis-backed so it is shared across instances. The remaining routes use only the ordinary
-per-identity ceiling.
+**Rate limiting — two per-IP buckets, and `/refresh` is deliberately not in the strict one.**
+Both are Redis-backed, so the counter is shared across instances, and both use a 60-second window.
+
+| Bucket | Routes | Ceiling | Redis prefix |
+|---|---|---|---|
+| **credential** | `/auth/login` · `/auth/mfa/verify` · `/auth/password` | **10/min/IP** (`ADMIN_AUTH_RATE_LIMIT_MAX`) | `auth-rl:` |
+| **refresh** | `/auth/refresh` **only** | **60/min/IP** (`ADMIN_REFRESH_RATE_LIMIT_MAX`) | `refresh-rl:` |
+
+A refresh presents a rotating token the caller already holds, so it is not a guess and does not
+belong in a brute-force budget. Sharing one bucket meant a handful of tab reloads exhausted the
+allowance — and a client cannot tell a rate-limited refresh from a dead session, so it signed the
+operator out of a live one.
+
+⚠ **Neither auth bucket sends `details.retryAfterSeconds`.** Its `429` carries the message
+*"Too many authentication attempts"* and no `details` at all; only the global and per-identity
+limiters populate that field. Read the `draft-7` `RateLimit` response headers instead.
+
+The remaining routes use only the ordinary per-identity ceiling.
 
 ---
 
@@ -248,7 +264,7 @@ token has expired. Its credential is the refresh token.
 |---|---|
 | **Method / Path** | `POST /api/v1/auth/refresh` |
 | **Authentication** | The refresh token, from the `admin_refresh_token` cookie **or** the body |
-| **Rate limit** | Credential limiter — 10/min/IP |
+| **Rate limit** | **Its own bucket — 60/min/IP** (`ADMIN_REFRESH_RATE_LIMIT_MAX`), *not* the 10/min credential one |
 
 ### Request body
 
@@ -494,13 +510,25 @@ Change your own password.
 
 ### Password policy
 
-Enforced where a password is **set**, and reported as `422` with the specific failures so the
-form can say which rule broke:
+Enforced where a password is **set** — never where one is checked:
 
 - at least **12** characters
 - at most **200** characters
-- not on the common-password list
+- not on the common-password list (nine literal entries, `password.service.ts:40`)
 - not a single repeated character
+
+> ### ⚠️ The `422` does **not** tell you which rule broke
+>
+> The throw site attaches `details.problems` — an array of phrases like *"must be at least 12
+> characters"* — and **the boundary drops it**. `problems` is on the always-dropped internal-key
+> list (`admin/src/core/errors/detail-policy.ts:74`, where it exists to suppress the boot
+> assertions' diagnostic payload), and it is dropped in **every** category. After the scrub the
+> object is empty, so `details` is omitted from the envelope entirely.
+>
+> **What a client actually receives is `422 ADMIN_AUTH_PASSWORD_WEAK` with the fixed message
+> "Password does not meet the minimum requirements" and no `details`.** State the four rules on
+> the form up front and validate the length client-side; do not build a UI that waits for the
+> server to name the failure. Verified 2026-09-08 — reported to the backend as a defect.
 
 ### Response (200)
 
@@ -520,7 +548,7 @@ Every **other** session is ended; the caller keeps theirs.
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | Missing field, or the new password equals the current one |
 | 401 | `ADMIN_AUTH_INVALID_CREDENTIALS` | `currentPassword` is wrong |
-| 422 | `ADMIN_AUTH_PASSWORD_WEAK` | Policy failure. `details` names the problems |
+| 422 | `ADMIN_AUTH_PASSWORD_WEAK` | Policy failure. ⚠ **No `details` arrive** — see the box above |
 | 429 | `RATE_LIMIT_EXCEEDED` | |
 
 ### Audit
@@ -635,9 +663,10 @@ and route to the login screen.
 | Session absolute cap | `ADMIN_SESSION_ABSOLUTE_TTL` | 604 800 s (7 d) |
 | Failed attempts before lockout | `ADMIN_LOCKOUT_MAX_ATTEMPTS` | 5 |
 | Lockout duration | `ADMIN_LOCKOUT_DURATION_S` | 900 s (15 min) |
-| MFA challenge TTL | — | 300 s (5 min) |
+| MFA challenge TTL | — | 300 s (5 min), hardcoded (`mfa.service.ts:96`) |
 | Level at/above which MFA is mandatory | `ADMIN_MFA_REQUIRED_TIER` | 1 (Developer) |
 | Credential-endpoint rate limit | `ADMIN_AUTH_RATE_LIMIT_MAX` | 10/min/IP |
+| **Refresh** rate limit (its own bucket) | `ADMIN_REFRESH_RATE_LIMIT_MAX` | **60/min/IP** |
 
 ### Things a client must not assume
 

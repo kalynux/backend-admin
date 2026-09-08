@@ -1,5 +1,7 @@
 # Frontend Architecture Assessment
 
+**Verified against source on 2026-09-08** — a dated 2026-08-13 snapshot, left as history. Its four-row reversal banner re-checked against source and found correct: the multipart route, the geo-tracker data door, `users.password.reset` now routed, and the permission count (118 across 20). The four remaining unrouted `†` names it lists were re-derived from the catalog and the route manifest and are exactly right.
+
 **Phase 0 — discovery only. No code was written.**
 
 > ⚠ **This is a dated snapshot, not a live reference.** Figures below were measured on

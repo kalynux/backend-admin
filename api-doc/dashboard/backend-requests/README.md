@@ -1,5 +1,7 @@
 # Backend requests
 
+**Verified against source on 2026-09-08** — the three-round index and its close-out links; the platform-rules list, whose `details.platformCode` bullet was corrected for the 403/429 allowlist against `admin/src/core/errors/detail-policy.ts:132-176`; the multipart narrowing and the four `†` permissions, both re-derived from source; and every route the folder names, checked against the live route manifest.
+
 **For the `wi-admin` backend team.** One document per thing the dashboard was asked to build and
 cannot, or can only build half of, against the contract as it stands today.
 
@@ -87,9 +89,13 @@ Stated once here so no document repeats them. All from
 - **Envelope.** Success `{ success: true, data, meta?, message? }` with `data` always present. Error
   `{ success: false, requestId, error: { code, message, statusCode, category, details? } }`. The
   client branches on `error.code`, never on `message`. `details` is *omitted* when absent.
-- **Delegated failures carry a second code.** A refusal from jovi-mall is
+- **Delegated failures carry a second code — except at 403 and 429.** A refusal from jovi-mall is
   `PLATFORM_OPERATION_REJECTED` at jovi-mall's original status, with jovi-mall's own code in
-  `details.platformCode`. Every request below states whether it expects to be delegated.
+  `details.platformCode`. ⚠ **Corrected 2026-09-08:** the boundary filters `details` by **category**,
+  and `authorization` (403) and `rate_limit` (429) are the two categories with a closed key
+  allowlist — `platformCode` is on neither, so it does **not** arrive on a forwarded 403 or 429.
+  Everywhere else it does. See [`errors.md`](../../api/errors.md) § What travels in `details`.
+  Every request below states whether it expects to be delegated.
 - **Every mutation is audited before it answers**, in the same transaction. Any new write needs a
   catalogued action name, and it must appear in `GET /audit/actions`.
 - **Every new error code must be added to [`errors.md`](../../api/errors.md).** The dashboard's

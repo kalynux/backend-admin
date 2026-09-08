@@ -1,5 +1,7 @@
 # Backend Integration Matrix
 
+**Verified against source on 2026-09-08** — a dated 2026-08-13 snapshot, left as history. Its correction banner extended with two more reversals found by re-deriving from source: the endpoint counts (237 / 24, not 179 / 18) and the rate-limit row, whose `/auth/refresh` ceiling and `details.retryAfterSeconds` claim were both wrong. Every route it names was checked against the live route manifest — the ones that do not resolve are section-relative paths, deleted routes it names to say so, or proposals that took a different shape.
+
 **Phase 0 — discovery only. No code was written.**
 Date: 2026-08-13 · Source of truth: `admin/api-doc/api/` (27 files today; 21 when this was written) · Service: `wi-admin`, port **8033**, base path **`/api/v1`**
 
@@ -13,6 +15,8 @@ Date: 2026-08-13 · Source of truth: `admin/api-doc/api/` (27 files today; 21 wh
 > | *"No multipart anywhere"* (§ platform rules) | **`POST /files/upload` accepts a `multipart/form-data` body**, capped at 32 MiB (`ADMIN_UPLOAD_MAX_BYTES`), since BR-015 / ADR-021 on 2026-08-26. The **1 MB** ceiling belongs to `express.json` and does not apply there |
 > | *"wi-admin has **no data door into geo-tracker**"* (§ agents) | **It has one** — scoped, purpose-bound and audited — since ADR-020 on 2026-08-22. `tracking.lastKnown` is still a stale mirror and still must not be rendered as a live marker, but `GET /agents/:agentId/live-position` is now the live answer |
 > | *"`GET /money/payouts/:id/destination` is the one audited **read**"* | **Four reads are audited**: that one, `GET /agents/:agentId/live-position`, `GET /shipments/:shipmentId/tracking-trail` and `GET /files/:fileId/content` |
+> | *"179 versioned endpoints across 18 route groups"* (and every per-section count below) | **237 across 24** on 2026-09-08, plus the internal automation door and the two health probes. Every section heading here is the 2026-08-13 figure. **Derive the number by booting the route manifest; never quote one.** |
+> | *"credential routes 10/min/IP"* (§ platform rules) | **`/auth/refresh` is in its own bucket at 60/min** (`ADMIN_REFRESH_RATE_LIMIT_MAX`), and neither `/auth/*` bucket sends `details.retryAfterSeconds` — corrected in the row below |
 >
 > Every path written here as `docs/admin/api/…` is the pre-2026-09-08 layout. The contract now
 > lives at `admin/api-doc/api/`, mirrored in the dashboard at `api-doc/admin/api/`.
@@ -1281,7 +1285,7 @@ filters `createdAt`, **not `completedAt`**, so `pending`/`failed` rows are not s
 | **Ids** | 24-hex ObjectIds, opaque. Session/challenge/approval ids are UUIDs (approval ids are 24-hex). A malformed path id is `400`, not `404` |
 | **`404` is the denial** for out-of-scope records — a 403 on an id would confirm the id exists |
 | **`X-Request-Id`** | Send it, it is echoed back and exposed to browsers. Surface it in generic error toasts |
-| **Rate limits** | Global 3000/min/IP; per-identity 2400 (T1) / 1800 (T2) / 1200 (T3) per minute; **credential routes 10/min/IP**. All `429 RATE_LIMIT_EXCEEDED` with `details.retryAfterSeconds` and `draft-7` headers |
+| **Rate limits** | Global 3000/min/IP; per-identity 2400 (T1) / 1800 (T2) / 1200 (T3) per minute; **credential routes** (`/auth/login`, `/auth/mfa/verify`, `/auth/password`) **10/min/IP**; **`/auth/refresh` its own bucket at 60/min/IP** (`ADMIN_REFRESH_RATE_LIMIT_MAX`). All `429 RATE_LIMIT_EXCEEDED` with `draft-7` headers; ⚠ `details.retryAfterSeconds` on the **global and per-identity layers only** — the two `/auth/*` buckets attach no `details`. *(Corrected 2026-09-08 against `api/middlewares/auth-rate-limit.middleware.ts`.)* |
 | **Body** | JSON, **1 MB max**, `413 REQUEST_BODY_TOO_LARGE`. Endpoints marked *strict* reject unknown fields with a `400`. ⛔ ~~No multipart anywhere.~~ **`POST /files/upload` takes one** (since 2026-08-26), with its own **32 MiB** ceiling; the 1 MB limit is `express.json`'s and never sees that request |
 | **Audit** | Every mutation is audited before it answers, in the same transaction. A `2xx` on a write means the audit row committed. The five inbox-hygiene routes are the deliberate exception. ⛔ **Four reads are audited**, not one: `GET /money/payouts/:id/destination`, `GET /agents/:agentId/live-position`, `GET /shipments/:shipmentId/tracking-trail`, `GET /files/:fileId/content` |
 | **Delegated failures** | `PLATFORM_OPERATION_REJECTED` at jovi-mall's original status with its code in **`details.platformCode`** — branch on that, not on `error.code`. `SERVICE_DEPENDENCY_UNAVAILABLE` (502/503) means no answer came back |

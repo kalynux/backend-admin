@@ -1,5 +1,7 @@
 # Admin dashboard — what Phase 4 and Phase 5 changed
 
+**Verified against source on 2026-09-08** — a dated changelog, left as history; every route and permission it names checked against the live route manifest and the permission catalog.
+
 Your slice of Phases **4** (Per-service hardening) and **5** (Legacy close-out) of
 [`PRODUCTION-READINESS/10-IMPLEMENTATION-PLAN.md`](../../PRODUCTION-READINESS/10-IMPLEMENTATION-PLAN.md).
 

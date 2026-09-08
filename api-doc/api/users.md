@@ -1,5 +1,7 @@
 # `/users` — platform user management
 
+**Verified against source on 2026-09-08** — all eight routes and their guards against the live route manifest; every query parameter, bound and sort allowlist against `users/validators/user.validator.ts` and `core/validation/common.schemas.ts`; the read DTO and the `profiles`/`missing` shape against `users/controllers/user.controller.ts:54-116` and `users/repositories/role-profile.read.repository.ts`; the write responses against `users/gateways/user.gateway.ts`; and the `details` exposure on the 429 against `core/errors/detail-policy.ts:156`.
+
 Base path: `/api/v1/users`
 
 The account behind every role. A `users` row is the sign-in identity; a vendor, agency, agent
@@ -97,7 +99,9 @@ GET /api/v1/users?role=agent&status=active&search=+237670112233&sort=-createdAt&
 | `status` | `active` \| `suspended` \| `closed` | |
 | `closedAt` | ISO-8601 \| null | **Present only while closed**, the same pairing rule as `suspension`. A closed account has had its identifiers removed by its owner: `email`, `phone` and the customer's name are gone and are **not recoverable** — the row survives so orders, tickets and bookings still resolve |
 | `suspension` | object \| null | **Present only while suspended.** An active account carrying a stale reason would read as suspended on any screen that renders the block without checking `status` first |
-| `suspension.by` | `{ id, source, name }` | `source` distinguishes a platform actor from an administrator |
+| `suspension.at` | ISO-8601 \| null | |
+| `suspension.reason` | string \| null | |
+| `suspension.by` | `{ id, source, name }` | Every member is nullable except `source`, which falls back to `"platform"`. `source` distinguishes a platform actor from an administrator |
 
 ---
 
@@ -124,6 +128,7 @@ Every list field, plus `profiles`:
     "roles": ["customer", "agent"],
     "status": "active",
     "suspension": null,
+    "closedAt": null,
     "createdAt": "2026-02-14T10:05:31.220Z",
     "updatedAt": "2026-08-01T08:12:44.907Z",
     "profiles": [
@@ -431,6 +436,10 @@ so an operator who clicks twice leaves one live credential rather than two.
 
 **There is no destination field.** Sending one is a `400`, not a silently ignored key.
 
+`password-reset-link` answers `kind: "password_reset"` with the message
+`"Password-reset link sent by <channel>"`; `login-link` answers `kind: "login"` with
+`"Sign-in link sent by <channel>"`.
+
 ### Where each channel goes
 
 | `channel` | Resolves to | Absent when |
@@ -466,8 +475,22 @@ confirm it went to the right person, not enough to retype.
 | 404 | `NOT_FOUND` | No such user |
 | 403 | `AUTHZ_PERMISSION_DENIED` | |
 | 409 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode` is `USER_CHANNEL_UNAVAILABLE`, `USER_LOGIN_LINK_ROLE_UNSUPPORTED`, or `AUTH_ACCOUNT_SUSPENDED` (reinstate the account first) |
-| 429 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: USER_CREDENTIAL_LINK_THROTTLED`. **`details.scope` is `party` or `administrator`** — the two have different remedies |
+| 429 | `PLATFORM_OPERATION_REJECTED` | Too many links recently. **`details.retryAfterSeconds` is the only detail that arrives** — see the ⚠ below |
 | 502 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: MESSAGING_DELIVERY_FAILED` — the channel accepted the request and did not deliver. Try another channel |
+
+> ### ⚠️ On the **429**, `details.platformCode` does **not** arrive
+>
+> jovi-mall raises `USER_CREDENTIAL_LINK_THROTTLED` with `{ retryAfterSeconds, scope }`, where
+> `scope` is `party` (this person has been sent too many) or `administrator` (you have sent too
+> many) — two different remedies, *wait* versus *ask a colleague*. **Neither `scope` nor
+> `platformCode` survives the boundary**: `details` is filtered by **category**, and `rate_limit`
+> has a closed allowlist of `retryAfterSeconds` · `limit` · `windowSeconds`
+> (`admin/src/core/errors/detail-policy.ts:156`).
+>
+> What you get is the status, `details.retryAfterSeconds`, and **jovi-mall's message** — which
+> is the only place the two scopes are distinguishable. Render the message; do not write a
+> branch on a code that will never be there. The same is true of any forwarded **403**, whose
+> allowlist is `required` · `requiredAny` · `mode` · `resource` · `action` · `hint`.
 
 **Delivery failure is raised, not swallowed.** The self-service flow logs and continues,
 because it must answer identically whether or not the account exists. Here the caller is an

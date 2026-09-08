@@ -1,5 +1,7 @@
 # wi-admin — the API contract
 
+**Verified against source on 2026-09-08** — the page count (27, not 26), the mirror path (`admin-dash/api-doc/docs/`, not `api-doc/admin-internal/`) and the five dashboard suites that read the mirror by path, all re-derived from the trees themselves.
+
 **This half of wi-admin's documentation is written for one reader: a developer building the
 admin dashboard.** Everything here is a promise to a client — a path, a guard, a field, a
 failure. If a behaviour is not written down in this directory, it is not promised.
@@ -18,7 +20,7 @@ dashboard's behalf and returns the result in its own envelope.
 
 | Directory | What |
 |---|---|
-| [`api/`](./api/) | **The endpoint reference — 26 pages, one per surface.** Start at [`api/README.md`](./api/README.md), which carries the base URL, the envelope, authentication, CSRF, pagination and the list-query vocabulary that every other page assumes. |
+| [`api/`](./api/) | **The endpoint reference — 27 pages, one per surface.** Start at [`api/README.md`](./api/README.md), which carries the base URL, the envelope, authentication, CSRF, pagination and the list-query vocabulary that every other page assumes. |
 | [`dashboard/`](./dashboard/) | The dashboard-facing working record: the [integration matrix](./dashboard/BACKEND-INTEGRATION-MATRIX.md), the [data-exposure register](./dashboard/DATA-EXPOSURE-REGISTER.md), the [frontend architecture assessment](./dashboard/FRONTEND-ARCHITECTURE-ASSESSMENT.md), and [`backend-requests/`](./dashboard/backend-requests/) — the request/answer channel between the dashboard team and this service. |
 | [`FRONTEND-CHANGELOG-phase-2-3.md`](./FRONTEND-CHANGELOG-phase-2-3.md) | What readiness Phases 2–3 changed **for this dashboard**. |
 | [`FRONTEND-CHANGELOG-phase-4-5.md`](./FRONTEND-CHANGELOG-phase-4-5.md) | What readiness Phases 4–5 changed — the largest instalment, and the one with breaking renames in it. |
@@ -45,6 +47,9 @@ A note, comment or link that names `admin/docs/api/…` or `admin/docs/dashboard
 the layout before that split. The files are the same files — `git mv` carried their history.
 
 **The mirror.** `admin-dash` keeps a byte copy of this directory at `api-doc/admin/`, and a copy
-of [`../docs/`](../docs/) at `api-doc/admin-internal/`. Six admin-dash test suites read pages out
-of the first one by path, so **this directory's internal layout is executed, not just read** —
+of [`../docs/`](../docs/) at **`api-doc/docs/`** — *not* `api-doc/admin-internal/`, which was the
+pre-split name and no longer exists. **Five** admin-dash test suites read out of the mirror by
+path — `error-catalog`, `notification-path`, `content-blocks`, `content-contract` and
+`permissions.types` — reaching `api/errors.md`, `api/notifications.md`, `api/permissions.md` and
+six mirrored source files. So **this directory's internal layout is executed, not just read**:
 moving a page inside it is a source change, not a documentation one.

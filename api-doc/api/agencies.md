@@ -1,5 +1,7 @@
 # `/agencies` — delivery agencies
 
+**Verified against source on 2026-09-08** — all seven routes and their composed guards against the live route manifest, and every query parameter, sort allowlist, pinned status enum, `reason` requirement and the 366-day span against `agencies/validators/agency.validator.ts`.
+
 Base path: `/api/v1/agencies`
 
 The delivery network's businesses: the directory, the detail, the agent roster, the contract

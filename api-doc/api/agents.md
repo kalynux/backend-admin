@@ -1,5 +1,7 @@
 # `/agents` — delivery agents
 
+**Verified against source on 2026-09-08** — all seventeen routes and their guards against the live route manifest; every query parameter, the four pinned state enums, all six write bodies and their conditional-`reason` refinements, and the tracking `reason`/`limit` rules against `agents/validators/agent.validator.ts`; the trail and event limit defaults (1000 / 200) against `geo-tracker/internal/modules/serviceaccess/delivery/http/handler.go:52-55`; and the `TRACKING_DOOR_REFUSED` detail exposure against `admin/src/modules/agents/domain/tracking-disclosure.ts:118` and `core/errors/detail-policy.ts:139-150`.
+
 Base path: `/api/v1/agents`
 
 Seventeen routes: the directory, the detail, contracts and their history, the administrative
@@ -823,12 +825,27 @@ decision, and every poll is an audit row.
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | Missing or blank `reason`, or one over 200 characters |
 | 404 | `NOT_FOUND` | No such agent (checked here, before anything is audited) |
-| 502 | `TRACKING_DOOR_REFUSED` | geo-tracker refused. `details.upstreamCode` says which: `SERVICE_SCOPE_FORBIDDEN` (the credential lacks the scope — `details.scope` names it), `SERVICE_TOKEN_INVALID` (the shared secret has drifted), `SERVICE_DOOR_NOT_CONFIGURED` (geo-tracker's half is closed) |
+| 502 | `TRACKING_DOOR_REFUSED` | geo-tracker answered and refused — a missing scope, a drifted shared secret, or geo-tracker's half of the door being closed. ⚠ **You cannot tell which from the response** — see the box below |
 | 503 | `TRACKING_DOOR_UNCONFIGURED` | This deployment has no data door |
 | 503 | `TRACKING_DOOR_UNAVAILABLE` | geo-tracker unreachable, or too slow |
 
 The three are separate codes because each is fixed by a different person. Do not collapse them
 into "tracking unavailable" on the screen.
+
+> ### ⚠️ The `502` carries **no `details`**, and its message is the generic one
+>
+> The throw site attaches `{ upstreamCode, upstreamStatus }` — geo-tracker's own
+> `SERVICE_SCOPE_FORBIDDEN` / `SERVICE_TOKEN_INVALID` / `SERVICE_DOOR_NOT_CONFIGURED` — and the
+> boundary drops both. `TRACKING_DOOR_REFUSED` is raised at **502**, which is category
+> `external_service`, and that category keeps **only** `platformCode` and `platformStatus`
+> (`admin/src/core/errors/detail-policy.ts:139-150`). Neither key is present, so `details` is
+> omitted entirely — and the same rule replaces the thrown message with the registry default
+> *"The tracking service refused this read"*.
+>
+> **What a client can act on is the code and the status, nothing finer.** Render *"the tracking
+> service refused this read — ask an operator to check the data door"* and stop there; the
+> distinction between the three upstream causes is visible only in geo-tracker's own logs and in
+> wi-admin's server-side log line. Verified 2026-09-08 and reported to the backend as a defect.
 
 ---
 

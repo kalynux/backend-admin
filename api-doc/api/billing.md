@@ -1,5 +1,7 @@
 # `/billing` — pricing plans and subscriptions
 
+**Verified against source on 2026-09-08** — all ten routes and their guards against the live route manifest; every query parameter, sort allowlist, plan-code rule, `null`-versus-absent limit rule and the 366-day span against `billing/validators/billing.validator.ts`; the `201`, the four response messages and the two distinct `404` codes against `billing/controllers/billing.controller.ts:93,200,426,447,471,516`.
+
 Base path: `/api/v1/billing`
 
 The subscription catalog, and who is on it.
@@ -379,7 +381,8 @@ The created subscription, message `"Plan vendor_growth assigned to the vendor"`.
 | Status | Code | When |
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | Bad `ownerType`, malformed id, unknown field |
-| 404 | `NOT_FOUND` | No such plan or owner |
+| 404 | **`ACCOUNT_OWNER_NOT_FOUND`** | No such vendor, agency or agent. `details` names the `ownerType` and `ownerId` |
+| 404 | **`NOT_FOUND`** | No such plan (message: *"Pricing plan not found"*). **A different code from the owner miss** — check which one you got before telling the operator what to fix |
 | 409 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: "BILLING_PLAN_INACTIVE"` — the plan is not purchasable |
 | 409 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: "BILLING_PLAN_ROLE_MISMATCH"` — **the plan's role does not match the owner** |
 | 409 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: "BILLING_PENDING_PLAN_EXISTS"` — **the owner already has a plan queued behind their current one.** Reachable on a completely ordinary path: assigning to an owner whose paid term has not lapsed produces a *queued* row rather than replacing the live one, so a second attempt hits this. Pre-empt it by checking `queued` on the owner-scoped read below |

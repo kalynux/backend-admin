@@ -1,5 +1,7 @@
 # `/content` — articles and bylines
 
+**Verified against source on 2026-09-08** — all fourteen routes and their guards against the live route manifest; the five locales, three statuses, five category keys and two author types against `content/domain/content.types.ts:27-59`; and every request schema — the id and slug patterns, the translation array rules, the strict cover object, the four list filters and the parameterless authors list — against `content/validators/article.validator.ts`.
+
 Base path: `/api/v1/content`
 
 The blog editor for the marketing site: article drafts, translations, the publish lifecycle,

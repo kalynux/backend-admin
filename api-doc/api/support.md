@@ -1,5 +1,7 @@
 # `/support/tickets` — the support queue
 
+**Verified against source on 2026-09-08** — all eighteen routes and their guards against the live route manifest, and every query parameter, sort allowlist, `queue` default, body bound (subject 200, description 700, note 300, at most five attachments) and the 366-day span against `support/validators/ticket.validator.ts`.
+
 Base path: `/api/v1/support/tickets`
 
 The queue, the detail, assignment, lifecycle, followers, notes, attachments, and the two

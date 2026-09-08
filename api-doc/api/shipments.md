@@ -1,5 +1,7 @@
 # `/shipments` — shipment administration
 
+**Verified against source on 2026-09-08** — all eight routes and their composed guards against the live route manifest; every query parameter, both write bodies (including the strict `pickupLocation`) and the two tracking query schemas against `shipments/validators/shipment.validator.ts`; the trail and event limit defaults against `geo-tracker/.../serviceaccess/delivery/http/handler.go:52-55`; and the tracking-door error set against `agents/domain/tracking-disclosure.ts` and `core/errors/detail-policy.ts`.
+
 Base path: `/api/v1/shipments`
 
 Entirely net-new: there was no admin shipment surface anywhere before this service. An
@@ -353,6 +355,23 @@ file about a completed delivery), so an operator can grant them apart. That mirr
 own scope model, which separates `agent:position` from `shipment:trail`.
 
 Both are inert when the door is not configured, answering `503 TRACKING_DOOR_UNCONFIGURED`.
+
+### Errors — both tracking reads
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Malformed id; on the trail, a missing or blank `reason` or one over 200 characters; a `limit` outside its range; any unknown parameter (both schemas are strict) |
+| 404 | `NOT_FOUND` | No such shipment — checked **before** anything is audited |
+| 502 | `TRACKING_DOOR_REFUSED` | geo-tracker answered and refused: a capability missing from `GEO_TRACKER_ADMIN_SCOPES`, a drifted shared secret, or geo-tracker's half of the door closed |
+| 503 | `TRACKING_DOOR_UNCONFIGURED` | **This deployment has no data door.** Not an outage — a configuration state |
+| 503 | `TRACKING_DOOR_UNAVAILABLE` | geo-tracker unreachable, or too slow |
+
+> ⚠ **The `502` carries no `details` and a generic message.** The throw site attaches
+> `{ upstreamCode, upstreamStatus }`, and the boundary's `external_service` rule keeps only
+> `platformCode`/`platformStatus` — so the object empties and `details` is omitted, and the
+> message becomes the registry default *"The tracking service refused this read"*. **You cannot
+> tell the three upstream causes apart from the response.** Same behaviour, same reason, as the
+> agent-scoped half — see [agents.md](agents.md).
 
 ---
 

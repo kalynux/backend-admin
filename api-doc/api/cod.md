@@ -1,5 +1,7 @@
 # `/cod` — cash on delivery
 
+**Verified against source on 2026-09-08** — all sixteen routes and their guards (including the two composed ones) against the live route manifest; every query parameter, sort allowlist, pinned-versus-loose vocabulary decision, the `resolution` enum, the `delta` bounds and the 366-day span against `cod/validators/cod.validator.ts`; and the `201` plus all seven response messages against `cod/controllers/cod.controller.ts:292,307,368,390,406,483,544`.
+
 Base path: `/api/v1/cod`
 
 Platform oversight of the cash chain: who is holding the platform's money, the two settlement

@@ -1,5 +1,7 @@
 # Health probes
 
+**Verified against source on 2026-09-08** — both routes, the readiness rule (three required dependencies, `joviMall` reported but not required), the dependency report shape and the pre-limiter mount, against `admin/src/api/routes/health.routes.ts` and `admin/src/app.ts:127,130`.
+
 **Mounted unversioned at `/health`** — a probe URL is infrastructure, not part of the
 dashboard's API contract, and must not move when `/api/v1` becomes `/api/v2`.
 

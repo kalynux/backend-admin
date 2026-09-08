@@ -1,5 +1,7 @@
 # `/system` — operations reads
 
+**Verified against source on 2026-09-08** — all seventeen routes and their guards (including the three-way `any` on `/system/errors`) against the live route manifest; the thirteen-key allowlist and — **correcting this page** — the ARRAY-of-`{key,value}` shape of `GET /system/config` and its stringified non-scalars, against `system/domain/exposed-config.ts:26-116` and `system/controllers/system.controller.ts:134`; the `/system/errors` envelope and the after-the-fact tier filtering against `system.controller.ts:256-277`; and every query schema against `dev-tools/validators/dev-tools.validator.ts`.
+
 Base path: `/api/v1/system`
 
 What an operator needs to answer *"is this thing working"*.
@@ -140,28 +142,44 @@ collection directly and still answers.
 
 ### Response (200)
 
+> ### ⛔ `config` is an **ARRAY of `{ key, value }`**, not an object keyed by name
+>
+> This page showed a flat object until 2026-09-08 and it was wrong. A client written from that
+> example reads `data.config.NODE_ENV` and gets `undefined` on all thirteen keys. Verified
+> against `admin/src/modules/system/domain/exposed-config.ts:100-116` and
+> `system.controller.ts:134`.
+>
+> **`value` is `string | number | boolean | null`, never an array or an object.** Anything
+> non-scalar is `String()`-ed so the wire shape stays flat — which is why
+> `ADMIN_DASHBOARD_ORIGINS` arrives **comma-joined**, not as a list.
+
 ```jsonc
 {
   "success": true,
   "data": {
-    "config": {
-      "NODE_ENV": "production",
-      "PORT": 8033,
-      "LOG_LEVEL": "info",
-      "TRUST_PROXY": 1,
-      "ADMIN_DASHBOARD_ORIGINS": ["https://admin.wimall.cm"],
-      "ADMIN_APPROVAL_TTL_S": 86400,
-      "ADMIN_APPROVAL_SWEEP_MIN_INTERVAL_MS": 60000,
-      "ADMIN_AUDIT_RETENTION_DAYS": 365,
-      "ADMIN_AUDIT_MAX_STATE_BYTES": 16384,
-      "ADMIN_AUDIT_DANGLING_INTENT_S": 300,
-      "ADMIN_AUDIT_EXPORT_API_MAX_ROWS": 50000,
-      "ADMIN_AUDIT_EXPORT_DIR": "./var/audit-exports",
-      "SHUTDOWN_TIMEOUT_MS": 15000
-    }
+    "config": [
+      { "key": "NODE_ENV", "value": "production" },
+      { "key": "PORT", "value": 8033 },
+      { "key": "LOG_LEVEL", "value": "info" },
+      { "key": "TRUST_PROXY", "value": 1 },
+      { "key": "ADMIN_DASHBOARD_ORIGINS", "value": "https://admin.wimall.cm" },
+      { "key": "ADMIN_APPROVAL_TTL_S", "value": 86400 },
+      { "key": "ADMIN_APPROVAL_SWEEP_MIN_INTERVAL_MS", "value": 60000 },
+      { "key": "ADMIN_AUDIT_RETENTION_DAYS", "value": 365 },
+      { "key": "ADMIN_AUDIT_MAX_STATE_BYTES", "value": 16384 },
+      { "key": "ADMIN_AUDIT_DANGLING_INTENT_S", "value": 300 },
+      { "key": "ADMIN_AUDIT_EXPORT_API_MAX_ROWS", "value": 50000 },
+      { "key": "ADMIN_AUDIT_EXPORT_DIR", "value": "./var/audit-exports" },
+      { "key": "SHUTDOWN_TIMEOUT_MS", "value": 15000 }
+    ]
   }
 }
 ```
+
+**Thirteen keys, in exactly this order** — the array is built by mapping the frozen allowlist, so
+its order is the allowlist's. ⚠ **`/system/platform/config` is shaped differently** —
+`{ service, entries: [{ key, value, set }], wiring, note }` — so do not share a renderer between
+the two without normalising first.
 
 **The key list is a closed allowlist**, built by naming keys and re-checked at boot: a key whose
 name contains `URI`, `URL`, `SECRET`, `TOKEN`, `KEY`, `PASSWORD`, `PASS`, `DSN` or `CREDENTIAL`
@@ -334,6 +352,26 @@ a role and a timestamp for every failure, and a scrollable list of those is a re
 however little each row says.
 
 ### Response (200) — the three projections
+
+#### The envelope around `entries`
+
+The controller answers `{ ...whatever jovi-mall returned, entries, view }`, so the response
+carries **more than `view` and `entries`**:
+
+| Field | Notes |
+|---|---|
+| `view` | `support` · `admin` · `developer` — which rung answered |
+| `entries` | The rows, filtered and projected for that rung |
+| `sourceUsed` | Which store actually answered — `ring` or `persisted`. Not always what you asked for |
+| `sourceReason` | Why, when `sourceUsed` differs from the `source` you asked for |
+| **`nextBefore`** | **The cursor for the next page.** Pass it back as `?before=`. `null` at the end |
+| `meta` | The platform's own counters for the page it built |
+
+> ### ⚠️ A short page does **not** mean the end of the feed
+>
+> Tier-3 row filtering happens **in wi-admin, after** the platform returned the page — so a
+> Support caller can get three rows against `limit=100` with `nextBefore` still set.
+> **Page off `nextBefore` alone; never off `entries.length < limit`.**
 
 Every response carries **`view`**, naming which rung answered. That is not decoration: without it
 a Support agent reading a thin row cannot tell *"there is nothing more to know"* from *"I am not

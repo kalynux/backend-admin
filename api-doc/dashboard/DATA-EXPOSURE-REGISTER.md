@@ -1,5 +1,7 @@
 # Data exposure register
 
+**Verified against source on 2026-09-08** — a dated working record, left as history. Its seven items and their resolution banners re-read; the live-tracking answers on item 1 (the two audit actions `agents.tracking.position.read` / `shipments.tracking.trail.read`, the `reason` bounds, and `withheld: "tracking_allow_off"`) confirmed against `admin/src/modules/agents/domain/tracking-disclosure.ts:139-206` and `audit/domain/audit.catalog.ts:392-398`. No claim on this page was found to be false.
+
 **For the `wi-admin` backend team.** Written by the dashboard, from the dashboard's side of the
 contract. Nothing here is a dashboard bug — every item is something the API hands us that we then
 have to decide whether to draw.

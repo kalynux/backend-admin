@@ -1,5 +1,7 @@
 # `/messaging` — one Telegram message, to one person
 
+**Verified against source on 2026-09-08** — the route and its guard, the exactly-one-recipient refinement, the 4096 ceiling, the `200` shape and all four error rows, against `admin/src/modules/messaging/{routes,validators,gateways}/`, `admin/src/infra/platform/platform.client.ts:545-590` and jovi-mall's `src/modules/telegram/admin-messaging.routes.ts:83-106`.
+
 One route. It is **not a broadcast**, and the family was renamed at Phase 5 Part C to stop
 implying that it is.
 
@@ -101,7 +103,7 @@ it as its own capability with its own permission.
 | Field | Notes |
 |---|---|
 | `sent` | Always `true` on a 200 — a failed send raises rather than answering `false` |
-| `chatId` | **The chat jovi-mall actually resolved.** When you addressed a `userId`, this is the only evidence of *where* the message went; a client that ignores it cannot tell a correct send from one to a stale connection |
+| `chatId` | string — **the chat jovi-mall actually resolved**, never `null` on a `200`. When you addressed a `userId`, this is the only evidence of *where* the message went; a client that ignores it cannot tell a correct send from one to a stale connection |
 
 ### Errors
 

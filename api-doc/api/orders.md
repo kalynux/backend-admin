@@ -1,5 +1,7 @@
 # `/orders` — order administration
 
+**Verified against source on 2026-09-08** — all nine routes and their guards against the live route manifest, and every query parameter, sort allowlist, pinned-versus-format-validated status decision, all four write bodies and the 366-day span against `orders/validators/order.validator.ts`.
+
 Base path: `/api/v1/orders`
 
 The directory, the detail, both histories, a refund ceiling, and the four interventions.

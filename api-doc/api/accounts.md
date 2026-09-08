@@ -1,5 +1,7 @@
 # `/accounts` — one party's financial position
 
+**Verified against source on 2026-09-08** — all five routes and their composed guards against the live route manifest; every query parameter, sort allowlist and path-parameter enum against `accounts/validators/account.validator.ts`; the response shapes and every nullability against `accounts/read-models/account.dto.ts` and `money/read-models/payout-destination.dto.ts:137-180`; the two delegated verdicts and the outage behaviour against `accounts/gateways/account.gateway.ts` and `accounts/controllers/account.controller.ts:136-200`.
+
 Base path: `/api/v1/accounts`
 
 What one vendor, agency or agent **holds, is owed, and owes**. Five routes, all net-new —
@@ -170,7 +172,10 @@ assembling it from four calls would render the halves at different moments.
       "lastPaidAt": "2026-07-30T10:00:00.000Z",
       "lastPaidAmount": 210000,
       "destination": { "method": "mobile_money", "isPreferred": true,
-                       "masked": { "…": "…" }, "full": { "mobileMoney": null, "bank": null, "card": null } }
+                       "masked": { "mobileMoney": { "provider": "MTN", "phoneNumberMasked": null,
+                                                   "accountName": "Eric Tchoumi" },
+                                    "bank": null, "card": null },
+                       "full": null, "revealed": false }
     },
 
     "flags": {
@@ -208,14 +213,34 @@ not own.
 
 | Field | Notes |
 |---|---|
-| `contracts[].outstandingBalance` | Cash collected under this contract and not yet settled to the agency |
-| `contracts[].outstandingToAgent` | Fees the agency owes the agent. **The other direction** |
-| **`contracts[].maxThreshold`** | The contract's COD ceiling. **`0` blocks all COD** — it does not mean "no limit" |
+| `contracts[].outstandingBalance` | Cash collected under this contract and not yet settled to the agency. **`number \| null`** — `null` when the contract has no `cod` block |
+| `contracts[].outstandingToAgent` | Fees the agency owes the agent. **The other direction.** **`number \| null`**, same reason |
+| `contracts[].lastSettledAt` | ISO-8601 \| null |
+| **`contracts[].maxThreshold`** | The contract's COD ceiling. **`0` blocks all COD** — it does not mean "no limit". `null` when the contract carries no `cod` block at all, which is *not* the same thing |
 | `reserveHolds` | **Agency only** — the rolling-reserve slices waiting to mature. `null` for an agent, who has no reserve |
 
-#### `payouts.destination` is **always masked**
+#### `payouts`
 
-`full` is always `null` here. The digits live behind
+| Field | Notes |
+|---|---|
+| `pendingCount` | **`0` or `1`, never more.** `payout_requests` carries a partial unique index on `(ownerType, ownerId)` where `status: 'pending'`, so an owner has at most one open request |
+| `pendingAmount` | `number \| null` — `null` when nothing is pending |
+| `currency` | `string \| null` — from the pending request, else the last paid one, else `null` |
+| `lastPaidAt` · `lastPaidAmount` | `null` until the owner has been paid once |
+| `destination` | See below |
+
+#### `payouts.destination` is **always masked**, and may be absent entirely
+
+**`destination` is an object or `null`** — `null` when this owner has never had a payout request,
+and also on a legacy row that predates the destination snapshot. An object of nulls would read as
+*"a destination with no details"*, which is a different fact.
+
+When it is present: **`full` is `null`** — the literal value `null`, not an object whose members
+are null — and **`revealed` is `false`**. `revealed` is the discriminator; never infer it from
+`full`. On this path `masked.mobileMoney.phoneNumberMasked` and `masked.bank.accountNumberMasked`
+are **always `null` too**: the digits are not projected out of the database at all, so an operator
+recognises a destination by its provider and account name. A card is the exception — `last4` is
+the entire number that exists. The digits live behind
 [`GET /money/payouts/:payoutId/destination`](money.md#get-moneypayoutspayoutiddestination) alone,
 gated on its own permission and audited on every call.
 
@@ -229,7 +254,7 @@ one would go, not a promise. Each request freezes its own snapshot.
 | `openDiscrepancies` | **`null` for a vendor**, who has none by construction |
 | `unsettledCollections` | Allocations whose COD cash the platform has **not physically received** |
 | `shipmentCapAlertedAt` | When the owner was last warned they were at their shipment cap |
-| `overCodThreshold` | **Agent only.** Their held cash has reached the ceiling that stops further dispatch. `null` for a vendor (no cash) and an agency (no single ceiling — see `codExposure`) |
+| `overCodThreshold` | **Agent only.** Their held cash has reached the ceiling that stops further dispatch (compared with `>=`, so a `0` ceiling always reads "over"). `null` for a vendor (no cash), for an agency (no single ceiling — see `codExposure`), **and for an agent who has no ceiling set at all** |
 
 ### Errors
 
@@ -237,6 +262,14 @@ one would go, not a promise. Each request freezes its own snapshot.
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | Bad `ownerType`, malformed `ownerId`, or any query parameter |
 | 404 | **`ACCOUNT_OWNER_NOT_FOUND`** | No such vendor, agency or agent. **An owner with no balances is not this** — that reports zeroes |
+| 502 | `SERVICE_DEPENDENCY_UNAVAILABLE` | jovi-mall answered 5xx to one of the two delegated verdicts. `details.platformCode` carries its code |
+| 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | jovi-mall is unreachable, or `JOVI_MALL_BASE_URL` is unset |
+
+> **This route fails whole when jovi-mall is down, and that is deliberate.** `balances.earnings`
+> and `subscription.entitlements` are the two delegated verdicts; rendering them as `null` would be
+> indistinguishable from an owner who is owed nothing and has no plan. **The three sub-lists below
+> (`/payouts`, `/credits`, `/cash-ledger`) are entirely direct reads and keep answering** — so a
+> dashboard that degrades to them during a platform outage still shows the movement history.
 
 ---
 

@@ -1,5 +1,7 @@
 # `/administrators` — administrator management
 
+**Verified against source on 2026-09-08** — all seventeen routes, their guards and their audit actions against `administrators/routes/administrator.routes.ts` and the live route manifest; every request schema against `administrators/validators/administrator.validator.ts`; the three escalation refusals, the `409 AUTHZ_APPROVAL_REQUIRED` on creating a Developer and the idempotent tier no-op against `administrators/domain/administrator.service.ts:280-292,633-661`; and the ten `endReason` values against `admin-identity/models/admin-session.model.ts:24-53` (the page said eleven and listed ten).
+
 Base path: `/api/v1/administrators`
 
 The surface that decides who may use this service: creating administrators, changing levels,
@@ -469,7 +471,7 @@ Another administrator's sessions.
 
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
-| `includeEnded` | boolean flag | `false` | `false` → live sessions only (from Redis). `true` → the durable **history**: who signed in from where, when it ended, and which of eleven reasons ended it |
+| `includeEnded` | boolean flag | `false` | `false` → live sessions only (from Redis). `true` → the durable **history**: who signed in from where, when it ended, and which of the **ten** reasons below ended it |
 
 Accepts `true`, `false`, `1`, `0`. `false` means false.
 

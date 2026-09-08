@@ -1,5 +1,7 @@
 # `/money` — earnings, payouts and settlements
 
+**Verified against source on 2026-09-08** — all fourteen routes and their guards against the live route manifest; every query parameter, sort allowlist, bounded-string decision and the 366-day span against `money/validators/money.validator.ts`; and both `PayoutDestination` shapes — including `full` being the literal `null` on the masked path and the `revealed` discriminator, which the examples had wrong — against `money/read-models/payout-destination.dto.ts:82-240`.
+
 Base path: `/api/v1/money`
 
 Fourteen routes; eight had no legacy equivalent at all.
@@ -332,7 +334,8 @@ The queue.
           "bank": null,
           "card": null
         },
-        "full": { "mobileMoney": null, "bank": null, "card": null }
+        "full": null,
+        "revealed": false
       },
       "ticketId": "66a3aabbccddeeff00112233",
       "requestedByUserId": null,
@@ -362,7 +365,8 @@ Consequently:
 | `masked.bank.accountNumberMasked` | **`null`** |
 | `masked.*.accountName`, `provider`, `bankName` | Present |
 | `masked.card` | Present in full — `last4` is the entire number the platform holds, so rendering it is not a disclosure |
-| **`full.*`** | **Always present as a key, always `null` here.** A key that appeared only on the disclosure endpoint would make "this was not disclosed" and "this client is out of date" indistinguishable |
+| **`full`** | **Always present as a key, and its value here is the literal `null`** — not an object whose members are null. A key that appeared only on the disclosure endpoint would make "this was not disclosed" and "this client is out of date" indistinguishable, so it is always sent |
+| **`revealed`** | **`false` here, always.** This is the discriminator between the two shapes. **Never infer it from `full`** — a mapper that forgot to set it would then look like a masked one, which is the wrong direction for a mistake to fail in |
 
 **An operator recognises a destination by its provider and account name** — "MTN · Nadège
 Mbarga" — not by its last four digits. To see the digits, call the audited disclosure endpoint
@@ -417,13 +421,19 @@ The same `destination` object, with `full` populated for the method on file:
       "mobileMoney": { "phoneNumber": "+237677003456" },
       "bank": null,
       "card": null
-    }
+    },
+    "revealed": true
   }
 }
 ```
 
-**`full.card` is permanently `null`, by design.** Nobody sends money *to* a card token, and the
-platform never stores a PAN.
+**Here — and only here — `full` is an object rather than `null`,** and `revealed` is `true`.
+Its members say what there *was*: a bank destination fills `bank.accountNumber` and leaves
+`mobileMoney` null. **`full.card` is permanently `null`, by design** — nobody sends money *to* a
+card token, and the platform never stores a PAN — so a card destination discloses
+`{ mobileMoney: null, bank: null, card: null }` **with `revealed: true`**. That reads correctly:
+this *was* the disclosure, and there was nothing further to give. Branch on `revealed`, never on
+whether `full` is null.
 
 ### Errors
 

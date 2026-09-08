@@ -1,5 +1,7 @@
 # `/vendors` — vendor management
 
+**Verified against source on 2026-09-08** — all thirteen routes and their composed guards against the live route manifest, and every query parameter, sort allowlist, pinned status/type/mode/suspension-reason enum, `reason` requirement and the 366-day span against `vendors/validators/vendor.validator.ts` and `vendors/repositories/vendor-context.read.repository.ts:175-178`.
+
 Base path: `/api/v1/vendors`
 
 The directory, the detail, the catalogue as oversight sees it, the delivery-agency connections,

@@ -1,5 +1,7 @@
 # `/notifications` — the administrator inbox
 
+**Verified against source on 2026-09-08** — all ten routes, their guards and the five unaudited writes against `notifications/routes/notification.routes.ts` and the live route manifest; the ten types, three severities, ten source ids and four `status` filters against `notifications/domain/notification.types.ts` and `source.registry.ts`; every query parameter, the `overrides` three-state rule and the 366-day span against `notifications/validators/notification.validator.ts`; and the 30-day retention default against `admin/src/config/env.ts:256`.
+
 Base path: `/api/v1/notifications`
 
 The fifth notification stack. The platform has carried four — vendor, agency, agent, customer —
@@ -367,6 +369,8 @@ the page rendering and the click. Taking the filter **and** `before` makes the g
 ```json
 { "success": true, "data": { "marked": 7 }, "message": "7 notifications marked read" }
 ```
+
+(The message is singularised when exactly one row was marked: `"1 notification marked read"`.)
 
 ---
 

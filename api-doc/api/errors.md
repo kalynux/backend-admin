@@ -2,6 +2,13 @@
 
 **Verified against source on 2026-09-08** — all **88** registry codes reconciled against `admin/src/core/errors/error-codes.ts` (85 were documented; the three `AUTOMATION_*` codes were missing and are now here), and the status→category table against `admin/src/core/errors/`.
 
+**Amended 2026-09-08 (second pass)** — the `details` exposure claims re-checked against
+`admin/src/core/errors/detail-policy.ts:132-176`. Three rows said `platformCode` arrives on a
+forwarded **403** or **429**; it does not, because those two categories are the only ones with a
+closed key allowlist. Corrected in place. Two further rows over-promised `details`:
+`ADMIN_AUTH_PASSWORD_WEAK` (its `problems` key is on the always-dropped list) and
+`RATE_LIMIT_EXCEEDED` (the two `/auth/*` buckets attach none).
+
 The error contract is shared across all three backend services (wi-admin, jovi-mall,
 geo-tracker). One envelope, one nine-value taxonomy, one exposure rule.
 
@@ -189,7 +196,7 @@ answer from the caller's point of view.
 
 | Field | When |
 |---|---|
-| `platformCode` | **Always.** It is a published contract and the dashboard's only handle on *why* a delegated write was refused |
+| `platformCode` | **On every forwarded status EXCEPT 403 and 429.** It is a published contract and the dashboard's only handle on *why* a delegated write was refused — but the boundary scrub above is keyed on **category**, and `authorization` and `rate_limit` are the two categories with a closed key allowlist that `platformCode` is not on. ⚠ **Verified 2026-09-08**: a forwarded 403 keeps only `required`/`requiredAny`/`mode`/`resource`/`action`/`hint`, and a forwarded 429 keeps only `retryAfterSeconds`/`limit`/`windowSeconds`. On those two, branch on the **status** and read the message |
 | `platformStatus` | On a forwarded **5xx** only, alongside `operation` — a 4xx already carries the platform's status on the status line |
 | jovi-mall's own `details` | **Only when jovi-mall's envelope declares a client-safe category.** An older platform build that sends no `category` forwards nothing — failing closed on a service whose exposure rules cannot be read from here |
 
@@ -213,7 +220,7 @@ logs.
 | `INTERNAL_SERVER_ERROR` | 500 | `internal` | Unhandled fault. Message is always "Something went wrong". |
 | `NOT_FOUND` | 404 | `not_found` | Resource not found. Also returned for a malformed database id that got past the edge. |
 | `VALIDATION_ERROR` | 400 | `validation` | Schema failure. Carries `details.fields`. |
-| `RATE_LIMIT_EXCEEDED` | 429 | `rate_limit` | Carries `details.retryAfterSeconds`. |
+| `RATE_LIMIT_EXCEEDED` | 429 | `rate_limit` | Carries `details.retryAfterSeconds` **from the global and per-identity limiters only**. The two `/auth/*` buckets send no `details` — read the `draft-7` `RateLimit` headers there. |
 
 ### Malformed request (before any schema)
 
@@ -241,7 +248,7 @@ logs.
 | `ADMIN_AUTH_MFA_ALREADY_ENROLLED` | 409 | `conflict` | Re-enrolling would silently invalidate the live authenticator. |
 | `ADMIN_AUTH_MFA_NOT_ENROLLED` | 409 | `conflict` | Two-factor is not set up. |
 | `ADMIN_AUTH_CSRF_INVALID` | 403 | `authentication` | Missing or mismatched `X-CSRF-Token`. The remedy is a fresh token, not a different permission. |
-| `ADMIN_AUTH_PASSWORD_WEAK` | 422 | `business_rule` | The new password fails policy. `details` names which rules. |
+| `ADMIN_AUTH_PASSWORD_WEAK` | 422 | `business_rule` | The new password fails policy. ⚠ **No `details` arrive.** The throw site attaches `details.problems`, and `problems` is on the always-dropped internal-key list above — so the scrub empties the object and `details` is omitted. The client gets the fixed message *"Password does not meet the minimum requirements"* and nothing more. The four rules are in [auth.md](auth.md#password-policy); state them on the form. |
 
 ### Authorization — `AUTHZ_*`
 
@@ -307,7 +314,7 @@ logs.
 |---|---|---|---|
 | `CONTRACT_NOT_FOUND` | 404 | `not_found` | No agent↔agency contract with this id. Its own code rather than a bare `NOT_FOUND` because `/contracts/:contractId` is addressable and the id is what a support ticket carries — a client showing "not found" needs to say *what* was not found, and the neighbouring 404s on that screen are about agents and agencies. |
 | `CONTRACT_INVALID_TRANSITION` | 409 | `conflict` | The contract is not in a status this verb can move it from — reinstating one that is already `active`, suspending one that is `deactivated`. `details` names the transition, the current `from`, and the `allowedFrom` set. **Arrives as `details.platformCode` on a `PLATFORM_OPERATION_REJECTED`.** |
-| `CONTRACT_TRANSITION_NOT_PERMITTED` | 403 | `authorization` | The transition exists but not for the party attempting it. Reachable from the admin surface only as a platform-side guard; the three administrative writes are chosen to be ones the agency holds unilaterally. **Arrives as `details.platformCode`.** |
+| `CONTRACT_TRANSITION_NOT_PERMITTED` | 403 | `authorization` | The transition exists but not for the party attempting it. Reachable from the admin surface only as a platform-side guard; the three administrative writes are chosen to be ones the agency holds unilaterally. ⚠ **You cannot branch on this code.** It is forwarded at 403, which is `authorization`, whose `details` allowlist drops `platformCode` — so what reaches the client is `403 PLATFORM_OPERATION_REJECTED` with jovi-mall's message and no code. |
 
 ### Tracking data door
 
@@ -322,7 +329,7 @@ the geo-tracker clients never throw, so a door failure fails the **request** onl
 | Code | Status | Category | Meaning |
 |---|---|---|---|
 | `TRACKING_DOOR_UNCONFIGURED` | 503 | `external_service` | **This deployment has no data door** — `GEO_TRACKER_DATA_BASE_URL` / `GEO_TRACKER_ADMIN_TOKEN` are unset. The door is **optional by design**, so this is a configuration state and not an incident: say "live tracking is not enabled here", not "something went wrong". Probe it without disclosing anything (and without writing an audit row) via the `configured` flag on the tracking reads. |
-| `TRACKING_DOOR_REFUSED` | 502 | `external_service` | geo-tracker answered **and refused** — typically a capability missing from `GEO_TRACKER_ADMIN_SCOPES`, or a rejected `reason`. Its own code survives the hop, since both services share one error envelope: `details.upstreamCode` and `details.upstreamStatus` carry it, so a client can say *why*. The remedy is geo-tracker's scope configuration. |
+| `TRACKING_DOOR_REFUSED` | 502 | `external_service` | geo-tracker answered **and refused** — typically a capability missing from `GEO_TRACKER_ADMIN_SCOPES`, or a rejected `reason`. The remedy is geo-tracker's scope configuration. ⚠ **No `details` reach the client.** The throw site attaches `{ upstreamCode, upstreamStatus }` and the `external_service` rule above keeps only `platformCode`/`platformStatus`, so the object empties and `details` is omitted — and the message is replaced by the registry default. A client can act on the code and the status, nothing finer. |
 | `TRACKING_DOOR_UNAVAILABLE` | 503 | `external_service` | geo-tracker could not be **reached** — timeout, connection refused, unparseable answer. The only one of the three that is an incident. Retry. |
 
 > ⚠ **A read that emits coordinates writes its audit row BEFORE the disclosure, and does not
@@ -379,13 +386,14 @@ collections), so every one arrives as `error.code` — **none of these is a
 
 ### Credential recovery
 
-Every one of these arrives as `details.platformCode` on a `PLATFORM_OPERATION_REJECTED`,
-since the send is delegated to jovi-mall. Branch on `platformCode`, not on `error.code`.
+These arrive as `details.platformCode` on a `PLATFORM_OPERATION_REJECTED`, since the send is
+delegated to jovi-mall. Branch on `platformCode`, not on `error.code` — **with one exception:
+the 429 below, where the boundary drops `platformCode`.** See the ⚠ in that row.
 
 | Code | Status | Category | Meaning |
 |---|---|---|---|
 | `USER_CHANNEL_UNAVAILABLE` | 409 | `conflict` | The party has no address on the requested channel — no `email`, no `phone`, or (for `telegram`) no connected chat. Telegram exists only once the person has run `/connect` with the bot; the platform stores no `chatId` on any party, so there is nothing to fall back to. |
-| `USER_CREDENTIAL_LINK_THROTTLED` | 429 | `rate_limit` | Too many links recently. **`details.scope` is `party` or `administrator`** and the two have different remedies — wait, versus ask a colleague. `details.retryAfterSeconds` carries the wait. |
+| `USER_CREDENTIAL_LINK_THROTTLED` | 429 | `rate_limit` | Too many links recently. **`details.retryAfterSeconds` carries the wait and is the only detail that survives.** ⚠ jovi-mall raises this with `{ retryAfterSeconds, scope }` where `scope` is `party` or `administrator` — two different remedies, wait versus ask a colleague — but the boundary's `rate_limit` allowlist drops both `scope` and `platformCode`. The distinction reaches the client **only in the message** (*"This person has been sent too many links recently"* versus *"You have sent too many links recently"*). Render the message; do not branch on a code here. |
 | `USER_LOGIN_LINK_ROLE_UNSUPPORTED` | 409 | `conflict` | A sign-in link was asked for on an account that is not a customer. Structural rather than configurable: jovi-mall scopes every session that flow mints to `customer` as a literal, because a vendor, agency or agent reaches money and other people's data. Send a **password-reset link** instead. |
 | `MESSAGING_DELIVERY_FAILED` | 502 | `external_service` | The channel accepted the request and did not deliver. **Raised rather than swallowed**, unlike the self-service reset path — that one must answer identically whether or not the account exists, while here an administrator is watching a dialog and "sent" when nothing was sent closes the ticket with the party still locked out. Offer another channel. |
 | `AUTH_ACCOUNT_SUSPENDED` | 409 | `conflict` | The party's account is suspended, so there is nothing to send them back into. Reinstate first. **Arrives as `details.platformCode`**, and note the status differs from the 403 the same code carries on jovi-mall's own login path. |
