@@ -1,5 +1,7 @@
 # ADR-008 — Vendor management
 
+**Verified against source on 2026-09-08** — **correcting D-8** — the plan-assign route it named (`POST /api/admin/vendors/:vendorId/plan`) is wrong on two counts today; the live path is `POST /api/internal/admin/billing/vendors/:vendorId/plan` (`jovi-mall/src/modules/billing/routes/admin-billing.routes.ts:52`, mounted at `api/routes/internal-admin.routes.ts:215`). The thirteen `/vendors` routes and the projected `policies` content were checked against the manifest and `vendor-policies.dto.ts`. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Status:** accepted · **Implements:** the vendor-management brief; the `vendors` half of
 blueprint Phase 6 · **Follows:** [ADR-004](./ADR-004-DOMAIN-OWNERSHIP.md) (ownership),
 [ADR-005](./ADR-005-API-CONTRACT.md) (contract), [ADR-007](./ADR-007-USER-MANAGEMENT.md)
@@ -184,8 +186,19 @@ dark, why*. Promote it when a product admin screen exists to read it — not bef
 ### D-8 · `vendors.settings.manage` governs order settings, not commission
 
 The permission's catalog summary said "commission and platform settings" and that was
-wrong. Commission lives on `PricingPlan.commission_percent` and is set by assigning a plan
-through jovi-mall's existing `POST /api/admin/vendors/:vendorId/plan`.
+wrong. Commission lives on `PricingPlan.commission_percent` and is set by assigning a plan.
+
+> ⚠ **Route corrected 2026-09-08.** This sentence named jovi-mall's
+> `POST /api/admin/vendors/:vendorId/plan`, which is wrong on two counts today: the public
+> `/api/admin/*` prefix was deleted at Phase 5, and the router is mounted under `/billing`. The
+> live path is **`POST /api/internal/admin/billing/vendors/:vendorId/plan`**
+> (`jovi-mall/src/modules/billing/routes/admin-billing.routes.ts:52`, mounted at
+> `api/routes/internal-admin.routes.ts:215`). The Context section above keeps the old path
+> deliberately — there it is a statement about what PHASE-0 found, and it was true then.
+>
+> An administrator reaches it through **wi-admin's own**
+> `POST /api/v1/billing/subscriptions/:ownerType/:ownerId` (`billing.subscriptions.assign`), which
+> did not exist when this decision was written.
 
 What this governs is three scalars on `vendor_settings`, chosen by one rule: **a setting is
 the administrator's when its effect lands on somebody other than the vendor.**

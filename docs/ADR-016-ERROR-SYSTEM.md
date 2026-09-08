@@ -1,5 +1,7 @@
 # ADR-016 · The error system
 
+**Verified against source on 2026-09-08** — **correcting D-5**, which said ADR-009 D-2 and ADR-015 D-5 *"stand unamended"* — [ADR-020](ADR-020-ADMIN-DATA-DOOR.md) amended both on 2026-08-22. The nine categories, the boundary-filtering rule and the three rungs were checked against `src/core/errors/error-category.ts` and `detail-policy.ts` and are correct. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Status:** accepted, implemented
 **Scope:** all three services — `jovi-mall`, `wi-admin`, `geo-tracker`
 **Enforced by:** `jovi-mall: npm run test:errors` (69) · `npm run test:system` (175) ·
@@ -151,8 +153,18 @@ middleware says it "is accepted for logging and is never read for a decision" �
 because the token authenticating that call is a **full-privilege credential**. Projecting
 there would be theatre.
 
-geo-tracker is out of it entirely: ADR-009 D-2 and ADR-015 D-5 stand unamended. Its errors
-reach operators through its own logs and the new `geotracker_errors_total`.
+geo-tracker is out of it **for errors**: nothing in this system reaches an operator through
+wi-admin. Its errors reach them through its own logs and the new `geotracker_errors_total`.
+
+> ⚠ **Corrected 2026-09-08.** This paragraph said *"ADR-009 D-2 and ADR-015 D-5 **stand
+> unamended**"*, and that stopped being true on 2026-08-22: **[ADR-020](ADR-020-ADMIN-DATA-DOOR.md)
+> amended both**, and geo-tracker now has a scoped **data** door — four `/internal/*` reads behind
+> `GEO_TRACKER_ADMIN_TOKEN`, audited fail-closed in wi-admin. Both amended decisions already say so
+> at their own D-items; this was the one page still asserting the old state.
+>
+> **The rung model above is unaffected and holds on the new door too**, for exactly the reason
+> given here: geo-tracker records `X-Admin-Actor` and never reads it for a decision, because it
+> authenticates a *service*, not a person. There is still **no error surface** on that door.
 
 ### The three rungs
 

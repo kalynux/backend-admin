@@ -1,5 +1,7 @@
 # ADR-005 — The core API contract
 
+**Verified against source on 2026-09-08** — the wire rules a client acts on: the envelope and the `details` omission (`src/core/http/responses.ts`), the nine categories (`src/core/errors/error-category.ts`), and D-10 pagination — `LIMIT_DEFAULT = 20`, `LIMIT_MAX = 100`, `pages = Math.ceil(total / limit)` so an empty list is `pages: 0` (`src/core/http/list-query.ts:38,47,68`). All correct. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Status:** Accepted, 2026-08-11 · **Implemented by:** Phase 5 (Port all 81 endpoints)
 **Establishes:** the conventions every endpoint in this service obeys
 **Enforced by:** `npm run test:contract` (97 assertions, DB-free) · `defineRoute` · ESLint · the global error handler

@@ -1,5 +1,22 @@
 # BR-002 · Totals and owner names on the earnings-accounts directory
 
+**Verified against source on 2026-09-08** — the five-route `/accounts` mount and the
+`GET /money/earnings/accounts` guard against the live route manifest; `meta.totals` and the
+`owner: { type, id, name }` row against `admin/src/modules/money/gateways/money.gateway.ts:216-266`
+and `money/controllers/money.controller.ts:278`.
+
+> ### ✅ BUILT — read [`money.md`](../../api/money.md), not the shape traced below
+>
+> **Answered in [`RESPONSE-2026-08-17.md`](RESPONSE-2026-08-17.md).** `meta.totals` shipped as the
+> per-currency array proposed here, and the owner name shipped — but **the row shape changed**:
+> `ownerType`/`ownerId` became **`owner: { type, id, name }`**, matching every other money row on
+> the service. A client written against the `ownerType`/`ownerId` example below reads `undefined`
+> on both. `sort` and `search` were **declined**, with the reason recorded in `money.md`.
+>
+> Still true, and worth keeping: **there is no `GET /accounts` list endpoint** — the `/accounts`
+> mount is exactly five owner-scoped routes. What is stale is the *"response shape is
+> undocumented"* complaint: `money.md` now carries a full response block.
+
 **Priority: medium.** Blocks the Accounts screen from answering *"how much do we owe, in total?"*
 
 ## The ask

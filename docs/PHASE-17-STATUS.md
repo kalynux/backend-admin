@@ -1,5 +1,7 @@
 # Phase 17 — what is done, what is half-done, what is not started
 
+**Verified against source on 2026-09-08** — the close-out it records, against the live manifest and the permission catalog — the four deliberately-unbuilt permissions are still exactly the four `†` names (`users.sessions.revoke`, `users.roles.manage`, `notifications.manage`, `developer_tools.webhooks.redeliver`). Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 > # ✅ PHASE 17 IS CLOSED — 2026-08-20
 >
 > Parts B, C, D and E all landed, executed as Parts A, B, C and D of

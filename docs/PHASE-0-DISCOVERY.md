@@ -1,5 +1,7 @@
 # Admin Backend — Phase 0: Repository & System Discovery
 
+**Verified against source on 2026-09-08** — **nothing current, and deliberately.** This is the 2026-08-10 census of jovi-mall *before* the port, and every figure in it measures a surface that has since been deleted. What was checked is that its routes are **absent** from the live manifest — which is what the port was for. ⛔ Do not read a number on this page as current. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Status:** Discovery complete. No business functionality implemented.
 **Date:** 2026-08-10
 **Legacy source inspected:** `backend/jovi-mall/` (Express + TypeScript + MongoDB + Redis)

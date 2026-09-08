@@ -1,5 +1,7 @@
 # ADR-015 — Developer tools
 
+**Verified against source on 2026-09-08** — the nine `/dev-tools` routes and the thirteen `developer_tools.*` permissions (8 `destructive`) against the live manifest and `npm run authz:matrix`, and D-5's own ADR-020 amendment banner, which is present and accurate. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Phase 15.** Status: implemented. Builds on ADR-014; amends ADR-009 §D-2 (narrowly, and in the
 open — see D-5).
 

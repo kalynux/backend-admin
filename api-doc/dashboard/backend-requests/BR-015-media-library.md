@@ -1,5 +1,40 @@
 # BR-015 · A media library, and an upload path for administrators
 
+**Verified against source on 2026-09-08** — `GET /files/library`, `GET /files/orphans` and
+`POST /files/upload`, their permissions and the upload's `records:files.upload` declaration against
+the live route manifest; the 32 MiB ceiling (`ADMIN_UPLOAD_MAX_BYTES`) against
+`admin/src/config/env.ts`; and the multipart narrowing against
+`admin/src/modules/files/routes/file.routes.ts`.
+
+> ### ✅ BUILT — design record [ADR-021](../../../docs/ADR-021-ADMIN-MEDIA-LIBRARY.md)
+>
+> **Answered in [`RESPONSE-2026-08-26.md`](RESPONSE-2026-08-26.md); live contract
+> [`files.md`](../../api/files.md).**
+>
+> ```
+> GET  /api/v1/files/library    files.library.read    DIRECT read of jovi_mall.files
+> GET  /api/v1/files/orphans    files.orphans.read
+> POST /api/v1/files/upload     files.upload          audited · stream proxy, body NEVER parsed
+> ```
+>
+> Three things to carry, each of which went differently from the proposal:
+>
+> - **The upload ticket (option 1) was declined**; what shipped is a **stream proxy** — wi-admin
+>   pipes the raw multipart body through unread. The platform rule *"wi-admin accepts no multipart
+>   bodies anywhere"* is **narrowed** to *"wi-admin never **parses** one"*, amended in writing.
+>   Only the **32 MiB** byte ceiling is enforced here; the 10-file, `files` field-name and MIME
+>   limits are jovi-mall's and are **published, not policed** on this side.
+> - **`sortBy` + `sortOrder` do not work.** This service takes one `sort` token (`sort=-createdAt`),
+>   and the list schema is not `.strict()` — a wrong parameter returns `200` in the default order
+>   with nothing saying the sort was dropped.
+> - **The library read is NOT audited**, against this page's recommendation, because
+>   `files.orphans.read` already enumerates on the same mount and is not. Adding it later is
+>   additive.
+>
+> ⛔ *"There is no cover editor at all today"* and the *"four routes"* count below are the
+> 2026-08-25 state. Admin uploads land in **public** trees, so an admin-uploaded blog image gets a
+> real `url` — the blog half of this request closed with it.
+
 **Priority: high.** It blocks five separate asks at once, and **four of the five pieces already
 exist in jovi-mall** — what is missing is the doors.
 

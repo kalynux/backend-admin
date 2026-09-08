@@ -1,5 +1,12 @@
 # wi-admin — architecture
 
+**Verified against source on 2026-09-08** — the 23 modules (`ls src/modules`), the 11 Mongoose
+models, the route surface (240 = 237 versioned in 24 groups + 1 internal + 2 health, by executing
+`routeManifest()` and `FRONTEND-SYNC/tools/dump-routes.js`), and every boot assertion in
+`src/app.ts:48-62,147,158` and `src/lifecycle.ts:51`. **Four things were wrong** — the module list
+and the route table both omitted `automation` (ADR-022, 2026-09-07), § 3's total folded the health
+probes into the versioned figure, and § 4 listed **four** of the **ten** boot assertions.
+
 Read from source 2026-09-06. Route census:
 [`../../DOC-PROGRAM/evidence/admin-routes.txt`](../../DOC-PROGRAM/evidence/admin-routes.txt).
 Permission matrix: `npm run authz:matrix`.
@@ -10,7 +17,7 @@ Permission matrix: `npm run authz:matrix`.
 
 ```
 src/api/       the route manifest · middleware chain · error handler · rate limiter
-src/modules/   22 modules — controllers, domain, repositories, routes, validators
+src/modules/   23 modules — controllers, domain, repositories, routes, validators
 src/core/      errors · http (the list query) · data (Mongo query building) · validation · logging
 src/infra/     mongo (two connections) · redis · platform (the jovi_mall read side) · geo · storage
 src/config/    one Zod schema that SUPPLIES the environment
@@ -32,12 +39,16 @@ That produces an asymmetry with two databases:
 
 ---
 
-## 2 · Twenty-two modules
+## 2 · Twenty-three modules
 
 `accounts` · `admin-identity` · `administrators` · `agencies` · `agents` · `audit` ·
-`authorization` · `billing` · `cod` · `content` · `dev-tools` · `dual-control` · `files` ·
-`messaging` · `money` · `notifications` · `orders` · `shipments` · `support` · `system` · `users` ·
-`vendors`
+`authorization` · **`automation`** · `billing` · `cod` · `content` · `dev-tools` · `dual-control` ·
+`files` · `messaging` · `money` · `notifications` · `orders` · `shipments` · `support` · `system` ·
+`users` · `vendors`
+
+> ⚠ **`automation` was missing from this list until 2026-09-08**, and from the route table below.
+> It landed on 2026-09-07 with [ADR-022](./ADR-022-AUTOMATION-FAILURE-AUDIT.md) — the day after
+> this page was read from source — so both omissions have one cause. `ls src/modules | wc -l`.
 
 Four of them are **the service itself** rather than a domain, and they are where the interesting
 code lives:
@@ -45,7 +56,7 @@ code lives:
 | Module | Owns |
 |---|---|
 | `admin-identity` | administrators, sessions, MFA, lockout — an identity space **entirely separate** from the platform's |
-| `authorization` | the 116-permission catalog and the tier grant table |
+| `authorization` | the permission catalog (**118** on 2026-09-08 — `npm run authz:matrix`) and the tier grant table |
 | `audit` | the 114-action catalog, the writer, exports and retention |
 | `dual-control` | four-eyes approval requests |
 
@@ -54,10 +65,11 @@ a delegating client call for writes.
 
 ---
 
-## 3 · The route surface — 237 routes, and none of them is registered by hand
+## 3 · The route surface — 240 routes, and none of them is registered by hand
 
-Everything under `/api/v1`, except `/health/live` and `/health/ready`, which mount **before** the
-rate limiter.
+**237 versioned** under `/api/v1`, in **24** groups · **1** unversioned service door
+(`POST /api/internal/automation/failures`) · **2** health probes (`/health/live`, `/health/ready`),
+which mount **before** the rate limiter.
 
 | Group | Routes | Group | Routes |
 |---|---|---|---|
@@ -71,8 +83,17 @@ rate limiter.
 | `vendors` | 13 | `audit` | 7 |
 | `auth` | 11 | `approvals` | 5 |
 | `orders` | 10 | `accounts` | 5 |
-| | | `contracts` · `permissions` · `messaging` | 4 · 3 · 1 |
+| | | `contracts` · `permissions` · **`automation`** · `messaging` | 4 · 3 · **2** · 1 |
+| | | `/api/internal/automation/failures` | 1 |
 | | | `/health/*` | 2 |
+
+> ⚠ **Corrected 2026-09-08.** The table omitted `/automation` (ADR-022, 2026-09-07) and reached
+> "237" by counting the two health probes inside the versioned figure. The versioned surface is
+> **237 on its own**; 240 is the whole HTTP surface. Re-derive rather than trust:
+> ```bash
+> node -r ts-node/register/transpile-only -r dotenv/config \
+>     ../FRONTEND-SYNC/tools/dump-routes.js "$(pwd)/src/app.ts" | tail -1   # TOTAL 240
+> ```
 
 ### `defineRoute` — the mechanism that makes an unguarded route unshippable
 
@@ -110,19 +131,44 @@ failure mode.**
 
 ---
 
-## 4 · Four things asserted at boot, before the port binds
+## 4 · Ten things asserted at boot, before the port binds
 
-`src/app.ts` and `src/lifecycle.ts`. Each turns a class of silent wrongness into a startup error:
+`src/app.ts` and `src/lifecycle.ts`. Each turns a class of silent wrongness into a startup error.
+They share one argument: **a service running on an inconsistent registry is worse than one that is
+down, because it looks like it is working.**
+
+Seven run before any route is mounted (`app.ts:48-62`):
 
 | Assertion | Catches |
 |---|---|
+| `assertGrantTableValid()` | a tier grant that breaks nesting (3 ⊆ 2 ⊆ 1), or a `financial` / `destructive` permission reaching tier 3 |
+| `assertDualControlHandlersRegistered()` | a four-eyes action with no registered handler to commit it |
 | `assertAuditCatalogValid()` | an action whose `transport` and recording path disagree |
-| `assertRouteManifestComplete(app)` | a route registered without `defineRoute` |
+| `assertFeatureFlagCatalogValid()` | a flag nothing reads |
+| `assertExposedConfigSafe()` | a `GET /system/config` allowlist key that names a secret |
+| `assertNotificationCoverageComplete()` | a notification type nothing produces — invisible otherwise: it appears in the filter and on the preferences screen and simply never arrives |
+| `assertSourcePermissionsExist()` | a notification source naming a permission the catalog does not hold |
+
+Two run **immediately after mounting**, because they inspect what Express actually registered
+(`app.ts:147,158`):
+
+| Assertion | Catches |
+|---|---|
+| `assertRouteManifestComplete(app)` | a route registered without `defineRoute`, or one claiming `public` without being on `PUBLIC_ROUTE_ALLOWLIST` |
 | `assertAuditCoverageComplete()` | a mutating route with no audit declaration, **and** a catalogued action nobody produces |
+
+One runs in the lifecycle, before the port binds (`lifecycle.ts:51`):
+
+| Assertion | Catches |
+|---|---|
 | `assertAuditStoreTransactional()` | a `wi_admin` database that cannot run multi-document transactions |
 
-The last one is the load-bearing one and is described in
-[DATA.md § 2](./DATA.md#2--the-audit-store).
+The last is the load-bearing one and is described in [DATA.md § 2](./DATA.md#2--the-audit-store).
+
+> ⚠ **This section listed four of the ten until 2026-09-08.** The six it omitted are the ones a
+> reader most needs: they are what fails the boot when somebody adds a permission, a feature flag,
+> a notification type or a four-eyes action and stops one step short. Re-derive with
+> `grep -n 'assert' src/app.ts src/lifecycle.ts`.
 
 ---
 

@@ -1,5 +1,7 @@
 # Phase 17 — porting the last 21 permissions
 
+**Verified against source on 2026-09-08** — the port it plans, against the live manifest — every permission it lists is in the catalog and every route it plans is served. Its **110**-permission figure is the figure at the time of writing; today it is **118**. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 > # ✅ COMPLETE — 2026-08-20. **The register below is closed.**
 >
 > All 21 permissions are routed and all 35 legacy rows are gone. Part A (support) landed at

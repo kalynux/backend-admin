@@ -1,5 +1,31 @@
 # BR-004 · Reading and administering one agent↔agency contract
 
+**Verified against source on 2026-09-08** — the four `/contracts` routes and their composite guards
+against the live route manifest, and the camelCase `terms.employment` / `.remittance` / `.feeSplit`
+field names against [`contracts.md`](../../api/contracts.md) and
+`admin/src/modules/agencies/read-models/contract.dto.ts`.
+
+> ### ✅ BUILT — the read, three of the six writes, and a written position on the other three
+>
+> **Answered in [`RESPONSE-2026-08-17.md`](RESPONSE-2026-08-17.md); live contract
+> [`contracts.md`](../../api/contracts.md).**
+>
+> ```
+> GET  /api/v1/contracts/:contractId             agencies.read + agents.read
+> POST /api/v1/contracts/:contractId/suspend     agents.contracts.manage   audited
+> POST /api/v1/contracts/:contractId/reinstate   agents.contracts.manage   audited
+> POST /api/v1/contracts/:contractId/terminate   agents.contracts.manage   audited
+> ```
+>
+> Approving a pending contract, editing terms and adjusting the COD slice were all **refused**, each
+> with its reason recorded. ⚠ **Terminate routinely does not terminate** — branch on
+> `data.contract`, never on the status; see the response.
+>
+> ⛔ Two claims below are now stale. *"There is no `PATCH` or `POST` on any contract path"* — three
+> POSTs exist. And the `snake_case` complaint in § 2 is **closed**: `terms.employment`,
+> `terms.remittance` and `terms.feeSplit` are camelCase on the wire and documented field by field.
+> That was a **breaking** change, announced as such.
+
 **Priority: medium. This is a policy question first and an endpoint request second.** The contract
 currently refuses most of what is being asked for, on stated grounds. Please decide, rather than
 build.

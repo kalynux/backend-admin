@@ -1,5 +1,7 @@
 # ADR-018 — Answering the dashboard's backend requests
 
+**Verified against source on 2026-09-08** — every route BR-001…BR-009 produced, against the live manifest — all present, at the stated paths, with the stated permissions and audit actions. ⚠ Its *"113 permissions … 27 are `†` … 190 versioned endpoints across 20 route groups"* is the 2026-08-17 measurement; today it is **118**, **4** `†`, **237** across **24**. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Date:** 2026-08-17
 **Status:** Accepted, implemented
 **Scope:** wi-admin, jovi-mall, geo-tracker

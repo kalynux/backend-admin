@@ -1,5 +1,7 @@
 # ADR-006 — The audit subsystem
 
+**Verified against source on 2026-09-08** — the audit model it decides, against `AUDIT_CATALOG` **executed** rather than read: **114** actions across four transports (delegated 69 · external 21 · `wi_admin_txn` 17 · observation 7), and the fail-closed store assertion at `src/lifecycle.ts:51`. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Status:** Accepted, 2026-08-11 · **Implements:** blueprint Phase 3.5, decision **D4**
 **Closes:** ADR-002 D4 (audit location and consistency), PHASE-0 open question 3 (retention)
 **Verified by:** `npm run test:audit` (103, DB-free) · `npm run verify:audit` (26, needs Mongo + Redis)

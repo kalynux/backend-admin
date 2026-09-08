@@ -1,5 +1,7 @@
 # ADR-004 — Domain ownership and data-access paths
 
+**Verified against source on 2026-09-08** — the ownership table and the `PlatformReadRepository` rule it decides, against `src/infra/platform/` and the 49-entry access table. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Status:** Accepted, 2026-08-11 · **Implemented by:** Phase 4 (Data Access and Domain Boundaries)
 **Amends:** ADR-002 §2.1 (two measurement errors), blueprint J5 (the re-mount mechanism)
 **Amended by:** [ADR-009](./ADR-009-DELIVERY-NETWORK.md) D-1 (the *Agents* row) ·

@@ -1,11 +1,15 @@
 # wi-admin — implementation constraints
 
+**Verified against source on 2026-09-08** — the suite count (24 `test:*` + 15 `verify:*`, from
+`package.json`) and the permission total (**118**, `npm run authz:matrix`). Both figures had moved;
+every rule on the page was left as written.
+
 **The things that look like improvements and are not.**
 
 Every entry here is a rule whose *obvious* refactor is the bug. They are collected in one place
 because they share a property: **each is invisible to the type system**, and several are invisible to
-the 37 suites as well — so the only thing standing between the codebase and the regression is
-somebody having read this.
+the 39 suites as well (24 `test:*` offline + 15 `verify:*` live, re-counted 2026-09-08) — so the
+only thing standing between the codebase and the regression is somebody having read this.
 
 Read from source 2026-09-06.
 
@@ -19,7 +23,7 @@ Read from source 2026-09-06.
 |---|---|
 | mint platform users for administrators | it collapses the identity separation the entire admin architecture is built on. This was the **rejected alternative** in ADR-020 |
 | authenticate an administrator through jovi-mall | jovi-mall cannot resolve one — `/api/tracking/visible-agents` does a `findById` on `users`, and there is no row |
-| build a permission system in jovi-mall | the 116 permissions live here, and one policy in two places drifts |
+| build a permission system in jovi-mall | the permissions live here — **118** on 2026-09-08, and the figure moves every phase — and one policy in two places drifts |
 | enforce on `X-Actor-Tier` in jovi-mall | the token authenticating that call is **full-privilege**; anyone holding it could set the header. jovi-mall serves the full record, wi-admin grades it |
 | read `X-Admin-Actor` in **geo-tracker** for a decision | same reason, other seam. It is recorded, never consulted — which is precisely **why the tracking audit row lives here**, where the human is actually known |
 

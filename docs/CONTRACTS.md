@@ -1,5 +1,12 @@
 # wi-admin — contracts
 
+**Verified against source on 2026-09-08** — the permission catalog, the tier grants, the audit
+catalog and the error registry, each re-derived by **executing** `npm run authz:matrix` and
+`AUDIT_CATALOG` rather than by reading: **118** permissions across **20** families, tiers
+**118 / 101 / 31**, **114** audit actions across four transports (delegated 69 · external 21 ·
+`wi_admin_txn` 17 · observation 7), **88** error codes. § 2's permission figures and § 7's code
+count were stale; § 2's *"21 `money`"* flag count was **never right** and is **14**.
+
 Read from source 2026-09-06: `src/api/middlewares/`, `src/api/route-manifest.ts`,
 `src/modules/authorization/domain/`, `src/modules/audit/domain/`, `src/core/errors/`,
 `src/infra/geo/`, `src/infra/platform/`.
@@ -64,21 +71,27 @@ Small, but free to avoid.
 
 ---
 
-## 2 · Authorization — 116 permissions, granted by tier
+## 2 · Authorization — 118 permissions, granted by tier
 
-`npm run authz:matrix` on 2026-09-06: **116 permissions across 20 families**.
+`npm run authz:matrix` on **2026-09-08**: **118 permissions across 20 families**.
 
 | Tier | Holds |
 |---|---|
-| **1 — Developer** | 116 |
-| **2 — Admin** | 99 |
-| **3 — Support** | 30 |
+| **1 — Developer** | 118 |
+| **2 — Admin** | 101 |
+| **3 — Support** | 31 |
+
+⚠ **Run it; do not quote it.** These four figures have moved five times during this programme
+(110 → 113 → 114 → 116 → 118). Only the family count has held.
 
 ⚠ **A LOWER tier number means MORE privilege.** This reverses ADR-001 D5 and is the single most
 misread fact in this service.
 
-Flags on the catalog: **17 `destructive`**, **21 `money`**, plus two scoped kinds
-(`scoped:audit` ×1, `scoped:tickets` ×8).
+Flags on the catalog: **17 `destructive`**, **14 `money`** (the flag is `financial: true`; the
+matrix prints it as `money`), plus two scoped kinds (`scoped:audit` ×1, `scoped:tickets` ×8).
+⚠ **The `money` figure read 21 until 2026-09-08 and was never right** — 21 is neither the flag
+count (14) nor the size of the `money` *family* (6), and the two are different things: a
+`financial` permission can live in any family, which is exactly why the flag exists.
 
 ### The rules the catalog encodes
 
@@ -161,7 +174,7 @@ because there is one projector.
 
 Tunables: `ADMIN_NOTIFICATIONS_SWEEP_S` (30) · `_BATCH` (200) · `_MAX_PER_TICK` (25) ·
 `_AUTO_ARCHIVE_DAYS` (90) · `_RETENTION_DAYS` (30). ⚠ **All five are absent from `.env.example`** —
-see [OPERATIONS.md § 3](./OPERATIONS.md#3--configuration--47-variables-supplied-not-read).
+see [OPERATIONS.md § 3](./OPERATIONS.md#3--configuration--53-variables-49-supplied-and-4-read).
 
 ---
 
@@ -182,9 +195,11 @@ this reason.
 
 ---
 
-## 7 · Errors — 85 codes, nine categories, and the tier ladder
+## 7 · Errors — 88 codes, nine categories, and the tier ladder
 
-**85 codes** in `src/core/errors/error-codes.ts` (measured 2026-09-06). The envelope, the nine
+**88 codes** in `src/core/errors/error-codes.ts` (re-measured **2026-09-08**; it read 85 on
+2026-09-06). ⚠ **This number now has a guard** — `npm run test:error-docs` asserts that every
+declared code is documented in `api-doc/api/errors.md` and that the page invents none. The envelope, the nine
 categories and the boundary-filtering rule are the **shared** contract described in
 [ADR-016](./ADR-016-ERROR-SYSTEM.md) and are identical in all three services:
 

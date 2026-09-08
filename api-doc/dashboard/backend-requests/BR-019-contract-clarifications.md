@@ -1,5 +1,32 @@
 # BR-019 · Four things the contract leaves undecided that a client now has to decide
 
+**Verified against source on 2026-09-08** — `sourceLocale` on the article DTO against
+`admin/src/modules/content/read-models/article.dto.ts`, and the documented public-preview shape and
+`cod-allocation` response shape against [`content.md`](../../api/content.md) and
+[`agents.md`](../../api/agents.md).
+
+> ### ✅ ALL FOUR ANSWERED — and **§ 1's answer is (b), because (a) is false**
+>
+> **Answered in [`RESPONSE-2026-08-26.md`](RESPONSE-2026-08-26.md).**
+>
+> ⛔ **`translations[]` is NOT in creation order and the order is NOT stable.** `PATCH` replaces the
+> whole array and stores it in the order it was sent, so **`translations[0]` is the first element of
+> whichever array was PATCHed most recently** — and a client that sorts them for display and sends
+> them back repoints the driver itself, with a request that cannot fail. Use **`sourceLocale`**,
+> which is derived at create and never written by `PATCH`, and is guaranteed to name a locale
+> present in `translations`.
+>
+> § 2 — `eventType` is **closed at nine**, append-only enforced by five `pre` hooks (Mongoose
+> *query* hooks, so a raw-driver write bypasses them). § 3 — the preview shape is documented in
+> `content.md` § *The public shape* and pinned by a cross-repo assertion; the source mirror in
+> option (a) was **not** written, and the dashboard accepted that (`REPLY-2026-08-26.md` § 3 — the
+> dashboard's reply, which lives only in its own copy of this folder). § 4 — `cod-allocation` has a documented
+> response shape and the `agency: { id, businessName, status }` decoration from BR-016 § 2.
+>
+> ⚠ A bug fell out of § 1: `ARTICLE_LIST_PROJECTION` was missing `translations.cover_alt`, so
+> **every row of the article list reported `coverAlt: null`** — on the one field whose purpose is
+> to warn that a publish will be refused. Fixed and pinned.
+
 **Priority: low, except § 1 — and § 1 is only low because we have a workaround we do not like.**
 
 None of these asks for a new capability. Each is a place where the dashboard has had to adopt a

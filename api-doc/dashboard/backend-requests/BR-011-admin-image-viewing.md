@@ -1,5 +1,35 @@
 # BR-011 · Administrators cannot see any private image, anywhere in the platform
 
+**Verified against source on 2026-09-08** — `GET /files/:fileId/content`, its permission
+`files.content.read` and its `records:files.content.read` audit declaration against the live route
+manifest; the seven-route `/files` mount against the same; and the absence of
+`FILE_VIEW_NOT_SUPPORTED` and of `files.view_private` against
+`admin/src/core/errors/error-codes.ts` and
+`admin/src/modules/authorization/domain/permission.catalog.ts`.
+
+> ### ✅ BUILT — but **as a byte stream, not a signed URL**, so it is not what this page specifies
+>
+> **Answered in [`RESPONSE-2026-08-24.md`](RESPONSE-2026-08-24.md); live contract
+> [`files.md`](../../api/files.md).**
+>
+> ```
+> GET /api/v1/files/:fileId/content    files.content.read    tiers 1·2·3    AUDITED, fail-closed
+> ```
+>
+> **It returns the file's raw bytes.** Not JSON, not `{ url, expiresAt }` — `fetch` it and make a
+> blob URL. The signed-URL design was rejected because the configured provider is `local`, which
+> has **no `getSignedUrl` at all**, so signing would have meant standing up a new unauthenticated
+> public route serving private bytes — a smaller copy of the hole ADR-A01 D-2 was written to close.
+>
+> ⛔ Three names this page proposes **do not exist and must not be branched on**:
+> `GET /files/:fileId/view-url`, the permission `files.view_private` (the real one is
+> **`files.content.read`**), and the code `FILE_VIEW_NOT_SUPPORTED` (no registry defines it — the
+> provider question it was for went away with the signed-URL design). `reason` is **not** required
+> on this read.
+>
+> ⛔ *"Its entire `files` module is four routes"* is the 2026-08-24 state; it is **seven** today,
+> the media library having added `library`, `orphans` and `upload` (BR-015).
+
 **Priority: high. This is a capability the platform does not have, not a bug.** It needs a design
 decision before it needs code, and the decision has a security shape — so this document proposes
 one rather than assuming it.

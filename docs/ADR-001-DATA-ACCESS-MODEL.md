@@ -1,5 +1,7 @@
 # ADR-001 — Admin Backend Data Access Model
 
+**Verified against source on 2026-09-08** — the read/write split it decides, against `src/infra/platform/platform-collections.ts` (49 entries — 47 `read`, 2 `owned`) and `platform.repository.ts`, which still has no write method. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Status:** Awaiting decision (this is the detail requested for Phase 0 §9.1)
 **Context:** [PHASE-0-DISCOVERY.md](./PHASE-0-DISCOVERY.md)
 **Decided already:** bootstrap first-admin · big-bang cutover · Express+TS+Mongo+Redis · fixed tier permissions

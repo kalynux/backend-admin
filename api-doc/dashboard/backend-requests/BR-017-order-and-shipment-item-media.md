@@ -1,5 +1,21 @@
 # BR-017 · Product images and titles on order and shipment items
 
+**Verified against source on 2026-09-08** — `items[].image` on the order detail and
+`items[].title` / `price` / `image` on the shipment detail against
+[`orders.md`](../../api/orders.md), [`shipments.md`](../../api/shipments.md) and their DTOs.
+
+> ### ✅ BUILT — both screens; drop the client-side N+1
+>
+> **Answered in [`RESPONSE-2026-08-26.md`](RESPONSE-2026-08-26.md).** `GET /orders/:orderId` gained
+> `items[].image` (**variant-preferred**, keeping `access` and `mimeType` so a both-conditions
+> render gate still works); `GET /shipments/:shipmentId` gained `items[].title`, `items[].price` +
+> `currency` and `items[].image`. **Cost is three reads per screen regardless of line count**, not
+> one per distinct product. The resolver mirrors jovi-mall's `resolveProductImages` exactly:
+> variant-first as a *fallback*, never a merge, `image/*` only, live rather than snapshotted.
+>
+> § C was confirmed as needing no change — `order.vendorId` + `items[].productId` and `order.id` +
+> `items[].orderItemId` were already on the shipment wire.
+
 **Priority: medium.** Unlike the rest of this round, **this one has a working client-side answer**
 — it just costs one delegated request per distinct product on the screen. We are asking you to
 fold it in, not to unblock us.

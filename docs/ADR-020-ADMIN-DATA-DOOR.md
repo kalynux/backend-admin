@@ -1,5 +1,7 @@
 # ADR-020 — The administrator's door into geo-tracker data
 
+**Verified against source on 2026-09-08** — the whole scope model, against `geo-tracker/internal/modules/serviceaccess/domain/entity.go:61-78` (the four capabilities `agent:presence` · `agent:position` · `shipment:trail` · `shipment:events`) and `delivery/http/handler.go:212,264,328,408` (the four routes). The subject bound is structural as claimed: there is no agent-scoped trail route and no listing route of any kind. wi-admin's half — `agents.tracking.read` / `shipments.tracking.read`, and the audited live-position read — matches the live manifest. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Date:** 2026-08-18 (evidence gathered 2026-08-17) · **design added 2026-08-22**
 **Status:** Accepted and **IMPLEMENTED** — D-1 and D-2 decided the position on 2026-08-18;
 D-3 … D-7 are the design, written and built by Phase 6.I step 15 on 2026-08-22

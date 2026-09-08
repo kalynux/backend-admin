@@ -1,5 +1,7 @@
 # ADR-007 — Platform user management
 
+**Verified against source on 2026-09-08** — the `/users` surface it decides, against the live route manifest — eight routes, including the two credential-recovery writes BR-001 added. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Status:** Accepted, 2026-08-11 · **Implements:** the user-management brief; the `users` half of blueprint Phase 6
 **Depends on:** [ADR-004](./ADR-004-DOMAIN-OWNERSHIP.md) (read direct / write delegated), [ADR-005](./ADR-005-API-CONTRACT.md) (the list contract), [ADR-006](./ADR-006-AUDIT.md) (the trail this surface's activity feed reads)
 **Verified by:** `npm run test:users` (61, DB-free) · `npm run verify:users` (52, needs Mongo + Redis + a running jovi-mall) · jovi-mall's `npm run verify:admin-users` (18, needs Mongo + a running jovi-mall)

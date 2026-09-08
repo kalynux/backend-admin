@@ -1,5 +1,7 @@
 # ADR-021 — The administrator's media library, and the first file this service can create
 
+**Verified against source on 2026-09-08** — the three decisions it records, against the live manifest and source: the library is a direct read (`files.library.read`), the upload is an unparsed stream proxy capped by `ADMIN_UPLOAD_MAX_BYTES` (**32 MiB**, `src/config/env.ts:329`) answering **415** `FILE_UPLOAD_NOT_MULTIPART` (`file.controller.ts:328-339`), and wi-admin builds `FileDetail.url` itself (`src/infra/storage/file-detail.ts`). D-3's reversal of ADR-009 D-6 is stated on both pages. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Date:** 2026-08-25 · **Status:** Accepted and **IMPLEMENTED**
 **Scope:** wi-admin, jovi-mall. **geo-tracker is not touched.**
 **Amends:** **ADR-009 D-6** (*"this service resolves no file URLs"* — no longer true of one

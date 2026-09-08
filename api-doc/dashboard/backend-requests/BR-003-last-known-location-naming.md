@@ -1,5 +1,30 @@
 # BR-003 · Naming an agent's last-known position
 
+**Verified against source on 2026-09-08** — the `lastKnown` block and the four tracking reads
+against the live route manifest and [`agents.md`](../../api/agents.md); the *"no data door"* claim
+below against `admin/src/modules/agents/domain/tracking-disclosure.ts` and
+`admin/docs/ADR-020-ADMIN-DATA-DOOR.md`; and the absence of any accuracy field against
+geo-tracker's location domain.
+
+> ### ✅ BUILT — except `accuracyMetres`, which is **not deliverable** and never will be `null`-shipped
+>
+> **Answered in [`RESPONSE-2026-08-17.md`](RESPONSE-2026-08-17.md); live contract
+> [`agents.md`](../../api/agents.md).** `lastKnown.place` shipped in exactly the proposed shape
+> (`label` · open `source` string · `resolvedAt`, `null` when unresolved), resolved server-side once
+> per position. Three repositories changed to make it answerable at all — the notification pipe had
+> never carried a coordinate. The exposure question in § 3 was answered: **`lastKnown` stays under
+> `agents.read`**, no new permission and no audit row.
+>
+> ⛔ **The "What exists today" table is wrong on two rows, and has been since 2026-08-22.** It says
+> a live position and a trail are *"**No.** wi-admin has no data door into geo-tracker"*. **Phase
+> 6.I built that door** ([ADR-020](../../../docs/ADR-020-ADMIN-DATA-DOOR.md)) — four scoped reads:
+> `GET /agents/:agentId/live-position` (audited, fail-closed) and `/tracking-presence`,
+> `GET /shipments/:shipmentId/tracking-trail` and `/tracking-events`. § 4's *"if a genuinely live
+> view is wanted it is a separate, larger piece of work"* is right, and that work **happened**.
+>
+> The `lastKnown` warning itself still stands and still matters: it is a **stale business mirror**,
+> not a live position, and must be rendered as "last seen". The live answer is the new read.
+
 **Priority: medium.** Carries an open question from
 [`DATA-EXPOSURE-REGISTER.md` §1](../DATA-EXPOSURE-REGISTER.md) that should be answered at the same time.
 

@@ -1,5 +1,30 @@
 # BR-012 · Two contract pages disagree with the service they describe
 
+**Verified against source on 2026-09-08** — both reported defects and their present state: the
+error registry against `admin/src/core/errors/error-codes.ts` (**88** declared, **88** documented),
+and the composite-guard counts against the live route manifest (**17** `all`-mode, **3** `any`-mode).
+
+> ### ✅ BOTH FIXED — and both numbers have moved again since, which is the point of the request
+>
+> **Answered in [`RESPONSE-2026-08-24.md`](RESPONSE-2026-08-24.md).** All sixteen codes landed in
+> [`errors.md`](../../api/errors.md), and `GET /contracts/:contractId` is in the composite-guard
+> table with the reasoning this page supplied.
+>
+> ⛔ **Every count below is a 2026-08-24 measurement. Do not quote them.**
+>
+> | This page | Today |
+> |---|---|
+> | *"`errors.md` publishes **73** codes; the service defines **82**"* | **88 declared, 88 documented** — pinned by `npm run test:error-docs`, which did not exist when this was filed |
+> | *"Thirteen endpoints … the real number is **fourteen**"* | **Seventeen** `all`-mode, plus **three** `any`-mode |
+>
+> The general lesson was acted on: [`permissions.md`](../../api/permissions.md) and
+> [`errors.md`](../../api/errors.md) now say how to re-derive their figures instead of stating
+> them, and `test:error-docs` makes the registry half enforceable in the repository that owns both
+> sides.
+>
+> ⚠ The paths in this page (`docs/admin/api/…`) predate the 2026-09-08 `docs/` → `api-doc/` +
+> `docs/` split. The contract is `admin/api-doc/`, mirrored at `api-doc/admin/`.
+
 **Priority: medium, effort: small.** No code changes, no wire changes. Two doc pages under
 `backend/admin/docs/api/` are behind the service, and we cannot fix them from here —
 [`docs/admin/`](../../) is a **verbatim mirror** and read-only on this side, by design.

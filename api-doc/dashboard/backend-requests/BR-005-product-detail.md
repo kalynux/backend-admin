@@ -1,5 +1,30 @@
 # BR-005 · A product detail endpoint
 
+**Verified against source on 2026-09-08** — the four `/vendors/:vendorId/products*` routes and the
+three `/files` resolver routes against the live route manifest, and the `?ids=` bound (1–100)
+against `admin/src/modules/files/validators/file.validator.ts`.
+
+> ### ✅ BUILT — plus a general file resolver, which closed gap D2 for the whole dashboard
+>
+> **Answered in [`RESPONSE-2026-08-17.md`](RESPONSE-2026-08-17.md); live contracts
+> [`vendors.md`](../../api/vendors.md) and [`files.md`](../../api/files.md).**
+>
+> ```
+> GET /api/v1/vendors/:vendorId/products/:productId   vendors.read
+> GET /api/v1/files?ids=a,b,c                         files.resolve   (1..100)
+> GET /api/v1/files/:fileId                           files.resolve
+> ```
+>
+> Every block asked for is on the detail — `media`, `pricing`, `inventory`, `deliveryAgency`,
+> `storage`, `variants` — with three differences the response explains: `storage` reports
+> **`monthlyEstimate`** rather than an accrued charge (the platform has never invoiced storage);
+> `inventory.tracked` is `false` at product level if **any** active variant is infinite-stock; and
+> the catalogue row's `deliveryAgencyId` was **replaced** by `deliveryAgency: { id, businessName }`,
+> which is a breaking rename, not an addition.
+>
+> ⛔ *"There is no `GET /vendors/:vendorId/products/:productId`"* and the thirteen-field row below
+> are the 2026-08-17 state. Both are superseded.
+
 **Priority: high.** This is the largest gap in the round — most of the ask has no data behind it at all.
 
 ## The ask

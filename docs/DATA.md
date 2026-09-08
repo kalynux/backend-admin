@@ -1,5 +1,11 @@
 # wi-admin — data
 
+**Verified against source on 2026-09-08** — `platform-collections.ts` (49 entries: 47 `read`, 2
+`owned`; writes 46 `internal-api`, 2 `direct`, 1 `none` — **confirmed correct**), the eleven
+Mongoose models on the private connection, and the three reserved Redis indices. **Two corrections:**
+the model list omitted `AutomationFailure` (ADR-022), and § 1's `admin_action_log` paragraph named a
+writer — jovi-mall's `/admin/*` middleware — that Phase 5 deleted.
+
 Read from source 2026-09-06: `src/infra/mongo/`, `src/infra/platform/`, `src/infra/redis/`,
 `src/modules/audit/models/`, `scripts/ensure-indexes.ts`.
 
@@ -11,7 +17,7 @@ Read from source 2026-09-06: `src/infra/mongo/`, `src/infra/platform/`, `src/inf
 |---|---|---|
 | database | `jovi_mall` — **shared** | `wi_admin` — **private** |
 | URI | `MONGO_URI_PLATFORM` | `MONGO_URI_ADMIN` |
-| driver | **raw MongoDB driver**, hand-written read interfaces | **Mongoose**, 10 models |
+| driver | **raw MongoDB driver**, hand-written read interfaces | **Mongoose**, 11 models |
 | this service may | **read** (2 collections excepted, see below) | read and write |
 | standalone `mongod` acceptable? | yes | ⛔ **no** |
 
@@ -76,17 +82,38 @@ appears, adding the row is the easy half; deciding what may be projected out of 
 
 ### `admin_action_log` is `writes: 'none'`, a real third case
 
-It is written by jovi-mall's own `/admin/*` middleware and by nothing else, ever. Labelling it
-`internal-api` would assert there is an endpoint to write it through — **there is not, and there must
-not be, because an HTTP ingest into an audit collection is a forgery surface.**
+Labelling it `internal-api` would assert there is an endpoint to write it through — **there is not,
+and there must not be, because an HTTP ingest into an audit collection is a forgery surface.**
+
+> ⚠ **Who writes it — corrected 2026-09-08.** This paragraph said *"jovi-mall's own `/admin/*`
+> middleware, and nothing else, ever"*. That middleware **is gone**: Phase 5 deleted the public
+> `/api/admin/*` prefix it matched, and with it the coarse `source: 'request'` row it wrote. What
+> survives, and still writes this collection, is **`AuditLogger.log`, which routes any entry whose
+> `actor.role === 'admin'` here** — reached today through `/api/internal/admin/agencies`, where
+> `AdminAgencyService.deactivate` / `reactivate` hardcode that role
+> (`jovi-mall/src/api/index.ts:44-61`, `core/audit/admin-action.model.ts`).
+>
+> Two consequences worth knowing. **Every row still written duplicates a wi-admin audit row** for
+> the same operation, written there against a real administrator identity — whether `AuditLogger`
+> should stop is jovi-mall's open follow-up (Phase 5 O-6), not a wi-admin decision. And the rows
+> **age out**: `ADMIN_ACTION_LOG_TTL_DAYS = 400`.
+>
+> ⚠ The same stale sentence is still in **source**, at
+> `src/infra/platform/platform-collections.ts:175`. Documentation sessions do not edit source; it
+> is recorded for the code session.
 
 ---
 
 ## 2 · The audit store
 
-Ten Mongoose models on the private connection: `AdminAccount` · `AdminSession` · `AuditLog` ·
+**Eleven** Mongoose models on the private connection: `AdminAccount` · `AdminSession` · `AuditLog` ·
 `AuditExport` · `FeatureFlag` · `ApprovalRequest` · `AdminNotification` · `NotificationPreference` ·
-`NotificationWatermark` · `SchemaMigration`.
+`NotificationWatermark` · **`AutomationFailure`** · `SchemaMigration`.
+
+> ⚠ **`AutomationFailure` was missing from this list until 2026-09-08** — it landed on 2026-09-07
+> with [ADR-022](./ADR-022-AUTOMATION-FAILURE-AUDIT.md), the day after this page was read from
+> source. Ten of the eleven live at `src/modules/*/models/`; `SchemaMigration` is the exception, at
+> `src/infra/mongo/schema-migration.model.ts`.
 
 ### ⛔ The service refuses to start against a standalone `mongod`
 

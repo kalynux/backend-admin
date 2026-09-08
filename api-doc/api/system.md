@@ -1,6 +1,6 @@
 # `/system` — operations reads
 
-**Verified against source on 2026-09-08** — all seventeen routes and their guards (including the three-way `any` on `/system/errors`) against the live route manifest; the thirteen-key allowlist and — **correcting this page** — the ARRAY-of-`{key,value}` shape of `GET /system/config` and its stringified non-scalars, against `system/domain/exposed-config.ts:26-116` and `system/controllers/system.controller.ts:134`; the `/system/errors` envelope and the after-the-fact tier filtering against `system.controller.ts:256-277`; and every query schema against `dev-tools/validators/dev-tools.validator.ts`.
+**Verified against source on 2026-09-08** — all seventeen routes and their guards (including the three-way `any` on `/system/errors`) against the live route manifest; the thirteen-key allowlist and — **correcting this page** — the ARRAY-of-`{key,value}` shape of `GET /system/config` and its stringified non-scalars, against `system/domain/exposed-config.ts:26-116` and `system/controllers/system.controller.ts:134`; the `/system/errors` envelope and the after-the-fact tier filtering against `system.controller.ts:256-277`; and every query schema against `dev-tools/validators/dev-tools.validator.ts`. **Re-checked 2026-09-08 (R6)** — the two surviving *"wi-admin has no data door into geo-tracker"* claims in the geo-tracker section, false since ADR-020 on 2026-08-22 and corrected here against the live route manifest (`GET /agents/:agentId/live-position` · `tracking-presence`, `GET /shipments/:shipmentId/tracking-{trail,events}`) and `agents/domain/tracking-disclosure.ts`. The `note` string inside the `GET /system/geo-tracker` example is left verbatim: it is the literal the server emits at `system/controllers/system.controller.ts:313`.
 
 Base path: `/api/v1/system`
 
@@ -581,11 +581,20 @@ Collection stats, sizes and index drift.
 
 # geo-tracker
 
-**The narrow, service-level exception.** wi-admin has **no data door into geo-tracker**: every
-geo-tracker *data* read requires a real platform user JWT and resolves per-agent visibility by
-looking that user up — and a wi-admin administrator has no platform user row, deliberately.
+**The narrow, service-level door.** These two routes need **no identity on geo-tracker's side and
+expose no agent** — service-level health and metrics, nothing per-person. That is why they sit here
+under `system.health.read` / `system.metrics.read` rather than behind a tracking permission.
 
-These two routes need no identity on geo-tracker's side and expose no agent.
+> ⚠️ **Corrected 2026-09-08.** This section said *"wi-admin has **no data door into
+> geo-tracker**"*, and that stopped being true on 2026-08-22. Phase 6.I built a **second, scoped
+> door** — [ADR-020](../../docs/ADR-020-ADMIN-DATA-DOOR.md) — with its own token
+> (`GEO_TRACKER_ADMIN_TOKEN`), its own base URL (`GEO_TRACKER_DATA_BASE_URL`) and its own
+> capability scopes. Four reads go through it: `GET /agents/:agentId/tracking-presence` and
+> [`/live-position`](agents.md), and `GET /shipments/:shipmentId/tracking-trail` and
+> [`/tracking-events`](shipments.md). The old sentence is still the right description of **this**
+> pair of routes — an operations door, not a data one — and the two doors stay separate on purpose.
+> Both are **optional**: with the token unset every tracking read answers `configured: false` or
+> `503 TRACKING_DOOR_UNCONFIGURED`, which is a deployment posture rather than a fault.
 
 ## `GET /system/geo-tracker`
 
@@ -628,6 +637,6 @@ unhealthy report are the two ways it says "no".
 
 | Missing | Where it is |
 |---|---|
-| Live agent positions or GPS trails | geo-tracker, behind Tracking Allow. **No door exists from this service** |
+| Live agent positions or GPS trails | **Not on `/system`** — they are on the scoped data door built at Phase 6.I: [`GET /agents/:agentId/live-position`](agents.md) and `tracking-presence`, [`GET /shipments/:shipmentId/tracking-trail`](shipments.md) and `tracking-events`. A live-position read is **audited**; each carries its own permission. ⚠ This row read *"No door exists from this service"* until 2026-09-08 and had been wrong since 2026-08-22 ([ADR-020](../../docs/ADR-020-ADMIN-DATA-DOOR.md)) |
 | wi-admin's own logs | Not built. `/system/logs` is reserved for it |
 | Any write | [`/dev-tools`](dev-tools.md) |

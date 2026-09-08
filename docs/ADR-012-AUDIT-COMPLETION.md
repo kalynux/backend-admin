@@ -1,5 +1,7 @@
 # ADR-012 — Audit completion and enforcement
 
+**Verified against source on 2026-09-08** — the two boot assertions it adds, at `src/api/audit-coverage.ts` and `src/app.ts:158`, and the seven `/audit` routes against the live manifest. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Status:** accepted · **Implements:** the Phase 12 brief ("implement or integrate a proper
 audit system") · **Amends:** [ADR-006](./ADR-006-AUDIT.md), whose Phase 12 addendum records
 the corrections · **Follows:** [ADR-003](./ADR-003-GRANULAR-PERMISSIONS.md) (the enforcement

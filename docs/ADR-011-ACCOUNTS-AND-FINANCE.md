@@ -1,5 +1,7 @@
 # ADR-011 — Accounts and financial information
 
+**Verified against source on 2026-09-08** — the four money mounts against the live manifest — `/accounts` 5 · `/billing` 10 · `/money` 14 · `/cod` 16 — and the composed `all`-mode guard on `GET /accounts/:ownerType/:ownerId`. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Status:** accepted · **Date:** 2026-08-12 · **Phase:** 11
 **Amends:** ADR-004's *Money*, *Billing / plans* and *COD / cash* rows (read: HTTP → the
 verdict/record split)

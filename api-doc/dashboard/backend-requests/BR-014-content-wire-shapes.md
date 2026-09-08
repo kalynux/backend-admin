@@ -1,5 +1,26 @@
 # BR-014 — `/content` publishes no response shapes, and the one hint in the docs is misleading
 
+**Verified against source on 2026-09-08** — the fourteen `/content` routes and their `:articleId` /
+`:authorId` path parameters against the live route manifest and
+`admin/src/modules/content/validators/article.validator.ts:214-215`; and the article and author
+field tables, `sourceLocale` and `coverAlt` against [`content.md`](../../api/content.md).
+
+> ### ✅ ALL FOUR PARTS SHIPPED — and one **breaking** change arrived with the answer
+>
+> **Answered in [`RESPONSE-2026-08-25.md`](RESPONSE-2026-08-25.md).**
+> [`content.md`](../../api/content.md) now carries article, author and write-body field tables with
+> worked JSON; **`id` is canonical** and the two path parameters were renamed to `:articleId` /
+> `:authorId` (the **URL is byte-identical** — a path-parameter name is not on the wire); `GET
+> /authors` is documented as unpaginated and parameterless; and the list filters are named
+> `category` / `author` with no `search`.
+>
+> ⚠ **`cover.alt` moved onto the translation as `coverAlt`** in the same round — a breaking wire
+> change nobody asked for, and it 400s a cover form built against the old shape.
+>
+> The lesson this page draws — *a test written from the same misreading as the code cannot catch
+> the misreading* — is the one worth carrying; the field-by-field table below is the 2026-08-25
+> defect list, all of it now fixed on both sides.
+
 **Raised 2026-08-25, while building the article body editor.** This one is not a nice-to-have.
 
 **The dashboard's entire `/content` module was wrong on the wire, and had been since it was

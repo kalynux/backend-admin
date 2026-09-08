@@ -1,5 +1,7 @@
 # ADR-014 — System operations
 
+**Verified against source on 2026-09-08** — **correcting the exemption list against `jovi-mall/src/modules/system/domain/maintenance-mode.ts`** — `ALWAYS_EXEMPT` holds five prefixes and this page named the wrong five: `/api/internal/shipments/*` was missing and `/metrics` is not on it (it is reachable because it is mounted ahead of the gate). The seventeen `/system` routes and D-1's frozen `/api/health` contract were checked and are correct. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Phase 14.** Status: implemented. Supersedes nothing; amends ADR-005's `/system` prefix reservation
 and ADR-009 §D-2 (by reaffirming it).
 
@@ -180,14 +182,33 @@ Each entry is here because blocking it converts a window into an outage, and two
    "may this viewer track this agent", so every live subscription fails authorization and every
    watcher is dropped.
 3. **`/api/tracking/*`** — same family, read-only, same reason.
-4. **`/api/health*`** — a probe must always answer, or the orchestrator restarts the fleet and the
+4. **`/api/internal/shipments/*`** — the drop-off geo-tracker routes to. Same family as the two
+   above and the one with the **smallest** blast radius, which is exactly why it gets forgotten:
+   blocking it drops no watcher, it silently removes the ETA from every tracking session that
+   *opens* during the window, and geo-tracker does not re-resolve until the next activation or
+   subscribe.
+5. **`/api/health*`** — a probe must always answer, or the orchestrator restarts the fleet and the
    window becomes an outage nobody can exit. **Corollary: `/api/health/ready` returns 200 during
    maintenance**, reporting the mode in its body. Draining traffic is a load-balancer action.
-5. **`/metrics`** — telemetry matters most during the incident.
 
-`/api/admin/*` is **not** exempt: it is guarded by `requireRole(['admin'])` on a platform `users`
-row, and an admin with a users row is still a user. Prefix matching is on segment boundaries, so
-naming a route `/api/healthcheck-bypass` does not exempt it.
+Prefix matching is on segment boundaries, so naming a route `/api/healthcheck-bypass` does not
+exempt it.
+
+> ⚠ **Corrected 2026-09-08, on two counts, against
+> `jovi-mall/src/modules/system/domain/maintenance-mode.ts` — `ALWAYS_EXEMPT` holds exactly five
+> prefixes and this list named the wrong five.**
+>
+> - **`/api/internal/shipments/*` was missing.** It is a real always-exempt prefix (item 4 above),
+>   and **three** of the five are cross-service now, not two.
+> - **`/metrics` was listed and is NOT on the list.** It is reachable during a window for a
+>   different reason — it is **mounted ahead of the gate** (`jovi-mall/src/app.ts:163-172` versus
+>   `:200`), together with `/api/health`. The *effect* the entry described is real; the
+>   *mechanism* is structural rather than an allowlist entry, and the distinction matters to
+>   anyone adding a sixth exemption: mounting order and `ALWAYS_EXEMPT` are two different levers.
+>
+> The removed sentence *"`/api/admin/*` is **not** exempt: it is guarded by `requireRole(['admin'])`
+> …"* was true when written and is now **vacuous** — Phase 5 deleted that prefix, so there is
+> nothing left for the rule to apply to.
 
 ### Webhooks: a trade, written as a trade
 

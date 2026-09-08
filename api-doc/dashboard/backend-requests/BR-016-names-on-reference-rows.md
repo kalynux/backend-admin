@@ -1,5 +1,30 @@
 # BR-016 · Six places that return an id where an operator needs a name
 
+**Verified against source on 2026-09-08** — the composite guard now on
+`GET /agents/:agentId/cod-allocation` (`agents.read` + `agencies.read`) against the live route
+manifest, and the eleven-value closed `EntityType` enum and its routability table against
+[`support.md`](../../api/support.md).
+
+> ### ✅ ALL SEVEN CLOSED — and **two** of this page's claims were false
+>
+> **Answered in [`RESPONSE-2026-08-26.md`](RESPONSE-2026-08-26.md).**
+>
+> - ⛔ **§ 6 pointed at the wrong field, and following it would have shipped a bug.**
+>   `GET /orders`'s existing `vendorName` is `vendors.display_name` — a **personal** name. Reusing
+>   it would have repeated the very `businessName`/`contactName` error BR-006 was raised to fix.
+>   The shipment's `order.vendorName` comes from `stores.name` instead.
+>   ⚠ **`GET /orders` still labels a personal name `vendorName`**, deliberately: correcting it is a
+>   breaking change to a paginated endpoint, and the dashboard chose to render it honestly rather
+>   than have it changed (`REPLY-2026-08-26.md` § 2 — the dashboard's reply, which lives only in its
+>   own copy of this folder). The note in [`orders.md`](../../api/orders.md) and
+>   [`shipments.md`](../../api/shipments.md) is what stands between the next reader and the same
+>   mistake — **do not delete it.**
+> - ⛔ **§ 7's vocabulary is CLOSED, not open.** `EntityType` is a closed enum of **eleven**, pinned
+>   at the schema and at both jovi-mall validators.
+> - ⛔ **§ 2's premise was wrong** — there is no tier holding `agents.read` without `agencies.read`,
+>   so `agencies.read` was **composed onto the route** rather than the decoration being made
+>   conditional. § 3 needed no change at all: `agency.businessName` was already on the row.
+
 **Priority: medium — but it is the single most repeated complaint in this round.** Six endpoints,
 one shape of fix, and **the precedent is already yours**: [BR-006](BR-006-agency-name-on-contract-rows.md)
 added `agency.businessName` to `GET /agents/:agentId/contracts` for exactly this reason, and the

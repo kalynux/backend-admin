@@ -1,5 +1,27 @@
 # BR-009 · Detail for the two free-form log feeds
 
+**Verified against source on 2026-09-08** — the absence of `/audit/legacy` and of
+`/dev-tools/logs` against the live route manifest, and the declared log-entry shape, the
+`nextBefore` cursor, the *"nothing is truncated server-side"* answer and `meta.warning` against
+[`system.md`](../../api/system.md) § `GET /system/platform/logs` and
+`admin/src/modules/dev-tools/validators/dev-tools.validator.ts`.
+
+> ### ✅ CLOSED — all four acceptance items, and **both** log feeds have since moved
+>
+> **Answered in [`RESPONSE-2026-08-17.md`](RESPONSE-2026-08-17.md).** § 2's declared shape and § 3's
+> two confirmations all shipped — guaranteed keys named, everything else declared as the writer's
+> context, **nothing truncated server-side**, and `meta.warning` kept on the response.
+>
+> ⛔ **Neither route below exists at the path this page gives.**
+>
+> | This page says | Today |
+> |---|---|
+> | `GET /api/v1/audit/legacy` and `/audit/legacy/:id` | **Gone.** Phase 5 Part D deleted the feed, the `audit.legacy_feed` flag and the `AUDIT_LEGACY_FEED_DISABLED` code |
+> | `GET /api/v1/dev-tools/logs` | **`GET /api/v1/system/platform/logs`**, `developer_tools.logs.read`, documented in [`system.md`](../../api/system.md) with a pointer from [`dev-tools.md`](../../api/dev-tools.md) |
+>
+> The `audit.legacy_feed` mention below therefore names a flag that no longer exists. The rest is
+> kept as the record of the ask.
+
 **Priority: low.** Most of this ask turned out to be a frontend gap. Two small backend items remain.
 
 ## The ask

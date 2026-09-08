@@ -1,5 +1,7 @@
 # ADR-003 — Granular permissions in code, granted by tier
 
+**Verified against source on 2026-09-08** — the permission model it decides, re-derived by executing `npm run authz:matrix` — **118** permissions across **20** families, tiers **118 / 101 / 31**, privilege nesting enforced by `assertGrantTableValid()` at `tier-grants.ts:358-384`. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Status:** Accepted, 2026-08-10 · **Supersedes:** ADR-001 Decision 5 (in part), blueprint D8 (in part)
 **Implemented by:** Phase 3 (Authorization & RBAC)
 

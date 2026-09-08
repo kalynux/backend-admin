@@ -1,5 +1,7 @@
 # ADR-009 — Agency and delivery-agent administration
 
+**Verified against source on 2026-09-08** — the nine `/agencies` and eighteen `/agents` routes against the live manifest, and this page's own ADR-020 amendment banner, which is present and accurate. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Status:** Accepted · **Date:** 2026-08-11 · **Phase:** 9
 **Amends:** ADR-004's *Agents* row (read: HTTP → direct read)
 **Depends on:** ADR-004 (transports) · ADR-005 (list contract) · ADR-006 (the trail) ·

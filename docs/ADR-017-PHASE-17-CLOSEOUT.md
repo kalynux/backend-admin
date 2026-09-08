@@ -1,5 +1,7 @@
 # ADR-017 — Phase 17 close-out
 
+**Verified against source on 2026-09-08** — the cutover it records, against the live manifest — **zero** routes remain on the public `/api/admin/*` prefix in either service. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Date:** 2026-08-18, extended 2026-08-20 (Phase 5 Parts A–E)
 **Status:** **ACCEPTED — complete.** Every decision D-1 … D-12 is recorded here, plus the four
 corrections the work produced and the two cross-cutting notes (C-6, C-10). Phase 17 is closed

@@ -1,5 +1,31 @@
 # BR-007 · An owner-scoped view of subscriptions
 
+**Verified against source on 2026-09-08** — the ten `/billing` routes against the live route
+manifest, and the `current` / `queued` / `history` shape and the open status vocabulary against
+[`billing.md`](../../api/billing.md) § *Subscriptions* and
+`admin/src/modules/billing/read-models/billing.dto.ts`.
+
+> ### ✅ BUILT — both options, A **and** B
+>
+> **Answered in [`RESPONSE-2026-08-17.md`](RESPONSE-2026-08-17.md); live contract
+> [`billing.md`](../../api/billing.md).**
+>
+> ```
+> GET /api/v1/billing/subscriptions/:ownerType/:ownerId   billing.plans.read
+> GET /api/v1/billing/subscriptions/:subscriptionId       billing.plans.read
+> ```
+>
+> The owner-scoped read answers `{ owner, current, queued, history }`, unpaginated, and
+> **`current: null` means "no active plan"**, never "we could not determine it". The status
+> vocabulary is written down in `billing.md` as an **open** list (`active`, `pending_activation`,
+> `expired`, `cancelled`), with the instruction to rank an unrecognised value as history rather
+> than drop it. `BILLING_PENDING_PLAN_EXISTS` is documented on the assign route and in `errors.md`.
+>
+> ⛔ Two counts below are stale: *"the whole billing mount is **eight** routes"* — it is **ten** —
+> and *"there is no `GET /billing/subscriptions/:subscriptionId`, and no owner-scoped read"*, which
+> this request produced. The client-side grouping, the status-rank heuristic and the "this page
+> only" caveat can all go.
+
 **Priority: medium.** The screen can be built, but only over one page at a time — which for the
 question being asked is structurally a partial answer.
 

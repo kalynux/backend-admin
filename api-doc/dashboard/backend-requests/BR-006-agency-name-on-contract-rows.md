@@ -1,5 +1,29 @@
 # BR-006 · The agency's business name on contract rows — and the id→name problem generally
 
+**Verified against source on 2026-09-08** — the `agency` decoration on
+`GET /agents/:agentId/contracts`, the `deliveryAgency` object on the catalogue row and the
+`owner.name` on the earnings-accounts row against
+[`agents.md`](../../api/agents.md) · [`vendors.md`](../../api/vendors.md) ·
+[`money.md`](../../api/money.md) and their DTOs; and the `?ids=` resolver against the live route
+manifest.
+
+> ### ✅ BUILT — three specific joins; the general batch resolver was **declined**, with the reason
+>
+> **Answered in [`RESPONSE-2026-08-17.md`](RESPONSE-2026-08-17.md).** `agency.businessName` is on
+> every contract row, `deliveryAgency: { id, businessName }` replaced `deliveryAgencyId` on the
+> catalogue row, and the earnings-accounts row carries `owner.name`. `agents.md` and `agencies.md`
+> both now state that **`contactName` is a person and `businessName` is the business**, so the
+> mislabelled column cannot recur.
+>
+> A batch `?ids=` on the three **directories** was refused — a bounded ids list on a directory is a
+> way to read that directory, and the callers who want one are exactly the callers who lack its
+> permission.
+>
+> ⛔ *"Across all **179** routes there is **no fetch-by-ids endpoint** and no `?ids=` parameter"* is
+> now false in both halves: the surface is **237** versioned routes, and **`GET /files?ids=`
+> exists** (`files.resolve`, 1–100 ids). It is deliberately not a directory read — file ids are
+> unguessable, the answer is metadata, and there is no listing form.
+
 **Priority: low individually, medium as a pattern.** The specific fix is one field. The pattern
 behind it costs this dashboard a request per row on four screens.
 

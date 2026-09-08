@@ -1,5 +1,7 @@
 # ADR-002 — Target Architecture (re-derived from your directive)
 
+**Verified against source on 2026-09-08** — the three-service shape it decides, against the live module list (`src/modules/`, 23) and `src/api/index.ts`. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Supersedes** the recommendation in [ADR-001](./ADR-001-DATA-ACCESS-MODEL.md). ADR-001's analysis
 remains valid as measurement; its *conclusion* is overridden by the directive below.
 

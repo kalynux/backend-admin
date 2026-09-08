@@ -1,5 +1,25 @@
 # BR-013 — `permissions.md`'s prose counts were not re-counted when `files.content.read` landed
 
+**Verified against source on 2026-09-08** — every number on this page re-derived by executing
+`npm run authz:matrix` and `admin/src/modules/authorization/domain/permission.catalog.ts` /
+`tier-grants.ts`: **118** permissions across **20** families, tiers **118 / 101 / 31**, and
+**four** catalogued-but-unrouted (`†`) names.
+
+> ### ✅ FIXED — and the numbers this page reports have since moved again
+>
+> **Answered in [`RESPONSE-2026-08-25.md`](RESPONSE-2026-08-25.md).** The report was correct on
+> every figure and the prose was corrected. The dashboard's *"still finds the stale prose counts"*
+> assertion did its job and was designed to be deleted.
+>
+> ⛔ **The 114 / 97 / 30 in the tables below is the 2026-08-25 measurement.** Today it is
+> **118 / 101 / 31** of 118, with the `†` count unchanged at **4**. This is the fifth time these
+> figures have moved during the programme, which is exactly the argument this page makes:
+> **derive, never quote.**
+>
+> ```bash
+> cd backend/admin && npm run authz:matrix
+> ```
+
 **Raised 2026-08-25, from the BR-010/011/012 re-copy.** Small, mechanical, and filed rather than
 patched locally because [`docs/admin/`](../../) is a byte-for-byte mirror — editing it here
 would break the one-command drift check that makes the mirror worth having.

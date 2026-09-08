@@ -1,5 +1,24 @@
 # BR-010 · `FileDetail` declares `url: string` and omits `access` entirely
 
+**Verified against source on 2026-09-08** — `FileDetail.url`'s nullability and the **three**-value
+`access` enum against `admin/src/infra/storage/file-detail.ts:69` and
+`jovi-mall/src/modules/catalog/read-models/file-detail.resolver.ts:73`; and the note below against
+[`files.md`](../../api/files.md), which documents all three values and the precedence between them.
+
+> ### ✅ CONFIRMED on all three questions — and the third answer has since **changed**
+>
+> **Answered in [`RESPONSE-2026-08-24.md`](RESPONSE-2026-08-24.md).** `url` is `string | null` and
+> `access` is present unconditionally; both are pinned in `file.gateway.ts` (the type now lives in
+> `infra/storage/file-detail.ts` and is re-exported there) and documented in
+> [`files.md`](../../api/files.md).
+>
+> ⚠ **`access` is a closed set of THREE, not two.** `quota_blocked` was added in both services and
+> **outranks `authorized`** — a blocked file that also sits in a private tree reports
+> `quota_blocked`. Branch on it first, and keep the open-union treatment this page's § 3 argues
+> for: it is exactly why the change broke nobody.
+>
+> The `files` module is **seven** routes now, not the four this round described.
+
 > ⚠ **A later note, 2026-09-08.** Question 3 below asks whether `'public' | 'authorized'` is a
 > closed set. It was answered *"yes, closed at two"* on 2026-08-24 and that answer has since
 > been overtaken: `quota_blocked` is a third value, live in both services. The current contract

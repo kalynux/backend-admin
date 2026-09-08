@@ -1,5 +1,24 @@
 # BR-008 · A vendor's commercial terms, and completing the agency's
 
+**Verified against source on 2026-09-08** — the projected vendor `policies` content (its `returns`,
+`cancellation` and `support` blocks and the derived booleans) against
+[`vendors.md`](../../api/vendors.md) and `admin/src/modules/vendors/read-models/vendor-policies.dto.ts`, and
+`policyVersionPausedConnections` against [`agencies.md`](../../api/agencies.md).
+
+> ### ✅ BUILT — the asymmetry is closed, and the answer went **against** the caution in § 1
+>
+> **Answered in [`RESPONSE-2026-08-17.md`](RESPONSE-2026-08-17.md).** A vendor's commercial terms
+> are **not** more sensitive than an agency's — they are published to every customer on the
+> storefront, a strictly wider audience than the connected vendors the agency exception was granted
+> for. So `policies` now carries `returns`, `cancellation` and `support` in full, each `null` when
+> the vendor stored none, with the three booleans kept and **derived** from the content. That was a
+> **breaking** change. `policyVersionPausedConnections` is on the agency detail. **No policy write
+> was added**, and that remains the position.
+>
+> ⛔ *"Vendor — four booleans"* and *"`agencies.md` documents the whole block as `{ "…": "…" }`"*
+> are the 2026-08-17 state; both blocks are documented field by field now, and both are camelCase
+> on the wire. The dashboard's *"which terms are not available"* section can go.
+
 **Priority: medium.** One asymmetry between two directories, plus a small hardening ask on the one
 that already works.
 

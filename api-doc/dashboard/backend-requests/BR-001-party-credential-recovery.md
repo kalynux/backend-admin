@@ -1,5 +1,39 @@
 # BR-001 · Credential recovery for platform parties
 
+**Verified against source on 2026-09-08** — both proposed routes, their permissions and their audit
+actions against the live route manifest; the `†` list below and the `broadcast`/`customers`
+permissions it names against `admin/src/modules/authorization/domain/permission.catalog.ts`; the
+request body against `users/validators/user.validator.ts` (`SendCredentialSchema`); and the
+response shape against `users/gateways/user.gateway.ts` (`CredentialDeliveryResult`).
+
+> ### ✅ BUILT — and this page's *"What exists today: **Nothing**"* is a snapshot of 2026-08-17
+>
+> **Answered in [`RESPONSE-2026-08-17.md`](RESPONSE-2026-08-17.md). The live contract is
+> [`users.md`](../../api/users.md) § *Credential recovery*** — read that, not this.
+>
+> ```
+> POST /api/v1/users/:userId/password-reset-link   users.password.reset      audited
+> POST /api/v1/users/:userId/login-link            users.login_link.send     audited
+> ```
+>
+> Three things below are **no longer true**, and each would mislead:
+>
+> - ⛔ *"there is no endpoint anywhere in the **179**"* — the surface is **237** versioned routes
+>   across **24** groups today, and two of them are these. Re-derive rather than re-quote:
+>   `npm run authz:matrix` for permissions, and `routeManifest()` for routes.
+> - ⛔ **The six-permission `†` list is wrong twice over.** `users.password.reset` was routed by
+>   this very request, and `broadcast.send`, `customers.read` and `customers.suspend` are **not in
+>   the permission catalog at all** any more. There are exactly **four** catalogued-but-unrouted
+>   permissions today: `users.sessions.revoke`, `users.roles.manage`, `notifications.manage`,
+>   `developer_tools.webhooks.redeliver`.
+> - ⛔ **`USER_CHANNEL_UNVERIFIED` (§2, and the error table) was never created.** jovi-mall's
+>   `users` row carries no `email_verified`, so the gate this page proposes protects nothing —
+>   the reasoning is in [`RESPONSE-2026-08-17.md`](RESPONSE-2026-08-17.md) § *There is no
+>   `emailVerified` on a user*. Do not branch on it.
+>
+> The rest is kept as the record of the ask, and the seven design questions in it are each
+> answered in the response.
+
 **Priority: high. Scope: two services.** This one cannot be done inside wi-admin alone.
 
 ## The ask

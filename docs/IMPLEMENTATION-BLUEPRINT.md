@@ -1,5 +1,7 @@
 # Admin Backend — Implementation Blueprint
 
+**Verified against source on 2026-09-08** — the phase ledger it records, against the live manifest and `package.json` — the surface it plans to reach is built, and wi-admin now runs **24** `test:*` and **15** `verify:*` suites. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Status:** Decisions locked. Ready to build on your go-ahead.
 **Supersedes** the open questions in [ADR-001](./ADR-001-DATA-ACCESS-MODEL.md) and
 [ADR-002](./ADR-002-TARGET-ARCHITECTURE.md). Their measurements stand; this file is the decided state.

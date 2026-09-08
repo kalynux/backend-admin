@@ -1,5 +1,29 @@
 # BR-018 · A vendor's delivery-agency connections, as rows rather than counts
 
+**Verified against source on 2026-09-08** — `GET /vendors/:vendorId/agencies` and its
+`vendors.read` + `agencies.read` composite guard against the live route manifest, and the row,
+`productCount` and the bounded-string `status` rule against [`vendors.md`](../../api/vendors.md).
+
+> ### ✅ BUILT — and **better** than asked: `productCount` is on the row
+>
+> **Answered in [`RESPONSE-2026-08-26.md`](RESPONSE-2026-08-26.md); live contract
+> [`vendors.md`](../../api/vendors.md).**
+>
+> ```
+> GET /api/v1/vendors/:vendorId/agencies    vendors.read + agencies.read
+> ```
+>
+> ⛔ **The proposed transport was wrong.** It is a **direct read**, not delegated —
+> `vendor_agency_connections` has been declared readable since Phase 6 and two shipped endpoints
+> already read it directly. And `productCount` costs **one `$group` for the whole page**, not a
+> `countDocuments` per row, so the column was granted rather than dropped.
+>
+> ⚠ **`status` is validated as a bounded string, not a pinned enum** (ADR-005 D-17): a vocabulary
+> this service does not own is checked for shape, not membership, so a seventh `ConnectionStatus`
+> added upstream does not become silently unfilterable.
+>
+> ⛔ *"there is **no endpoint of any kind** behind it"* below is the 2026-08-25 state.
+
 **Priority: high.** The screen has been asked for explicitly, and there is **no endpoint of any
 kind** behind it — not a narrower one, not a paginated one, nothing.
 

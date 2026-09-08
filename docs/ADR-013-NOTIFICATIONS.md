@@ -1,5 +1,7 @@
 # ADR-013 — The administrator inbox
 
+**Verified against source on 2026-09-08** — the ten `/notifications` routes against the live manifest, and the two coverage assertions it adds — `assertNotificationCoverageComplete()` and `assertSourcePermissionsExist()` at `src/app.ts:61-62`. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Status:** accepted · **Date:** 2026-08-12 · **Phase:** 13
 **Implements:** the *Notifications* row of `PHASE-0:307`; the `admin_notifications` half of
 blueprint Phase 7

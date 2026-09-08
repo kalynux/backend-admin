@@ -1,5 +1,13 @@
 # wi-admin — operations
 
+**Verified against source on 2026-09-08** — the scheduled work (`grep -rn 'setInterval' src/` — one),
+the environment surface (`src/config/env.ts` plus a scan of `src/` for call-site reads), the two
+geo-tracker clients, and the `/dev-tools` and `/system` mounts against the live route manifest and
+`npm run authz:matrix`. **Three sections carried false claims** and each is corrected in place with
+the measurement: § 1 listed a dangling-intent sweep that does not exist, § 3 undercounted the
+environment by six and denied a call-site read that happens four times, and § 7 called the
+dev-tools mount uniformly tier-1 and uniformly audited when it is neither.
+
 Read from source 2026-09-06: `src/lifecycle.ts`, `src/config/env.ts`, `src/infra/geo/`,
 `src/modules/notifications/domain/notification.scheduler.ts`, `src/api/routes/health.routes.ts`.
 
@@ -8,16 +16,31 @@ Deployment, rollback and secret rotation are **not** here — they span all thre
 
 ---
 
-## 1 · Background work — one projector and two sweeps
+## 1 · Background work — exactly one scheduled job
 
-wi-admin has **no worker fleet**. Compared with jovi-mall's eighteen workers, that is the honest
-shape of a service that owns almost no domain: there is nothing here to sweep.
+wi-admin has **no worker fleet**. Compared with jovi-mall's **nineteen** (18 triggerable in
+`WORKER_REGISTRY` plus the observable `inbound-calendar-sync`, re-counted 2026-09-08), that is the
+honest shape of a service that owns almost no domain: there is nothing here to sweep.
 
-| Job | What | Cadence |
+**There is one `setInterval` in the whole service** (`grep -rn 'setInterval' src/`), and the other
+two things this page used to call "sweeps" are not scheduled at all:
+
+| Job | What | When it runs |
 |---|---|---|
-| **notification projector** | sweeps for things worth telling an administrator, writes `admin_notifications` | `ADMIN_NOTIFICATIONS_SWEEP_S` (30 s) |
-| **audit dangling-intent sweep** | closes intents whose outcome never arrived | `ADMIN_AUDIT_DANGLING_INTENT_S` (300 s) |
-| **approval expiry** | expires four-eyes requests past `ADMIN_APPROVAL_TTL_S` (24 h) | floored by `ADMIN_APPROVAL_SWEEP_MIN_INTERVAL_MS` (10 s) |
+| **notification projector** | sweeps for things worth telling an administrator, writes `admin_notifications` | **Scheduled** — `setInterval`, `ADMIN_NOTIFICATIONS_SWEEP_S` (30 s). `0` disables it |
+| **approval expiry** | expires four-eyes requests past `ADMIN_APPROVAL_TTL_S` (24 h) | **On a read, not on a clock.** All three approval readers call `expireOverdue()` first; it is throttled to one sweep per `ADMIN_APPROVAL_SWEEP_MIN_INTERVAL_MS` (10 s) and bounded at `EXPIRY_SWEEP_BATCH` = 50 rows per call. ⚠ **Nothing expires while nobody reads the queue** — and that is safe only because `assertDecidable` compares `expires_at` against the clock, so the sweep is bookkeeping and not the enforcement |
+| ~~audit dangling-intent sweep~~ | — | ⛔ **No such job exists.** See below |
+
+> ⛔ **Corrected 2026-09-08. This table listed an "audit dangling-intent sweep" that "closes intents
+> whose outcome never arrived", on a 300-second cadence. All three claims are false.**
+> `ADMIN_AUDIT_DANGLING_INTENT_S` is a **classification cutoff**, not a cadence
+> (`audit/domain/audit-retention.ts:52-55`), and its only consumer is
+> `GET /api/v1/system/health`, which **counts** rows still at `attempted` older than the cutoff and
+> caps the count at 100 (`system/controllers/system.controller.ts:77-85`).
+> **`findDanglingIntents` has exactly one caller and it is that read.** Nothing closes a dangling
+> intent; ADR-002 D4-a's position is that the row is *"itself a useful signal"*, resolved by
+> grepping the other service for its `correlation_id`. A reader who believed this row would wait
+> for a reconciliation that never happens.
 
 ⚠ **`setInterval` fires on a wall clock, not on completion.** A tick slower than its own period
 would stack, so the projector is explicitly built as an interval **that cannot overlap itself and
@@ -82,21 +105,38 @@ a fault** — unlike the other shared secrets, where absence is now loud on all 
 
 ---
 
-## 3 · Configuration — 47 variables, SUPPLIED not read
+## 3 · Configuration — 53 variables, 49 SUPPLIED and 4 read
 
-`src/config/env.ts` is a **Zod schema that supplies every value**. Nothing in `src/` reads
-`process.env` at a call site. That is the opposite of jovi-mall's arrangement, and the difference is
-deliberate on both sides: jovi-mall reads 300 variables through 27 module configs that own their own
-defaults, so its `env.ts` validates an environment it does not supply. wi-admin has 47 and one
-schema, so the schema *is* the configuration.
+`src/config/env.ts` is a **Zod schema that supplies every value it knows about**. That is the
+opposite of jovi-mall's arrangement, and the difference is deliberate on both sides: jovi-mall reads
+300 variables through 27 module configs that own their own defaults, so its `env.ts` validates an
+environment it does not supply.
 
-Grouped, and the fifteen groups sum to 47: process 5 · databases 2 · Redis 1 · auth and session 9 ·
-rate limits 2 · MFA 1 · approvals 2 · feature flags 1 · audit 5 · notifications 5 · CORS 1 ·
-jovi-mall client 3 · storage 4 · uploads 1 · geo-tracker 5.
+Grouped, and the sixteen groups sum to the schema's **49**: process 5 · databases 2 · Redis 1 ·
+auth and session 9 · rate limits 2 · MFA 1 · approvals 2 · feature flags 1 · audit 5 ·
+notifications 5 · CORS 1 · jovi-mall client 3 · storage 4 · uploads 1 · geo-tracker 5 ·
+**automation 2**.
 
-### ⚠ Nine of the 47 are missing from `.env.example`
+> ⚠ **Corrected 2026-09-08 (R6), and the correction is not only arithmetic.** This section read
+> *"47 variables"* and *"**nothing** in `src/` reads `process.env` at a call site"*. Both were
+> re-measured against `src/config/env.ts` and a scan of `src/`:
+>
+> - The schema holds **49**, not 47. The two the grouping missed are ADR-022's
+>   `AUTOMATION_REPORT_TOKEN` and `ADMIN_AUTOMATION_RETENTION_DAYS`, added 2026-09-07 — the day
+>   after the measurement.
+> - **Four variables are read at a call site after all**, through a local `envInt()` helper at
+>   `src/api/middlewares/rate-limit.middleware.ts:42-44`, which does `process.env[name]`:
+>   `ADMIN_RATE_LIMIT_DEVELOPER` (2400) · `ADMIN_RATE_LIMIT_ADMIN` (1800) ·
+>   `ADMIN_RATE_LIMIT_SUPPORT` (1200) · `ADMIN_RATE_LIMIT_ANON` (3000), all per minute. The
+>   indexed form is why a `process.env.NAME` grep does not find them.
+>
+> So the real surface is **53**, and the schema is the configuration for 49 of them.
 
-Measured 2026-09-06 by diffing the Zod schema against the template. Filed as DOC-PROGRAM **P-14**:
+### ⚠ Thirteen of the 53 are missing from `.env.example`
+
+The first nine were measured 2026-09-06 by diffing the Zod schema against the template and filed as
+DOC-PROGRAM **P-14**; the remaining four are the call-site reads above, which no schema diff can
+find. Re-measured 2026-09-08:
 
 ```
 ADMIN_APPROVAL_SWEEP_MIN_INTERVAL_MS   ADMIN_NOTIFICATIONS_BATCH
@@ -104,17 +144,22 @@ ADMIN_AUTH_RATE_LIMIT_MAX              ADMIN_NOTIFICATIONS_MAX_PER_TICK
 ADMIN_FEATURE_FLAG_CACHE_MS            ADMIN_NOTIFICATIONS_RETENTION_DAYS
 ADMIN_NOTIFICATIONS_AUTO_ARCHIVE_DAYS  ADMIN_NOTIFICATIONS_SWEEP_S
 ADMIN_REFRESH_RATE_LIMIT_MAX
+                                       ADMIN_RATE_LIMIT_DEVELOPER   ← call-site reads,
+                                       ADMIN_RATE_LIMIT_ADMIN         absent from the
+                                       ADMIN_RATE_LIMIT_SUPPORT       schema AND from
+                                       ADMIN_RATE_LIMIT_ANON          `.env.example`
 ```
 
-All nine have defaults, so the service boots and nothing is broken. What is lost is **discoverability
-of real operational levers** — the notification sweep interval, batch size, retention and
-auto-archive window, and both rate-limit ceilings.
+All thirteen have defaults, so the service boots and nothing is broken. What is lost is
+**discoverability of real operational levers** — the notification sweep interval, batch size,
+retention and auto-archive window, and **all six** rate-limit ceilings.
 
 ⚠ **This is the exact class of defect jovi-mall's `test:env` exists to catch, and wi-admin has no
 equivalent.** jovi-mall's suite found *84 of 149 variables undocumented* when it was written and
-now asserts in **both** directions (read-but-undocumented, and documented-but-unread). wi-admin's 37
-suites include no `test:env`. Porting it is the durable fix; listing the nine is only the immediate
-one.
+now asserts in **both** directions (read-but-undocumented, and documented-but-unread). wi-admin's 39
+suites include no `test:env`. Porting it is the durable fix — and note that a port which only reads
+the Zod schema would still miss the four above, which is the argument for scanning `src/` rather
+than the schema.
 
 ---
 
@@ -174,9 +219,26 @@ sequence assertable from `verify:live`.
 
 ## 7 · The dangerous verbs
 
-`/api/v1/dev-tools/*` — 9 routes, all **tier-1 Developer only**, all audited, and **8 of the 13**
-`developer_tools.*` permissions flagged `destructive`. `/api/v1/system/*` (17 routes) is the
-read-only half: its six `system.*` permissions are tier 1 **and 2**, and **none is destructive**.
+`/api/v1/dev-tools/*` — **9 routes**, and **8 of the 13** `developer_tools.*` permissions are
+flagged `destructive`. `/api/v1/system/*` (**17 routes**) is the read-only half: its **seven**
+`system.*` permissions are tier 1 **and 2**, and **none is destructive**.
+
+> ⚠ **Corrected 2026-09-08 — two claims here were too strong, and the mount is not uniform.**
+> This paragraph said the dev-tools mount is *"all tier-1 Developer only, all audited"* and that
+> there are *"six"* `system.*` permissions. Measured against the live route manifest and
+> `npm run authz:matrix`:
+>
+> - **7 of the 9 are audited.** The two reads are not: `GET /dev-tools/feature-flags` and
+>   `GET /dev-tools/workers`.
+> - **8 of the 9 are tier-1 only.** `GET /dev-tools/workers` declares **`system.workers.read`**,
+>   not a `developer_tools.*` permission — so it is reachable by an **Admin**, on the dev-tools
+>   mount. That is deliberate (it is a read of the same worker inventory `GET /system/workers`
+>   serves) but it means *"grant an Admin the diagnostics without the verbs"* is achieved by the
+>   permission split, **not** by the mount split: the mount alone does not gate the tier.
+> - `system.*` holds **seven** permissions, not six: `health.read` · `workers.read` ·
+>   `outbox.read` · `metrics.read` · `maintenance.read` · `automation.read` · `errors.read`. The
+>   seventh, `system.automation.read`, arrived with [ADR-022](./ADR-022-AUTOMATION-FAILURE-AUDIT.md)
+>   on 2026-09-07 — the day after this page was read from source.
 
 Keeping the two mounts apart is what lets a deployment grant an Admin the diagnostics without the
 verbs — and it mirrors jovi-mall's own `/system/*` vs `/dev-tools/*` split exactly.

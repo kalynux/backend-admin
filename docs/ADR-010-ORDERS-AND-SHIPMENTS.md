@@ -1,5 +1,7 @@
 # ADR-010 — Orders and shipments
 
+**Verified against source on 2026-09-08** — the ten `/orders` and eight `/shipments` routes against the live manifest, and the nine-value closed `eventType` union at `jovi-mall/src/modules/orders/order-timeline.model.ts:22-31`. Every route, error code, permission and audit action this page names was re-checked against the live route manifest and the four registries — `permission.catalog.ts`, `audit.catalog.ts`, and both services' `error-codes.ts`. ⚠ **This is a dated design record.** Its *Context* sections describe what PHASE-0 or the phase found **at the time** and are correct as history, not as a description of the service today; where a decision is still the live rule it says so at its own D-item.
+
 **Status:** accepted · **Implements:** the commerce brief; the `orders` and `shipments`
 halves of blueprint Phase 6 · **Follows:** [ADR-004](./ADR-004-DOMAIN-OWNERSHIP.md)
 (ownership), [ADR-005](./ADR-005-API-CONTRACT.md) (contract),
