@@ -1,6 +1,6 @@
 # Backend requests
 
-**Verified against source on 2026-09-08** — the three-round index and its close-out links; the platform-rules list, whose `details.platformCode` bullet was corrected for the 403/429 allowlist against `admin/src/core/errors/detail-policy.ts:132-176`; the multipart narrowing and the four `†` permissions, both re-derived from source; and every route the folder names, checked against the live route manifest.
+**Verified against source on 2026-09-09** — the four-round index and its close-out links; the platform-rules list, whose `details.platformCode` bullet was corrected for the 403/429 allowlist against `admin/src/core/errors/detail-policy.ts:132-176`; the multipart narrowing and the four `†` permissions, both re-derived from source; and every route the folder names, checked against the live route manifest.
 
 **For the `wi-admin` backend team.** One document per thing the dashboard was asked to build and
 cannot, or can only build half of, against the contract as it stands today.
@@ -13,8 +13,8 @@ Companion to the two registers already in this folder:
 | [`DATA-EXPOSURE-REGISTER.md`](../DATA-EXPOSURE-REGISTER.md) | What the API provides that perhaps it should not, or should provide differently |
 | **this folder** | What the API does **not** provide that an operator has asked for |
 
-Opened 2026-08-17, from a round of operator requests across eleven screens. **Three rounds have run
-since**, and every one of them is closed — see the index below.
+Opened 2026-08-17, from a round of operator requests across eleven screens. **Three more rounds
+have run since**, and every one of them is closed — see the index below.
 
 The dashboard keeps a **verbatim copy** of this folder and is read-only on that side. Nothing there
 edits it; corrections to the contract belong upstream and get re-copied. ⚠ **The copy was
@@ -74,6 +74,41 @@ set of two; `quota_blocked` is a third value and is live in both services. The c
 | [BR-017](BR-017-order-and-shipment-item-media.md) | Product images and titles on order and shipment items | [`RESPONSE-2026-08-26.md`](RESPONSE-2026-08-26.md) |
 | [BR-018](BR-018-vendor-agency-connections.md) | A vendor's delivery-agency connections, as rows rather than counts | [`RESPONSE-2026-08-26.md`](RESPONSE-2026-08-26.md) |
 | [BR-019](BR-019-contract-clarifications.md) | Four things the contract leaves undecided that a client now has to decide | [`RESPONSE-2026-08-26.md`](RESPONSE-2026-08-26.md) |
+
+### Round four — opened 2026-09-09, from building the `/automation` module
+
+| # | Request | Answered in |
+|---|---|---|
+| [BR-020](BR-020-automation-summary-tier-projection.md) | `/automation/summary` discloses to Support exactly what `/automation/failures` withholds from them | [`RESPONSE-2026-09-09.md`](RESPONSE-2026-09-09.md) |
+
+**The answer is (a): the asymmetry is intended and the sentence justifying it was false.** No wire
+change — re-copy [`automation.md`](../../api/automation.md) and keep the nav decision. Of the four
+rounds this is the first where a request found **two contract pages disagreeing with each other**
+rather than a page disagreeing with the service, and the first raised *before* anything was
+rendered on the strength of it.
+
+### Round five — opened 2026-09-09, from Phase 6 **live verification** against a running `:8033`
+
+| # | Request | Answered in |
+|---|---|---|
+| [BR-021](BR-021-credential-link-throttle-ordering.md) | The credential-link throttle is not counted on the attempt, and `users.md` says it is | [`RESPONSE-2026-09-12.md`](RESPONSE-2026-09-12.md) |
+| [BR-022](BR-022-list-query-strictness-is-not-uniform.md) | "Every list endpoint silently drops an unrecognised query parameter" is not true of all of them | [`RESPONSE-2026-09-12.md`](RESPONSE-2026-09-12.md) |
+| [BR-023](BR-023-quota-blocked-content-route.md) | `files.md` says the content route will not serve a `quota_blocked` file. It serves it | [`RESPONSE-2026-09-12.md`](RESPONSE-2026-09-12.md) |
+
+**All three were right, and all three are the same bug: a sentence that was checkable, false and
+load-bearing.** This is the first round found by **measuring against a running service** rather than
+by reading, and it is the round that justifies the method — BR-023 had already been implemented six
+surfaces deep and shipped before the wire contradicted it.
+
+- **BR-021 → (c), neither option offered.** The two rate-limit counters bound different things and
+  wanted opposite orderings, so they are now spent at different points. A **behaviour change**, and
+  the only one in this round: a refused channel now costs the *administrator's* allowance and not
+  the *party's*.
+- **BR-022 → scoped, and the strict set is 12 routes, not the 2 they measured.** Stated now in
+  [`api/README.md` § Filtering](../../api/README.md) and pinned by a new suite,
+  `test:list-strictness`.
+- **BR-023 → corrected, wording adopted nearly verbatim.** `quota_blocked` is a *publishing* state:
+  the cap withholds the address, not the bytes.
 
 ---
 

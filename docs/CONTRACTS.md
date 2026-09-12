@@ -174,7 +174,7 @@ because there is one projector.
 
 Tunables: `ADMIN_NOTIFICATIONS_SWEEP_S` (30) · `_BATCH` (200) · `_MAX_PER_TICK` (25) ·
 `_AUTO_ARCHIVE_DAYS` (90) · `_RETENTION_DAYS` (30). ⚠ **All five are absent from `.env.example`** —
-see [OPERATIONS.md § 3](./OPERATIONS.md#3--configuration--53-variables-49-supplied-and-4-read).
+see [OPERATIONS.md § 3](./OPERATIONS.md#3--configuration--53-variables-all-53-in-the-schema).
 
 ---
 

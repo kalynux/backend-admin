@@ -105,61 +105,74 @@ a fault** — unlike the other shared secrets, where absence is now loud on all 
 
 ---
 
-## 3 · Configuration — 53 variables, 49 SUPPLIED and 4 read
+## 3 · Configuration — 53 variables, all 53 in the schema
 
 `src/config/env.ts` is a **Zod schema that supplies every value it knows about**. That is the
 opposite of jovi-mall's arrangement, and the difference is deliberate on both sides: jovi-mall reads
 300 variables through 27 module configs that own their own defaults, so its `env.ts` validates an
 environment it does not supply.
 
-Grouped, and the sixteen groups sum to the schema's **49**: process 5 · databases 2 · Redis 1 ·
-auth and session 9 · rate limits 2 · MFA 1 · approvals 2 · feature flags 1 · audit 5 ·
+Grouped, and the sixteen groups sum to **53**: process 5 · databases 2 · Redis 1 ·
+auth and session 9 · **rate limits 6** · MFA 1 · approvals 2 · feature flags 1 · audit 5 ·
 notifications 5 · CORS 1 · jovi-mall client 3 · storage 4 · uploads 1 · geo-tracker 5 ·
-**automation 2**.
+automation 2.
 
-> ⚠ **Corrected 2026-09-08 (R6), and the correction is not only arithmetic.** This section read
-> *"47 variables"* and *"**nothing** in `src/` reads `process.env` at a call site"*. Both were
-> re-measured against `src/config/env.ts` and a scan of `src/`:
+> ✅ **Closed 2026-09-09 (DOC-PROGRAM close-out § 6, item 3).** This section used to read
+> *"53 variables, 49 SUPPLIED and 4 read"*, because four rate-limit ceilings were read at a call
+> site through a local `envInt()` doing `process.env[name]` — in **neither** the schema nor
+> `.env.example`, and invisible to a `process.env.NAME` grep because the read was indexed.
 >
-> - The schema holds **49**, not 47. The two the grouping missed are ADR-022's
->   `AUTOMATION_REPORT_TOKEN` and `ADMIN_AUTOMATION_RETENTION_DAYS`, added 2026-09-07 — the day
->   after the measurement.
-> - **Four variables are read at a call site after all**, through a local `envInt()` helper at
->   `src/api/middlewares/rate-limit.middleware.ts:42-44`, which does `process.env[name]`:
->   `ADMIN_RATE_LIMIT_DEVELOPER` (2400) · `ADMIN_RATE_LIMIT_ADMIN` (1800) ·
->   `ADMIN_RATE_LIMIT_SUPPORT` (1200) · `ADMIN_RATE_LIMIT_ANON` (3000), all per minute. The
->   indexed form is why a `process.env.NAME` grep does not find them.
+> `ADMIN_RATE_LIMIT_DEVELOPER` (2400) · `ADMIN_RATE_LIMIT_ADMIN` (1800) ·
+> `ADMIN_RATE_LIMIT_SUPPORT` (1200) · `ADMIN_RATE_LIMIT_ANON` (3000), all per minute, are now
+> schema keys read through `env()`. Two things changed with the move, beyond discoverability:
+> a **non-integer is a boot failure** rather than a silent revert to the default (`envInt`
+> accepted `ADMIN_RATE_LIMIT_SUPPORT=twelve` and quietly used 1200), and `adminRateLimits()`
+> is deliberately a **function** rather than the frozen const it replaces — `env()` throws on a
+> bad environment, so evaluating it at module scope would move a configuration failure into an
+> import and out of `server.ts`'s boot handler.
 >
-> So the real surface is **53**, and the schema is the configuration for 49 of them.
+> The figure this section has carried has been wrong twice — *47*, then *49 of 53*. It is now
+> asserted rather than counted: `test:foundation` § 1d reads `ENV_SCHEMA_KEYS` directly.
 
-### ⚠ Thirteen of the 53 are missing from `.env.example`
+### ✅ `.env.example` documents all 53 — and a test now says so
 
-The first nine were measured 2026-09-06 by diffing the Zod schema against the template and filed as
-DOC-PROGRAM **P-14**; the remaining four are the call-site reads above, which no schema diff can
-find. Re-measured 2026-09-08:
+This section previously read **"⚠ Thirteen of the 53 are missing from `.env.example`"**. Re-measured
+2026-09-09 against the schema:
 
 ```
-ADMIN_APPROVAL_SWEEP_MIN_INTERVAL_MS   ADMIN_NOTIFICATIONS_BATCH
-ADMIN_AUTH_RATE_LIMIT_MAX              ADMIN_NOTIFICATIONS_MAX_PER_TICK
-ADMIN_FEATURE_FLAG_CACHE_MS            ADMIN_NOTIFICATIONS_RETENTION_DAYS
-ADMIN_NOTIFICATIONS_AUTO_ARCHIVE_DAYS  ADMIN_NOTIFICATIONS_SWEEP_S
-ADMIN_REFRESH_RATE_LIMIT_MAX
-                                       ADMIN_RATE_LIMIT_DEVELOPER   ← call-site reads,
-                                       ADMIN_RATE_LIMIT_ADMIN         absent from the
-                                       ADMIN_RATE_LIMIT_SUPPORT       schema AND from
-                                       ADMIN_RATE_LIMIT_ANON          `.env.example`
+53 schema keys
+50 assigned in .env.example
+ 3 present but commented out on purpose  ADMIN_COOKIE_DOMAIN
+                                         STORAGE_FIREBASE_BUCKET
+                                         STORAGE_FIREBASE_PUBLIC
+ 0 absent
+ 0 in .env.example but not in the schema
 ```
 
-All thirteen have defaults, so the service boots and nothing is broken. What is lost is
-**discoverability of real operational levers** — the notification sweep interval, batch size,
-retention and auto-archive window, and **all six** rate-limit ceilings.
+The three commented ones are optional and commented **so a checkout runs on the local storage
+provider without editing anything**, with the name and its explanation still in front of the
+operator. That is documented, not missing.
 
-⚠ **This is the exact class of defect jovi-mall's `test:env` exists to catch, and wi-admin has no
-equivalent.** jovi-mall's suite found *84 of 149 variables undocumented* when it was written and
-now asserts in **both** directions (read-but-undocumented, and documented-but-unread). wi-admin's 39
-suites include no `test:env`. Porting it is the durable fix — and note that a port which only reads
-the Zod schema would still miss the four above, which is the argument for scanning `src/` rather
-than the schema.
+Of the thirteen, the **nine** filed as DOC-PROGRAM **P-14** on 2026-09-06 had all been added by the
+time this was re-measured — the entry was stale, not wrong when written. The remaining **four** are
+the rate-limit ceilings above, added with the schema change.
+
+⚠ **The instrument that finds this class is a SOURCE scan, and that is the part worth keeping.**
+jovi-mall's `test:env` diffs schema against template, and a diff of two things agrees when a
+variable is missing from **both** — so a port of it would have found the nine and not the four.
+`test:foundation` **§ 1d** is the guard that exists now, and it asserts four separate things:
+
+| Assertion | Catches |
+|---|---|
+| no `process.env` read uses a computed key | the indexed read that hid the four |
+| every `process.env` read names a schema key | a variable read but never declared |
+| every schema variable appears in `.env.example` | a new variable shipped undocumented |
+| every `.env.example` variable is one the schema declares | a **rename**, which leaves a dead lever in the template |
+
+It was proved by deliberately breaking each of the four and confirming the right assertion failed
+each time. `src/config/env.ts` is exempt from the first two, since reading raw `process.env` is its
+whole job; `logger.ts` is **not** exempt and does not need to be — it reads `NODE_ENV` and
+`LOG_LEVEL` directly because it is constructed before `env()` can throw, and both are schema keys.
 
 ---
 

@@ -3,6 +3,7 @@ import { Request, RequestHandler } from 'express';
 import { createAppError } from '../../core/errors/app-error';
 import { ERROR_CODES } from '../../core/errors/error-codes';
 import { logger } from '../../core/logging/logger';
+import { env } from '../../config/env';
 
 /**
  * Rate limiting for wi-admin (Phase 16 retrofit of the Phase 1 blanket limiter).
@@ -39,11 +40,6 @@ import { logger } from '../../core/logging/logger';
 
 export type AdminCallerClass = 'developer' | 'admin' | 'support' | 'anonymous';
 
-function envInt(name: string, fallback: number): number {
-    const raw = Number(process.env[name]);
-    return Number.isInteger(raw) && raw > 0 ? raw : fallback;
-}
-
 /**
  * Per-minute ceilings by tier.
  *
@@ -51,22 +47,32 @@ function envInt(name: string, fallback: number): number {
  * — dependency probes, log searches, the error journal — which is the most request-dense
  * work anybody does here. Support sits lowest because ticket work is human-paced.
  *
+ * The `anonymous` entry is Layer A's ceiling, and what an unauthenticated caller gets.
+ * Raised from Phase 1's 300, it sits above every identity ceiling so that Layer A only ever
+ * catches a genuine flood from one address rather than being the thing that limits a
+ * signed-in administrator — that is Layer B's job, and it can tell them apart.
+ *
  * Every number is a backstop. If any of them is ever reached by a real administrator the
- * number is wrong, and `RATE_LIMIT_*` exists so that can be corrected without a deploy.
+ * number is wrong, and `ADMIN_RATE_LIMIT_*` exists so that can be corrected without a
+ * deploy.
+ *
+ * ⚠ Read through `env()` since 2026-09-09 (DOC-PROGRAM close-out § 6, item 3). These four
+ * used to be a local `envInt()` over `process.env[name]`, which put them in neither the Zod
+ * schema nor `.env.example` — configurable in principle and undiscoverable in practice, and
+ * invisible to a `process.env.NAME` grep because the read was indexed. Deliberately a
+ * FUNCTION rather than the frozen const it replaces: `env()` parses on first call and
+ * throws on a bad environment, so evaluating it at module scope would move a configuration
+ * failure into an import and out of `server.ts`'s boot handler.
  */
-export const ADMIN_RATE_LIMITS: Readonly<Record<AdminCallerClass, number>> = Object.freeze({
-    developer: envInt('ADMIN_RATE_LIMIT_DEVELOPER', 2400),
-    admin: envInt('ADMIN_RATE_LIMIT_ADMIN', 1800),
-    support: envInt('ADMIN_RATE_LIMIT_SUPPORT', 1200),
-    /**
-     * Layer A's ceiling, and what an unauthenticated caller gets.
-     *
-     * Raised from Phase 1's 300. It sits above every identity ceiling so that Layer A only
-     * ever catches a genuine flood from one address rather than being the thing that limits
-     * a signed-in administrator — that is Layer B's job, and it can tell them apart.
-     */
-    anonymous: envInt('ADMIN_RATE_LIMIT_ANON', 3000),
-});
+export function adminRateLimits(): Readonly<Record<AdminCallerClass, number>> {
+    const config = env();
+    return {
+        developer: config.ADMIN_RATE_LIMIT_DEVELOPER,
+        admin: config.ADMIN_RATE_LIMIT_ADMIN,
+        support: config.ADMIN_RATE_LIMIT_SUPPORT,
+        anonymous: config.ADMIN_RATE_LIMIT_ANON,
+    };
+}
 
 /**
  * Which bucket this request counts against.
@@ -91,7 +97,7 @@ const WINDOW_MS = 60_000;
 function build(scope: 'ip' | 'identity'): RequestHandler {
     return rateLimit({
         windowMs: WINDOW_MS,
-        limit: (req) => ADMIN_RATE_LIMITS[adminCallerClass(req)],
+        limit: (req) => adminRateLimits()[adminCallerClass(req)],
         keyGenerator: (req) =>
             scope === 'identity' && req.admin
                 ? `admin:${req.admin.adminId}`

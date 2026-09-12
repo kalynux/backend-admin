@@ -282,10 +282,18 @@ published elsewhere that needs to keep its date. `unpublish` and `archive` take 
 
 **There is no `search`.** No free-text search over articles exists on this surface.
 
-⚠ **The query schema is not `.strict()`, so an unrecognised parameter is silently dropped** —
+⚠ **This query schema is not `.strict()`, so an unrecognised parameter is silently dropped** —
 which means a misspelt filter returns the *unfiltered* list and nothing on either side reports
 it. A `400` is a bad afternoon; a stripped filter is a screen that looks correct and lies.
-This is the service-wide `listQuery` behaviour, not a `/content` quirk.
+
+⚠ **This is `listQuery`'s behaviour and it is the common case, but it is NOT service-wide —
+that sentence used to say it was** (BR-022, corrected 2026-09-12). Eleven query schemas are
+strict, including **`GET /authors` two sections below**, so this page contradicted itself. The
+complete strict set is the table in [`README.md` § Filtering](./README.md#filtering).
+
+**The other axis is not lenient here either.** A *recognised* key with a value outside its enum
+— `?category=__nope__`, `?locale=xx` — is a `400` naming the permitted set, on this endpoint and
+every other. It is the misspelt **key** that is dropped, never the misspelt **value**.
 
 `sort` accepts `updatedAt` (the default, `-updatedAt`), `createdAt`, `publishedAt` and `status`.
 

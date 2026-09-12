@@ -1,5 +1,23 @@
 # ADR-022 — Auditing the automation layer's failures
 
+**Verified against source on 2026-09-08** — checked 2026-09-09, the last page the documentation
+programme had left (`05-CLOSE-OUT.md` § 1). D-3's door (`automation-internal.routes.ts:32`, the
+`serviceToken()` kind, `SERVICE_ROUTE_ALLOWLIST` and the boot assertion at
+`route-manifest.ts:521-529`), the guard setting no `req.admin` (`service-token.middleware.ts:23`),
+`noAudit()` on the door and `test-audit.ts:1024` asserting the machine door really declares
+`serviceToken()`, D-4's plain TTL (`automation-failure.model.ts:146` over `purge_after`, written
+from `ADMIN_AUTOMATION_RETENTION_DAYS`), D-5's salted digest and its absence from every projection
+(`automation-failure.repository.ts:49,141,169`), D-7's three permission names and that **neither
+new one is flagged sensitive** (`permission.catalog.ts:433,1116`), the 503
+`AUTOMATION_DOOR_UNCONFIGURED` and `configured` on both reads, and jovi-mall's one redaction line
+(`core/audit/redact.ts:59-60`). **Every wi-admin claim held.**
+
+**Two defects, both in D-8, and both are D-8's own predicted drift** — found by reading
+`settings.errorWorkflow` off all 13 workflows on the instance rather than trusting the list:
+coverage is **ten**, not nine (`wi-mall-product-cards`, created the day after this ADR), and the
+`UP-` prefix is **not** universal (that same workflow has none). Corrected in place. One detail
+the ADR does not mention and that is not a defect: the digest is truncated to 32 hex characters.
+
 **Date:** 2026-09-07
 **Status:** Accepted and **IMPLEMENTED** — built the same day
 **Scope:** wi-admin, n8n (the automation layer), jovi-mall (one redaction-parity line only)
@@ -207,21 +225,72 @@ denied is machine detail, which on a support call is not a secret so much as a f
 Unlike the error journal there is **no per-row filter and no query narrowing for tier 3**. Both
 exist there because the subject is a customer's failed request. The subject here is a machine.
 
+> ⚠ **This rung table describes `GET /automation/failures` and nothing else, and that was not
+> stated until BR-020 asked** (2026-09-09). `GET /automation/summary` carries the **same
+> `anyPermission` triple and is not projected at all** — every group in it names a `workflowId`
+> and a `workflowName`, the two fields the table above withholds from rung 3. A Support
+> administrator is therefore refused a workflow name on the feed and handed it on the summary,
+> one route away. The dashboard found this by reading both pages and asked whether it was a
+> decision or an oversight, having built its navigation on top of it.
+>
+> **It is a decision, and it follows from what this section already says the boundary is for.**
+> Read the paragraph above: what rung 3 is denied is machine detail, *"which on a support call
+> is not a secret so much as a false lead"*. The boundary is **not confidentiality** — it is
+> protection against **per-incident causal attribution**, an agent reading one row and telling a
+> customer their message failed because `sync identity` timed out. A summary cannot produce that
+> sentence: it has no node, no message, no stack and no per-incident row, only *this workflow,
+> this channel, this many, since then*. **Aggregate identity is a weaker disclosure than
+> per-incident identity**, and the statement it supports — *"WhatsApp is degraded right now, we
+> know"* — is the exact one the paragraph above says Support is granted this surface to make.
+>
+> Withholding it would have cost the rung its most useful instrument to protect a boundary that
+> was never about the name. So the module's rule is: **the feed is graded, the summary is whole.**
+>
+> Two related facts, recorded so neither is later mistaken for a leak. `workflowId` is an
+> **ungated query filter** on `/failures` — `FailureQuerySchema` never consults the caller's
+> tier — so rung 3 can narrow the feed by workflow and still receives rung-3 rows; consistent
+> with the above, and left alone deliberately. And `external_id_hash` is the one field withheld
+> from **every** rung including 1, which is D-5 and is untouched by any of this.
+>
+> `test:automation` § 2b pins the summary's shape for the same reason § 2 pins the feed's: a
+> deliberate asymmetry that nothing asserts is indistinguishable from an accident, which is
+> precisely how this one read for two days.
+
 ---
 
 ## D-8 · Coverage is an allowlist, and it will drift
 
-The reporter is wired as the `errorWorkflow` on **nine** workflows: `wi-mall-core`,
+The reporter is wired as the `errorWorkflow` on **ten** workflows: `wi-mall-core`,
 `wi-mall-tg-adapter`, `wi-mall-wa-adapter`, `wi-mall-typing`, `wi-mall-mcp`, `wi-mall-bargain`,
-`wi-mall-bargain-tools`, `wi-mall-vectoriser`, `wi-mall-product-search`.
+`wi-mall-bargain-tools`, `wi-mall-vectoriser`, `wi-mall-product-search`, `wi-mall-product-cards`.
 
-Not wired: `wi-mall-flow` (superseded), the dev harnesses, unrelated automations on the instance,
-and — deliberately — **the reporter itself**, which would loop a wi-admin outage.
+Not wired, and all three correctly: the two dev harnesses (`wi-mall-bargain-smoke`,
+`wi-mall-vectoriser-schema`), unrelated automations on the instance, and — deliberately — **the
+reporter itself**, which would loop a wi-admin outage. `wi-mall-flow` was listed here as
+superseded-and-not-wired; it no longer exists on the instance at all.
 
-Every workflow belonging to this backend now carries the `wi-mall-` prefix; the two adapters were
-renamed on 2026-09-07 (they were `tg-adapter` / `wa-adapter`). The prefix is not cosmetic here —
-`workflow_name` travels on every report, so a failure row now identifies its owner without a
-lookup against an instance that also hosts unrelated automations.
+> ⚠ **This said "nine" and it was already ten when re-measured 2026-09-09 — which is D-8 being
+> right about itself.** `wi-mall-product-cards` was created 2026-09-08, the day after this ADR,
+> and somebody did remember to set its `errorWorkflow`. The section predicted the drift; what it
+> could not do is notice it. **The count is not the thing to trust — the instance is.** Every
+> workflow's `settings.errorWorkflow` was read directly for this re-measure: 13 workflows,
+> 10 wired to `d2JZ7jA2jJCg0O9S`, 3 deliberately not.
+
+**On the instance these are named `UP-wi-mall-…`** (2026-09-07: the adapters lost their bare
+`tg-adapter` / `wa-adapter` names, then all thirteen then present gained the `UP-` prefix). The
+naming is not cosmetic here — `workflow_name` travels on every report, so a failure row identifies
+its owner without a lookup against an instance that also hosts unrelated automations.
+
+> ⚠ **The prefix is a convention, not a rule, and it has already been missed once.**
+> `wi-mall-product-cards` carries **no** `UP-` prefix, so this paragraph's "every one of these"
+> was false within a day. Nothing depends on the prefix — `workflow_id` is the field to match on,
+> as the next paragraph says — so this is a legibility loss, not a breakage. It is recorded
+> because a naming rule that reads as universal and is not is worse than one stated as a habit.
+
+This document keeps the bare names, because `wi-mall-core` is the component and `UP-` is how the
+instance displays it. Nothing resolves a workflow by name — n8n uses ids — so **a report's
+`workflow_name` will read `UP-wi-mall-core` while this page says `wi-mall-core`, and both are
+right.** `workflow_id` is the field to match on.
 
 ⚠ **`wi-mall-typing` is the one whose reports mean the least, and it was wired anyway.** Every
 node in it already carries `onError: continueRegularOutput`, so a failure there is nearly

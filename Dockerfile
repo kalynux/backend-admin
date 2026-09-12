@@ -42,6 +42,12 @@ COPY tsconfig.json tsconfig.scripts.json ./
 COPY src ./src
 COPY scripts ./scripts
 
+# ⚠ Same ceiling as jovi-mall's builder, and for the same reason — see that Dockerfile and
+# docs/RUNBOOK.md § "Found 3". This tree is smaller and has not hit the limit yet; the pin
+# is here so it never does silently. V8 sizes its default old-space from visible memory, so
+# without it a build that passes on a CI runner can still exit 134 on an 8 GB VPS.
+ENV NODE_OPTIONS=--max-old-space-size=4096
+
 RUN npm run build
 
 # ═════════════════════════════════════════════════════════════════════════════════

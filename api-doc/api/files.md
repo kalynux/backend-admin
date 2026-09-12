@@ -154,15 +154,33 @@ kind of absent file and means something completely different.
 
 `quota_blocked` means **the file owner is over their plan storage cap and this file falls
 outside it.** The file has not been deleted and nothing is broken: it comes back the moment the
-owner upgrades their plan or frees space. `url` is `null`, and the content route will not help
-you either.
+owner upgrades their plan or frees space. **`url` is `null`. The content route still serves the
+bytes — the cap withholds the address, not the file.**
+
+⚠ **That last sentence used to read *"and the content route will not help you either"*, and it
+was false** (BR-023, corrected 2026-09-12). It cost the dashboard a feature: six surfaces were
+built to withhold the audited open on the stated grounds that it *"cannot succeed"*, so images an
+administrator was entitled to see were hidden for as long as that stood — including the
+delivery-proof photograph BR-011 built the route for. **`quota_blocked` is a publishing state,
+not an access state.** The quota sweep stops the platform *handing out an address*; it revokes
+nothing, and `GET /files/:fileId/content` never reads `quotaBlockedAt` at all.
 
 | | `authorized` | `quota_blocked` |
 |---|---|---|
 | Why there is no URL | the file is in a private tree | the owner is over their storage cap |
 | Will it ever get one | no — private is permanent | **yes**, when the plan is upgraded |
-| What to render | "cannot be displayed" + metadata | a placeholder **and an upgrade prompt** |
+| **Can the content route show it** | **yes** | **yes** — the cap withholds the address, not the bytes |
+| What to render | "cannot be displayed" + metadata | the file, **plus** an upgrade prompt beside it |
 | Is it a fault | no | no — it is a *billing* state |
+
+**So draw the billing state beside the affordance, never in place of it.** Offer the open; it
+works. A blocked file is the one case where the state and the content are independent.
+
+⚠ **It could not be enforced on the bytes even if we wanted it to be**, which is part of why it
+is not. Public trees are served by `express.static` straight off disk, with no database access —
+so a blocked *public* file stays fetchable by anyone holding its URL for as long as the file
+exists. Enforcing in the content route would refuse the one caller who is authenticated,
+permissioned and audited while leaving a stale anonymous link untouched.
 
 **Never render this as a broken image, and never as "file missing".** Both are wrong in a way
 the user can act on incorrectly: one reads as a platform bug, the other as data loss, and the
@@ -312,6 +330,12 @@ Public trees included. A public file streams exactly the same way, so the dashbo
 **one code path** and never has to branch on `access` to decide which call to make. It is
 also the more private choice for a public file: the `url` from a resolve is
 unauthenticated, and this is not.
+
+⚠ **A `quota_blocked` file is not a special case either** (BR-023, 2026-09-12). It streams
+`200` like any other, in every tree — measured on `images/`, `shipments/` and `digital/`. The
+handler never reads `quotaBlockedAt`; there is no quota branch to have failed. **Do not
+pre-empt this call on `access`** — that read of the old wording cost the dashboard six working
+surfaces. `access` tells you whether a `url` exists, never whether the bytes are reachable.
 
 ⚠ **`digital/` is included too**, which means an administrator can retrieve a vendor's
 saleable product file. That is the decided scope — an operator resolving a dispute about a

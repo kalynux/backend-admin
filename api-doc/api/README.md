@@ -390,6 +390,47 @@ Only one sort field at a time; there is no multi-key sort.
 Filters are per endpoint and always documented on that endpoint's page. Three conventions hold
 everywhere:
 
+### ⚠ Unknown query parameters — two different axes, and only one is lenient
+
+**This was stated service-wide as *"an unrecognised query parameter is silently dropped on every
+list endpoint"*, and that is not true of all of them** (BR-022, corrected 2026-09-12). The claim
+was inferred from `listQuery` not being `.strict()`, which is true — but **11 query schemas are
+hand-rolled and strict**, and a client written against the general rule breaks on them. Separate
+the two axes; they behave differently and only the first varies by endpoint:
+
+| Axis | Behaviour |
+|---|---|
+| An unrecognised **key** — `categoryKey` instead of `category` | **Usually dropped silently**, `200`, unfiltered. **Refused with `400` on the 12 routes below.** |
+| A recognised key with an out-of-range **value** — `?category=__nope__` | **Always `400 VALIDATION_ERROR`, everywhere**, and the message names the permitted set |
+
+**The second axis is the useful guarantee and it holds service-wide.** A misspelt *value* is never
+silently ignored — `?targetType=not_a_real_target` on `/audit` answers `400` and enumerates all 23
+permitted values. So the hazard is narrow: it is a misspelt **key**, on a non-strict endpoint,
+which returns an unfiltered list that looks correct. Check a filter *name* against the endpoint's
+page; you do not need to check its *values*.
+
+**The complete strict set** — derived by loading every exported query schema and probing it, not
+by grep, and re-derivable the same way:
+
+| Route | Takes |
+|---|---|
+| `GET /accounts/:ownerType/:ownerId/activity` | `before`, `limit` |
+| `GET /agents/:agentId/assignability` | its documented query |
+| `GET /agents/:agentId/eligibility` | its documented query |
+| `GET /agents/:agentId/live-position` | `reason` (**required**) |
+| `GET /agents/:agentId/tracking-presence` | **nothing — and refuses `reason` too** |
+| `GET /content/articles/:articleId/preview` | `locale` (**required**) |
+| `GET /content/authors` | **nothing, and refuses any.** Not paginated — `?page=1&limit=20` is a `400` |
+| `GET /money/earnings/accounts` | its documented query |
+| `GET /shipments/:shipmentId/tracking-events` | its documented query |
+| `GET /shipments/:shipmentId/tracking-trail` | its documented query |
+| `GET /support/tickets/reference/orders` · `/products` | its documented query |
+
+Everything else strips. **Widening `listQuery` to `.strict()` service-wide is deliberately not
+done** — it is a behaviour change with its own blast radius, and it is not planned. This table is
+the contract; it is pinned by `test:list-strictness`, which fails if a schema's strictness changes
+without this table changing with it.
+
 ### Free-text search — `?search=`
 
 Trimmed, 1–120 characters. An empty `?search=` is rejected rather than treated as "no filter" —
@@ -435,7 +476,7 @@ headers (`RateLimit`, `RateLimit-Policy`).
 | Layer | Scope | Window | Default ceiling | `details.retryAfterSeconds` |
 |---|---|---|---|:-:|
 | **A — global** | Per IP, before the routers | 60 s | 3000 req (`ADMIN_RATE_LIMIT_ANON`) | ✅ |
-| **B — identity** | Per administrator, at the tail of the auth gate | 60 s | tier 1 **2400** / tier 2 **1800** / tier 3 **1200** | ✅ |
+| **B — identity** | Per administrator, at the tail of the auth gate | 60 s | tier 1 **2400** (`ADMIN_RATE_LIMIT_DEVELOPER`) / tier 2 **1800** (`…_ADMIN`) / tier 3 **1200** (`…_SUPPORT`) | ✅ |
 | **Credential** | Per IP, on `/auth/login`, `/auth/mfa/verify`, `/auth/password` | 60 s | **10** (`ADMIN_AUTH_RATE_LIMIT_MAX`) | ❌ |
 | **Refresh** | Per IP, on `/auth/refresh` **alone** | 60 s | **60** (`ADMIN_REFRESH_RATE_LIMIT_MAX`) | ❌ |
 
@@ -446,6 +487,12 @@ reloads produced a `429` that clients could not tell from a dead session, and si
 operators out. See [auth.md](auth.md).
 
 `/health/*` is mounted **before** the limiter and is never throttled.
+
+⚠ **All four ceilings became discoverable on 2026-09-09** (DOC-PROGRAM close-out § 6, item 3).
+The three tier ceilings and the anonymous one were read at the call site through a local helper,
+so they were in neither `src/config/env.ts` nor `.env.example` — configurable in principle,
+undiscoverable in practice. They are schema-validated now, which also means a non-integer stops
+the boot rather than silently reverting to the default. Names unchanged; no behaviour changed.
 
 The identity and global ceilings are runaway-loop backstops, not budgets — if a real operator
 reaches one, the number is wrong. The credential ceiling is a security boundary and is strict.

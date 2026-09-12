@@ -70,7 +70,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: kalynux/jovi-mall
-          ref: phase-6-unbuilt-scope
+          ref: production
           token: ${{ secrets.CROSS_REPO_TOKEN }}
           path: jovi-mall
 
@@ -246,7 +246,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: kalynux/jovi-mall
-          ref: phase-6-unbuilt-scope
+          ref: production
           token: ${{ secrets.CROSS_REPO_TOKEN }}
           path: jovi-mall
 

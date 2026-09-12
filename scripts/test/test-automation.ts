@@ -5,11 +5,15 @@
  * route declarations, the permission catalog and the allowlists. No Mongo, no Redis, no
  * n8n.
  *
- * Three sections carry the weight:
+ * Four sections carry the weight:
  *
  *   §2  the projection. A stack trace must not reach tier 2 and machine detail must not
  *       reach tier 3, and the completeness assertion is written against the FIELDS rather
  *       than a snapshot, so adding a field without deciding its rung fails here.
+ *   §2b the asymmetry §2 does not describe: `/summary` is NOT projected and hands tier 3 a
+ *       workflow identity the feed withholds. Deliberate (ADR-022 D-7), and pinned because
+ *       nothing asserted it for two days while the prose describing it was false — a
+ *       deliberate asymmetry nothing asserts is indistinguishable from an accident.
  *   §3  the door. It is the only route on this service reachable without an administrator,
  *       so §3 asserts it is exactly one route, that it is allowlisted, and that nothing on
  *       `/api/internal` ever declares an administrator gate.
@@ -137,6 +141,116 @@ t.assert('every record field is either projected or deliberately withheld', () =
 
 t.assert('the view name matches the rung', () =>
     viewForTier(1) === 'developer' && viewForTier(2) === 'admin' && viewForTier(3) === 'support');
+
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * The asymmetry § 2 does NOT describe (BR-020, 2026-09-09).
+ *
+ * `/failures` is graded and withholds `workflowId` / `workflowName` from tier 3. `/summary`
+ * carries the SAME `anyPermission` triple (§ 4) and is not projected at all — so a Support
+ * administrator is refused a workflow name on the feed and handed it on the summary, one
+ * route away.
+ *
+ * That is DELIBERATE. ADR-022 D-7 says what rung 3 is denied is machine detail "not a secret
+ * so much as a false lead", and the hazard named is per-incident causal attribution — an
+ * agent reading one row and telling a customer `sync identity` timed out. A summary cannot
+ * produce that sentence: no node, no message, no stack, no per-incident row. Aggregate
+ * identity is a weaker disclosure than per-incident identity.
+ *
+ * It is pinned here because for two days NOTHING asserted it, and the only thing describing
+ * it was a sentence in `automation.md` that was checkable and false. A deliberate asymmetry
+ * that nothing asserts is indistinguishable from an accident — which is exactly how the
+ * dashboard read it, having built a navigation decision on top of it.
+ */
+t.section('2b. The summary is deliberately WHOLE — the asymmetry, asserted');
+
+const controllerSource = readFileSync(
+    join(__dirname, '..', '..', 'src', 'modules', 'automation', 'controllers', 'automation.controller.ts'),
+    'utf8',
+);
+
+const repositorySource = readFileSync(
+    join(
+        __dirname, '..', '..', 'src', 'modules', 'automation',
+        'repositories', 'automation-failure.repository.ts',
+    ),
+    'utf8',
+);
+
+/**
+ * Slice from an anchor, REFUSING to return anything when the anchor is missing.
+ *
+ * `String.slice(-1)` on a failed `indexOf` returns the last character, and every negative
+ * assertion below would then pass on a one-character string — a renamed handler would turn
+ * this whole section green while asserting nothing. A source scan's failure mode has to be
+ * a failure.
+ */
+function sliceFrom(source: string, anchor: string): string {
+    const at = source.indexOf(anchor);
+    if (at === -1) throw new Error(`anchor not found, so this scan asserts nothing: ${anchor}`);
+    return source.slice(at);
+}
+
+/** Everything from `static summary` to the end of the class. */
+const summaryHandler = sliceFrom(controllerSource, 'static summary');
+const summaryQuery = sliceFrom(repositorySource, 'async summary(');
+
+t.assert('the feed handler DOES project — the graded half still holds', () =>
+    /projectFailureRecord\(record, admin\.tier\)/.test(controllerSource));
+
+t.assert('the summary handler does NOT project', () =>
+    !/projectFailureRecord/.test(summaryHandler));
+
+/**
+ * The strongest form of the assertion: the summary never resolves the caller's tier at all,
+ * so it CANNOT grade by accident or on purpose without this failing first.
+ */
+t.assert('the summary never reads the caller identity — it has no tier to grade by', () =>
+    !/requireAdminIdentity/.test(summaryHandler));
+
+/**
+ * Named fields rather than a snapshot, the same reasoning as § 2's completeness assertion:
+ * these two ARE the disclosure this section exists to have decided. If a later change drops
+ * them from the aggregation, that is the boundary moving and it should be a deliberate edit
+ * here, in `automation.md` and in ADR-022 D-7 together.
+ */
+t.assert('the summary group names workflowId and workflowName — tier 3 receives both', () =>
+    /workflowId:\s*row\._id\.workflow_id/.test(summaryQuery)
+    && /workflowName:\s*row\.workflow_name/.test(summaryQuery));
+
+/**
+ * The property that makes the asymmetry reachable in one click, and therefore the property
+ * that makes it a decision rather than a detail: no extra permission stands between the two.
+ */
+t.assert('both routes are reachable by the SAME rungs — no permission separates them', () => {
+    const [a, b] = routeManifest().filter((r) => r.fullPath.startsWith('/api/v1/automation'));
+    if (a?.access.kind !== 'permission' || b?.access.kind !== 'permission') return false;
+    const names = (r: typeof a.access) => [...r.permissions].sort().join(',');
+    return names(a.access) === names(b.access);
+});
+
+/**
+ * Recorded, not repaired. `workflowId` is a filter on `/failures` and the controller never
+ * consults the tier for it, so rung 3 can narrow the feed by workflow and still receives
+ * rung-3 rows. Consistent with the decision above; asserted so it stays a known property
+ * rather than being rediscovered as a leak.
+ */
+t.assert('the workflowId FILTER is ungated by tier, deliberately', () => {
+    const feedHandler = sliceFrom(controllerSource, 'static failures')
+        .slice(0, sliceFrom(controllerSource, 'static failures').indexOf('static summary'));
+    // The two places the feed legitimately reads the tier: the projection and the view name.
+    const beyondThose = feedHandler
+        .replace(/projectFailureRecord\(record, admin\.tier\)/g, '')
+        .replace(/viewForTier\(admin\.tier\)/g, '');
+    return FailureQuerySchema.safeParse({ workflowId: 'vvbouV2136P5weCs' }).success
+        && feedHandler.includes('workflowId: query.workflowId')
+        && !/admin\.tier/.test(beyondThose);
+});
+
+/** D-5 is untouched by any of this: the digest is withheld from every rung, summary included. */
+t.assert('the summary still computes distinctCustomers server-side, emitting no digest', () =>
+    /distinctCustomers:\s*row\.customers\.filter/.test(summaryQuery)
+    && !/externalIdHash/.test(summaryQuery));
 
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('3. The machine door — the only route with no administrator');

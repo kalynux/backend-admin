@@ -57,7 +57,7 @@ const trustProxy = z
         return value.trim(); // subnet / named preset, passed through to Express
     });
 
-const EnvSchema = z
+const EnvObject = z
     .object({
         NODE_ENV: z.enum(NODE_ENVS).default('development'),
         PORT: port.default(8033),
@@ -122,6 +122,26 @@ const EnvSchema = z
          * its own schedule, and one browser can hold many.
          */
         ADMIN_REFRESH_RATE_LIMIT_MAX: positiveInt.default(60),
+
+        /**
+         * Per-minute ceilings for the two general limiters — Layer A (per IP, before the
+         * routers) and Layer B (per administrator, at the tail of the auth gate). See
+         * `api/middlewares/rate-limit.middleware.ts` for why they differ by tier.
+         *
+         * ⚠ Added to the schema 2026-09-09 (DOC-PROGRAM close-out § 6, item 3). All four
+         * were read at the call site through a local `envInt()` doing `process.env[name]`,
+         * so they were **in neither the schema nor `.env.example`** and no test looked for
+         * them: four real operational levers that no operator could discover, and that this
+         * file's own opening paragraph says should not exist. Two things changed with the
+         * move. A non-integer is now a BOOT failure rather than a silent fall back to the
+         * default — `envInt` accepted `ADMIN_RATE_LIMIT_SUPPORT=twelve` and quietly used
+         * 1200. And they are now reachable by the source scan in `test:foundation` § 1,
+         * which is the guard that stops the next variable going invisible the same way.
+         */
+        ADMIN_RATE_LIMIT_DEVELOPER: positiveInt.default(2400),
+        ADMIN_RATE_LIMIT_ADMIN: positiveInt.default(1800),
+        ADMIN_RATE_LIMIT_SUPPORT: positiveInt.default(1200),
+        ADMIN_RATE_LIMIT_ANON: positiveInt.default(3000),
 
         /** Tiers at or above this level MUST have TOTP active. 1 = developers only. */
         ADMIN_MFA_REQUIRED_TIER: z.coerce.number().int().min(1).max(3).default(1),
@@ -268,7 +288,7 @@ const EnvSchema = z
         /**
          * ── Storage, for building public file URLs here (BR-015 · ADR-021) ────
          *
-         * ⚠ **These four names are IDENTICAL to jovi-mall's, deliberately.** They are the
+         * ⚠ **These five names are IDENTICAL to jovi-mall's, deliberately.** They are the
          * sixth value shared across a service boundary on this platform, and the newest
          * lesson already written down is that a new shared value should not also be a new
          * name to remember — the reason `GEO_TRACKER_ADMIN_TOKEN` was given a matching name.
@@ -291,7 +311,7 @@ const EnvSchema = z
          * configured as, and guessing right by luck is worse than being inert: it publishes
          * URLs built from an assumption nobody stated.
          */
-        STORAGE_PROVIDER: z.enum(['local', 'firebase', 'cloudinary']).optional(),
+        STORAGE_PROVIDER: z.enum(['local', 'firebase', 'cloudinary', 'r2']).optional(),
         /** Must equal jovi-mall's `STORAGE_LOCAL_URL`. Its default there is the same string. */
         STORAGE_LOCAL_URL: z.string().url().default('http://localhost:8022/api/files'),
         STORAGE_FIREBASE_BUCKET: z.string().min(1).optional(),
@@ -299,6 +319,18 @@ const EnvSchema = z
             .string()
             .optional()
             .transform((value) => value === 'true'),
+        /**
+         * Must equal jovi-mall's `STORAGE_R2_PUBLIC_URL` — the Cloudflare custom domain bound to
+         * the PUBLIC bucket, and the fifth name in this block rather than the fourth.
+         *
+         * ⚠ This is the ONE R2 value this service holds, and the omission is the point: no
+         * account id, no access key id, no secret, no bucket name, no private bucket. ADR-021's
+         * containment — "it holds no bucket, no credential and no signing key; it computes a URL
+         * for a key it has already read, and nothing more" — survives intact, because a CDN
+         * hostname is none of those things. Anything more here would be a second copy of a
+         * credential in a service with no reason to hold one.
+         */
+        STORAGE_R2_PUBLIC_URL: z.string().url().optional(),
 
         /**
          * ── The upload ceiling THIS service declares (BR-015 · ADR-021 D-4) ───
@@ -403,7 +435,22 @@ const EnvSchema = z
          * TTL here when `approval-request.model.ts` refuses one outright.
          */
         ADMIN_AUTOMATION_RETENTION_DAYS: positiveInt.default(30),
-    })
+    });
+
+/**
+ * Every variable name the schema knows about.
+ *
+ * Exported so a test can hold source up against it. `test:foundation` § 1d scans `src/` for
+ * `process.env` reads and asserts each one names a key in here — the guard for the defect
+ * that produced this export, where four rate-limit ceilings were read at a call site and so
+ * existed in neither the schema nor `.env.example` (DOC-PROGRAM close-out § 6, item 3).
+ *
+ * Taken from the plain object rather than `EnvSchema`, because `.superRefine()` wraps it in
+ * a `ZodEffects` that has no `.shape`. That is the only reason the two are separate.
+ */
+export const ENV_SCHEMA_KEYS: readonly string[] = Object.freeze(Object.keys(EnvObject.shape));
+
+const EnvSchema = EnvObject
     .superRefine((env, ctx) => {
         // A base URL without a token would produce calls jovi-mall rejects at the guard,
         // which reads as "jovi-mall is broken" rather than "this service is misconfigured".

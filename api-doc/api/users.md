@@ -501,8 +501,32 @@ the ticket while the party stays locked out.
 
 Per party **and** per administrator, and neither substitutes for the other: the first is a
 harassment and SMS-bill bound (the party did not ask for any of these), the second bounds a
-compromised or careless operator account. Counted on the **attempt**, so a caller cannot
-probe which channels a party has by burning failures for free.
+compromised or careless operator account.
+
+⚠ **This said "counted on the attempt, so a caller cannot probe which channels a party has by
+burning failures for free", and the second half was false** (BR-021, corrected 2026-09-12).
+Both counters were spent *after* the channel was resolved, and a channel the party does not
+have is refused before that — so the probe cost nothing and was unbounded. The dashboard
+measured it in five requests.
+
+**The two counters are now spent at different points, because they bound different things:**
+
+| Counter | Spent | So a refused channel… |
+|---|---|---|
+| **per administrator** | on the **attempt**, before the channel is resolved | **does** cost the caller their allowance |
+| **per party** | once the channel **resolves** | does **not** cost the party theirs |
+
+What this buys you, concretely: **picking the wrong channel in the dialog is free for the
+party.** A `409 USER_CHANNEL_UNAVAILABLE` on `email` does not consume one of that party's three,
+so the operator can immediately try `whatsapp` and it will work. Charging the party for a
+message they were never sent would lock them out of the channel that does work for an hour, on
+the commonest mistake in that dialog — and the dialog has no way to discover which channels
+exist except by trying.
+
+The probe is **bounded, not impossible.** Three requests still answer "which channels does this
+party have" for one party; what the administrator counter stops is doing it across many. We
+consider that the right trade and are stating it rather than implying otherwise: this is contact
+metadata, and the caller already holds a permission to send to that contact.
 
 ### Audit
 

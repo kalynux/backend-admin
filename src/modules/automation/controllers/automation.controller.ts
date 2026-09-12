@@ -126,9 +126,31 @@ export class AutomationController {
     /**
      * GET /api/v1/automation/summary — counts by workflow, kind and channel.
      *
-     * Same three permissions, and NOT tier-projected: a count carries no machine detail
-     * and no identifier, so there is nothing to withhold. `distinctCustomers` is computed
-     * server-side from a hash the projection never emits — the one thing that hash is for.
+     * Same three permissions, and NOT tier-projected.
+     *
+     * ── Why, and it is NOT the reason this comment used to give ───────────────
+     * It said "a count carries no machine detail and no identifier, so there is nothing to
+     * withhold". That is true of `count` and `lastOccurredAt` and FALSE of the object they
+     * sit in: every group carries `workflowId` and `workflowName`, which are exactly the
+     * two fields `projectFailureRecord` withholds from tier 3. Both routes carry the same
+     * `anyPermission` triple, so a Support administrator is refused a workflow name on the
+     * feed and handed it here. The dashboard caught the contradiction (BR-020, 2026-09-09).
+     *
+     * The asymmetry is DELIBERATE, and the real reason is what the tier-3 boundary is for.
+     * It is not confidentiality — `failure-exposure.ts` and ADR-022 D-7 both say what
+     * Support is denied is machine detail "not a secret so much as a false lead". That
+     * hazard is PER-INCIDENT CAUSAL ATTRIBUTION: an agent reading one row and telling a
+     * customer their message failed because `sync identity` timed out. A summary cannot
+     * produce that sentence — no node, no message, no stack, no per-incident row. Aggregate
+     * identity is a weaker disclosure than per-incident identity, and "WhatsApp is degraded
+     * right now, we know" is the exact statement D-7 grants Support this surface to make.
+     *
+     * So: the feed is graded, the summary is whole. If that is ever reversed, reverse it in
+     * `automation.md`, in ADR-022 D-7, and in `test:automation` § 2b together — the shape is
+     * pinned there precisely so it cannot drift back into being an accident.
+     *
+     * `distinctCustomers` is computed server-side from a hash the projection never emits —
+     * the one thing that hash is for, and the one field here that IS withheld from everyone.
      *
      * ⚠ `configured: false` is the answer that matters most on this route. An empty summary
      * means either "nothing failed" or "no reporter is pointed at this deployment", and an

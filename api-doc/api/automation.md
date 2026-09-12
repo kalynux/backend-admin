@@ -1,6 +1,6 @@
 # `/automation` — what the customer bot reported about its own failures
 
-**Verified against source on 2026-09-08** — both routes, their three-permission `any` guard, the two enums, the query bounds and the tier projection, against `admin/src/modules/automation/{routes,validators,domain,controllers}/`.
+**Verified against source on 2026-09-09** — both routes, their three-permission `any` guard, the two enums, the query bounds and the tier projection, against `admin/src/modules/automation/{routes,validators,domain,controllers,repositories}/`. This round re-checked the **summary's** shape specifically, which the previous pass took the prose's word for: it is ungraded, it does emit `workflowId` and `workflowName` to tier 3, and the sentence that said otherwise is corrected below (BR-020).
 
 Base path: `/api/v1/automation`
 
@@ -99,10 +99,36 @@ understood.
 
 **No tier ever receives the customer identifier**, hashed or otherwise. See ADR-022 D-5.
 
+⚠ **This table describes `/failures` and only `/failures`.** The summary below is ungraded and
+**does** hand tier 3 a workflow identity. That is deliberate; the reason is under it.
+
 ## `GET /automation/summary`
 
-Query: `windowHours` (1–720, default 24). Not tier-projected — a count carries no machine detail
-and no identifier, so there is nothing to withhold.
+Query: `windowHours` (1–720, default 24).
+
+**Not tier-projected.** ⚠ **This said "a count carries no machine detail and no identifier, so
+there is nothing to withhold", and that was checkable and false** (BR-020, corrected 2026-09-09):
+true of `count` and `lastOccurredAt`, not true of the object they sit in, which carries
+`workflowId` and `workflowName` — the two fields the feed above is careful to withhold from tier 3.
+Both routes carry the same `any`-mode guard, so a Support administrator is refused a workflow name
+on the feed and handed it here, one click away.
+
+**The asymmetry is intended, and the reason is what the tier-3 boundary is actually for.** It is
+not confidentiality — ADR-022 D-7 says what Support is denied is machine detail *"which on a
+support call is not a secret so much as a false lead"*. That hazard is **per-incident causal
+attribution**: an agent reading one row and telling a customer their message failed because the
+`sync identity` node timed out. A summary cannot produce that sentence. It has no node, no
+message, no stack and no per-incident row — only *this workflow, this channel, this many, since
+then*. **Aggregate identity is a weaker disclosure than per-incident identity**, and the statement
+it supports — *"WhatsApp is degraded right now, we know"* — is precisely the one D-7 grants
+Support this surface in order to make.
+
+So the rule across the module is: **the feed is graded, the summary is whole.** A client renders
+the summary as it arrives at every tier.
+
+⚠ **`workflowId` is also an ungated query *filter* on `/failures`** — `FailureQuerySchema` does not
+consult the caller's tier. Tier 3 can therefore narrow the feed by a workflow id, and still gets
+tier-3 rows back. Consistent with the above, and named here so it is not later mistaken for a leak.
 
 ```jsonc
 {

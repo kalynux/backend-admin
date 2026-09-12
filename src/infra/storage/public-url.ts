@@ -48,10 +48,11 @@ import { logger } from '../../core/logging/logger';
  * ⚠ Deliberately narrower than either enum on the other side, and the gap is the point:
  *
  *   - `IFile.provider` (the Mongoose model) allows six — `local | s3 | gcs | r2 | firebase |
- *     cloudinary`. Three of those (`s3`, `gcs`, `r2`) have **no provider implementation in
- *     jovi-mall at all**; `storage.config.ts` declares three. The model's enum is wider than
- *     the factory's, and a row carrying one of the three phantom values cannot be resolved by
- *     either service.
+ *     cloudinary`. TWO of those (`s3`, `gcs`) have **no provider implementation in jovi-mall at
+ *     all**; `storage.config.ts` declares four. The model's enum is still wider than the
+ *     factory's, and a row carrying one of the two phantom values cannot be resolved by either
+ *     service. (`r2` was a phantom until 2026-09-09 and is now implemented on both sides — it
+ *     is the reason this paragraph says two rather than three.)
  *   - `cloudinary` IS implemented there, and is excluded here anyway. Its URL comes from
  *     `cloudinary.url(key, { secure, fetch_format: 'auto', quality: 'auto' })` — the SDK's own
  *     builder, which infers a resource type from the key and injects transformation segments.
@@ -61,7 +62,7 @@ import { logger } from '../../core/logging/logger';
  *     same options (URL building is local and needs only `cloud_name` — no API call, no
  *     credentials).
  */
-const REPRODUCIBLE_PROVIDERS = ['local', 'firebase'] as const;
+const REPRODUCIBLE_PROVIDERS = ['local', 'firebase', 'r2'] as const;
 export type ReproduciblePublicUrlProvider = (typeof REPRODUCIBLE_PROVIDERS)[number];
 
 /** One warning per process, not one per file row on a 100-row page. */
@@ -111,6 +112,31 @@ export function buildPublicUrl(key: string): string | null {
         return `${config.STORAGE_LOCAL_URL}/${normalizedKey}`;
     }
 
+    if (provider === 'r2') {
+        /**
+         * Verbatim from `R2StorageProvider.getPublicUrl`: normalise to forward slashes and
+         * concatenate against the public bucket's Cloudflare custom domain. **No
+         * `encodeURIComponent`** — jovi-mall does not encode either, and encoding on one side
+         * alone is exactly the silent divergence `verify:files` § 6 exists to catch.
+         *
+         * The trailing-slash strip is duplicated from jovi-mall's `storage.instance.ts` on
+         * purpose: a trailing slash would emit `//key` on BOTH sides, so the parity check would
+         * pass while every image 404'd. Three layers refuse it — there, here, and at boot.
+         *
+         * ⚠ This line is never reached for a private key: `toFileDetail` applies
+         * `isPrivateStorageKey` first, exactly as jovi-mall's resolver does. Over there the
+         * provider THROWS in that case, because its signature has no `null` to return; here the
+         * shape is `string | null` and the guard upstream has already returned it.
+         */
+        const base = config.STORAGE_R2_PUBLIC_URL;
+        if (!base) {
+            warnOnce(provider, 'STORAGE_R2_PUBLIC_URL is not set');
+            return null;
+        }
+        const normalizedKey = key.replace(/\\/g, '/');
+        return `${base.replace(/\/+$/, '')}/${normalizedKey}`;
+    }
+
     // Verbatim from `FirebaseStorageProvider.getPublicUrl`, including the branch: a public
     // bucket gets the storage.googleapis.com form, a private one the firebasestorage.googleapis
     // media form. Both are what jovi-mall emits, so both are what this must emit.
@@ -140,5 +166,7 @@ function isReproducible(provider: string): provider is ReproduciblePublicUrlProv
 export function publicUrlsAreConfigured(): boolean {
     const config = env();
     if (!config.STORAGE_PROVIDER || !isReproducible(config.STORAGE_PROVIDER)) return false;
-    return config.STORAGE_PROVIDER === 'local' || Boolean(config.STORAGE_FIREBASE_BUCKET);
+    if (config.STORAGE_PROVIDER === 'local') return true;
+    if (config.STORAGE_PROVIDER === 'r2') return Boolean(config.STORAGE_R2_PUBLIC_URL);
+    return Boolean(config.STORAGE_FIREBASE_BUCKET);
 }

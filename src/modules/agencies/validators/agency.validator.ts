@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { listQuery, paginationFields } from '../../../core/http/list-query';
+import { listQuery } from '../../../core/http/list-query';
 import {
     boolFlag,
     dateRangeFields,
@@ -185,8 +185,14 @@ export const ReactivateAgencySchema = z.object({
     reason: reasonText('Give a reason or omit it').optional(),
 });
 
-/** Delegated lists are sorted by jovi-mall, so they declare no SortMap of their own. */
-export const DelegatedPageQuerySchema = z.object({ ...paginationFields }).strict();
+/*
+ * `DelegatedPageQuerySchema` — a `.strict()` page schema for the delegated lists — was
+ * declared here and **bound to no route**, verified by scan and removed 2026-09-12 (BR-022).
+ * A strict schema nothing validates with is worse than none: it makes a `grep '.strict()'`
+ * over-report which endpoints refuse an unknown parameter, which is precisely the question
+ * BR-022 asked and the answer a reader would have got wrong. If a delegated list ever needs
+ * its own query shape, declare it AND put it on the route's `validate.query` in one change.
+ */
 
 export type SearchAgenciesQuery = z.infer<typeof SearchAgenciesQuerySchema>;
 export type ListRosterQuery = z.infer<typeof ListRosterQuerySchema>;

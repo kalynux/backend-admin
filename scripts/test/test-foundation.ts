@@ -14,8 +14,10 @@
  * Run: npm run test:foundation
  */
 import { z } from 'zod';
+import { readFileSync, readdirSync } from 'fs';
+import { join, sep } from 'path';
 import { suite } from './_assert';
-import { parseEnv, formatEnvIssues } from '../../src/config/env';
+import { parseEnv, formatEnvIssues, ENV_SCHEMA_KEYS } from '../../src/config/env';
 import { ERROR_CODES } from '../../src/core/errors/error-codes';
 import { AppError, createAppError } from '../../src/core/errors/app-error';
 import { clearable, csvList } from '../../src/core/validation/zod.helpers';
@@ -248,6 +250,152 @@ t.assert('session TTL defaults are 8h idle / 7d absolute', () => {
     return result.success
         && result.data.ADMIN_SESSION_IDLE_TTL === 28_800
         && result.data.ADMIN_SESSION_ABSOLUTE_TTL === 604_800;
+});
+
+
+// ─── 1d. Environment — nothing reads process.env behind the schema's back ────
+
+/**
+ * The guard for DOC-PROGRAM close-out § 6, item 3.
+ *
+ * Four rate-limit ceilings (`ADMIN_RATE_LIMIT_DEVELOPER` and its three siblings) were read
+ * at a call site through a local `envInt()` helper doing `process.env[name]`. They were real,
+ * working levers that appeared in **neither** `src/config/env.ts` nor `.env.example`, and no
+ * test looked for them — so nobody operating this service could discover they existed.
+ *
+ * ⚠ **A port of jovi-mall's `test:env` would NOT have caught them.** That suite diffs the
+ * schema against the template, and these were absent from both sides of that comparison; a
+ * diff of two things agrees when a variable is missing from each. The only instrument that
+ * finds this class is a scan of SOURCE, which is what this section is.
+ *
+ * Two rules, and the second is the one that failed:
+ *   1. A `process.env` read must use a literal key. An indexed read through a variable is
+ *      invisible to every `process.env.NAME` grep, which is how the four hid in plain sight.
+ *   2. The name it reads must be declared in the schema.
+ *
+ * `src/config/env.ts` is exempt from both: reading raw `process.env` is its entire job.
+ * `logger.ts` is NOT exempt and does not need to be — it reads `NODE_ENV` and `LOG_LEVEL`
+ * directly because it is constructed before `env()` can throw, and both are schema keys.
+ */
+t.section("1d. Environment — no configuration outside the schema");
+
+const SRC_DIR = join(__dirname, '..', '..', 'src');
+const ENV_SCAN_EXEMPT = ['config' + sep + 'env.ts'];
+
+function tsFilesUnder(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) return tsFilesUnder(full);
+        return entry.isFile() && entry.name.endsWith('.ts') ? [full] : [];
+    });
+}
+
+/**
+ * Comments are stripped so the prose ABOUT this defect — which necessarily quotes
+ * `process.env[name]` — does not trip the guard that exists because of it.
+ * The `[^:]` guard keeps `https://…` inside a string literal from eating the rest of a line.
+ */
+function withoutComments(code: string): string {
+    return code
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+}
+
+interface EnvRead {
+    file: string;
+    /** null for an indexed read through a variable — the invisible form. */
+    name: string | null;
+}
+
+const envReads: EnvRead[] = [];
+for (const file of tsFilesUnder(SRC_DIR)) {
+    const relative = file.slice(SRC_DIR.length + 1);
+    if (ENV_SCAN_EXEMPT.some((exempt) => relative === exempt)) continue;
+
+    const code = withoutComments(readFileSync(file, 'utf8'));
+    const pattern = /process\.env\s*(?:\.([A-Za-z_$][\w$]*)|\[\s*(['"`])([^'"`]+)\2\s*\]|\[)/g;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(code)) !== null) {
+        envReads.push({ file: relative, name: match[1] ?? match[3] ?? null });
+    }
+}
+
+t.assert('the scan finds the reads it is supposed to police', () =>
+    // A guard that silently matches nothing passes forever. `logger.ts` reads NODE_ENV and
+    // LOG_LEVEL before `env()` exists, so this floor is never legitimately zero.
+    envReads.length >= 2);
+
+t.assert('no process.env read uses a computed key', () => {
+    const computed = envReads.filter((read) => read.name === null);
+    if (computed.length > 0) {
+        console.error(`      indexed process.env reads: ${computed.map((r) => r.file).join(', ')}`);
+    }
+    return computed.length === 0;
+});
+
+t.assert('every process.env read names a variable the schema declares', () => {
+    const declared = new Set(ENV_SCHEMA_KEYS);
+    const undeclared = envReads.filter((read) => read.name !== null && !declared.has(read.name));
+    if (undeclared.length > 0) {
+        console.error(
+            `      not in the schema: ${undeclared.map((r) => `${r.name} (${r.file})`).join(', ')}`,
+        );
+    }
+    return undeclared.length === 0;
+});
+
+t.assert('the four rate-limit ceilings are schema-declared', () =>
+    // Named explicitly rather than left to the scan above: the scan would go green again if
+    // the reads were simply deleted, and these four are documented operational levers.
+    (['DEVELOPER', 'ADMIN', 'SUPPORT', 'ANON'] as const).every((suffix) =>
+        ENV_SCHEMA_KEYS.includes(`ADMIN_RATE_LIMIT_${suffix}`)));
+
+/**
+ * The template's side of the pair — what jovi-mall's `test:env` does, asserted in BOTH
+ * directions. It could not have found the four rate-limit ceilings, which were absent from
+ * each side (a diff of two things agrees when a variable is missing from both), but it does
+ * stop a NEW schema variable shipping undocumented.
+ *
+ * A COMMENTED assignment counts as documented on purpose. Three optional variables are
+ * deliberately commented out — `ADMIN_COOKIE_DOMAIN` and the two `STORAGE_FIREBASE_*` — so a
+ * checkout runs on the local storage provider without editing anything, while the name and
+ * its explanation stay in front of the operator. That is documented, not missing.
+ */
+const templateNames = ((): { assigned: Set<string>; documented: Set<string> } => {
+    const assigned = new Set<string>();
+    const documented = new Set<string>();
+    const template = readFileSync(join(__dirname, '..', '..', '.env.example'), 'utf8');
+    for (const line of template.split(/\r?\n/)) {
+        const live = /^([A-Z][A-Z0-9_]*)\s*=/.exec(line);
+        const commented = /^\s*#\s*([A-Z][A-Z0-9_]*)\s*=/.exec(line);
+        if (live) {
+            assigned.add(live[1]);
+            documented.add(live[1]);
+        } else if (commented) {
+            documented.add(commented[1]);
+        }
+    }
+    return { assigned, documented };
+})();
+
+t.assert('every schema variable appears in .env.example', () => {
+    const missing = ENV_SCHEMA_KEYS.filter((key) => !templateNames.documented.has(key));
+    if (missing.length > 0) {
+        console.error(`      missing from .env.example: ${missing.join(', ')}`);
+    }
+    return missing.length === 0;
+});
+
+t.assert('every .env.example variable is one the schema declares', () => {
+    // The reverse direction, and the one that catches a RENAME: without it, changing a name
+    // in the schema leaves the old one sitting in the template as an operator's lever that
+    // silently does nothing. Live assignments only — a commented line may be an illustration.
+    const declared = new Set(ENV_SCHEMA_KEYS);
+    const orphaned = [...templateNames.assigned].filter((name) => !declared.has(name));
+    if (orphaned.length > 0) {
+        console.error(`      in .env.example but not the schema: ${orphaned.join(', ')}`);
+    }
+    return orphaned.length === 0;
 });
 
 // ─── 2. Error-code registry ──────────────────────────────────────────────────

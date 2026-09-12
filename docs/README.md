@@ -55,7 +55,7 @@ reason.**
 | Validation rules | [CONTRACTS.md § 8](./CONTRACTS.md#8--validation) | [ADR-005](./ADR-005-API-CONTRACT.md) |
 | External services | [OPERATIONS.md § 2](./OPERATIONS.md#2--external-services--three-clients-none-of-which-may-ever-throw) | [ADR-020](./ADR-020-ADMIN-DATA-DOOR.md), [ADR-021](./ADR-021-ADMIN-MEDIA-LIBRARY.md) |
 | Background jobs | [OPERATIONS.md § 1](./OPERATIONS.md#1--background-work--exactly-one-scheduled-job) | [ADR-013](./ADR-013-NOTIFICATIONS.md) |
-| Configuration / environment | [OPERATIONS.md § 3](./OPERATIONS.md#3--configuration--53-variables-49-supplied-and-4-read) | [`../.env.example`](../.env.example) |
+| Configuration / environment | [OPERATIONS.md § 3](./OPERATIONS.md#3--configuration--53-variables-all-53-in-the-schema) | [`../.env.example`](../.env.example) |
 | Service-to-service communication | [CONTRACTS.md § 9](./CONTRACTS.md#9--service-to-service) | [`../../CLAUDE.md`](../../CLAUDE.md) |
 | Implementation constraints | [CONSTRAINTS.md](./CONSTRAINTS.md) | — |
 | **Audit** (a sixteenth, and this service's centre of gravity) | [DATA.md § 2](./DATA.md#2--the-audit-store) | [ADR-006](./ADR-006-AUDIT.md), [ADR-012](./ADR-012-AUDIT-COMPLETION.md) |

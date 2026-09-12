@@ -41,6 +41,7 @@
     "test:support": "ts-node scripts/test/test-support.ts",
     "test:content": "ts-node scripts/test/test-content.ts",
     "test:files": "ts-node scripts/test/test-files.ts",
+    "test:list-strictness": "ts-node scripts/test/test-list-strictness.ts",
     "test:messaging": "ts-node scripts/test/test-messaging.ts",
     "//verify": [
       "Every verify:* runs through `node --max-old-space-size=4096 -r ts-node/register`,",

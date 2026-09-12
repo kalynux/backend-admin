@@ -166,7 +166,14 @@ export const AttachFileSchema = z.object({
     fileId: objectId,
 }).strict();
 
-export const ListNotesQuerySchema = z.object({}).strict();
+/*
+ * `ListNotesQuerySchema` — `z.object({}).strict()` — was declared here and **bound to no
+ * route**, verified by scan and removed 2026-09-12 (BR-022). `GET /:ticketId/notes` validates
+ * its params only, so it accepts and ignores any query string; it is NOT strict, and the
+ * presence of this export made it look like it was. Wiring it would be a behaviour change
+ * (stray parameters would start answering 400) and BR-022 explicitly did not ask for one, so
+ * the export went rather than the route. Add it back only together with `validate.query`.
+ */
 
 /** The reference lookups backing the ticket-creation form. */
 export const ReferenceQuerySchema = z.object({
