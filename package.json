@@ -78,6 +78,9 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "overrides": {
+    "qs": "^6.16.0"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/bcrypt": "^6.0.0",
