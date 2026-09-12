@@ -214,6 +214,27 @@ jobs:
       # Plain http is refused in production only; this is a CI origin that never serves.
       ADMIN_DASHBOARD_ORIGINS: http://localhost:3000
 
+      # ── The storage pair, and it belongs at JOB level rather than per-step ───
+      # BR-015 / ADR-021 D-3 reversed ADR-009 D-6: wi-admin no longer receives a
+      # finished URL from jovi-mall, it BUILDS `FileDetail.url` itself from these.
+      # So the same five names are read by two services, and a mismatch is SILENT —
+      # its symptom is a screen full of 404 thumbnails, which reads as "the files are
+      # gone" rather than as a misconfiguration.
+      #
+      # `verify:files` § 6 ("L-3 parity — the URL this service builds IS jovi-mall's")
+      # is the only thing anywhere that checks that. It failed on the FIRST EVER run
+      # of this job, at its opening assertion — "this deployment can build URLs at
+      # all" — because the block above supplied what each service needs to BOOT and
+      # nothing the two need to AGREE on. Exactly the asymmetry the note above
+      # describes, one layer further out.
+      #
+      # ⚠ DECLARED ONCE, HERE, ON PURPOSE. Job-level env reaches both the "Start
+      # jovi-mall" step and the wi-admin suites, so the two sides cannot drift —
+      # one value, two readers. Setting them per-step would reintroduce precisely
+      # the divergence the parity assertion exists to catch.
+      STORAGE_PROVIDER: local
+      STORAGE_LOCAL_URL: http://127.0.0.1:8022/api/files
+
     steps:
       - name: Require the cross-repo token
         env:
