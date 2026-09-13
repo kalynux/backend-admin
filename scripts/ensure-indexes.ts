@@ -51,6 +51,7 @@ import { FeatureFlagModel } from '../src/modules/dev-tools/models/feature-flag.m
 import { AdminNotificationModel } from '../src/modules/notifications/models/admin-notification.model';
 import { NotificationPreferenceModel } from '../src/modules/notifications/models/notification-preference.model';
 import { NotificationWatermarkModel } from '../src/modules/notifications/models/notification-watermark.model';
+import { AutomationFailureModel } from '../src/modules/automation/models/automation-failure.model';
 
 export const MIGRATION_NAME = 'ensure:indexes';
 
@@ -114,6 +115,23 @@ async function main(): Promise<string> {
         { name: 'admin_notifications', model: AdminNotificationModel() },
         { name: 'admin_notification_preferences', model: NotificationPreferenceModel() },
         { name: 'admin_notification_watermarks', model: NotificationWatermarkModel() },
+        // ADR-022. ⚠ ADDED 2026-09-13, HAVING BEEN MISSED when the model landed on
+        // 2026-09-07 — so for six days its six indexes existed in development, where
+        // `autoIndex` builds them, and in production not at all. Two of them are not
+        // optimisations:
+        //
+        //   { workflow_id, execution_id, kind } UNIQUE (partial)  the dedup. Without it a
+        //     retried n8n error-workflow records the same failure twice, and the board
+        //     over-counts exactly when something is going wrong repeatedly.
+        //   { purge_after } TTL                                   THE PURGE. Without it the
+        //     collection grows forever, on a host with 8 GB and no cleanup — the same
+        //     unbounded-growth failure `admin_audit_log`'s TTL is called out for above,
+        //     arriving by the door this list leaves open.
+        //
+        // Found by comparing `src/**/*.model.ts` against this list, which is what
+        // `test:index-coverage` now does on every run — the header calls a growing list
+        // this service's most exposed failure mode, and it had already happened.
+        { name: 'admin_automation_failures', model: AutomationFailureModel() },
     ];
 
     // The ledger's own index, built here rather than through `targets` above: it has to

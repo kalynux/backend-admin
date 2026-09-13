@@ -36,6 +36,7 @@
     "test:money": "ts-node scripts/test/test-money.ts",
     "test:accounts": "ts-node scripts/test/test-accounts.ts",
     "test:devtools": "ts-node scripts/test/test-devtools.ts",
+    "test:index-coverage": "ts-node scripts/test/test-index-coverage.ts",
     "test:error-docs": "ts-node scripts/test/test-error-docs.ts",
     "test:notifications": "ts-node scripts/test/test-notifications.ts",
     "test:support": "ts-node scripts/test/test-support.ts",
