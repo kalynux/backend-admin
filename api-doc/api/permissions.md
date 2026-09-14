@@ -1,6 +1,8 @@
 # Permissions and administrator levels
 
-**Verified against source on 2026-09-08** — the 118 permissions, the 20 families, all three tier totals (118 / 101 / 31), the four unrouted `†` names and both composite-guard counts (17 `all`-mode, 3 `any`-mode), each re-derived by *executing* `admin/src/modules/authorization/domain/permission.catalog.ts`, `tier-grants.ts` and the live route manifest at HEAD rather than by reading them.
+⚠ **Re-measured 2026-09-14 (ADR-023): 121 permissions across 21 families, tier totals 121 / 101 / 31.** The new family is `employees` (2 permissions) and the new name in `administrators` is `administrators.activate`; all three are **tier 1 only**, so tiers 2 and 3 are unchanged. Re-derive rather than quoting — `npm run authz:matrix`.
+
+**Verified against source on 2026-09-08** — the 118 permissions then existing, the 20 families, all three tier totals (118 / 101 / 31), the four unrouted `†` names and both composite-guard counts (17 `all`-mode, 3 `any`-mode), each re-derived by *executing* `admin/src/modules/authorization/domain/permission.catalog.ts`, `tier-grants.ts` and the live route manifest at HEAD rather than by reading them.
 
 This is the complete authorization policy. It is **static code**, not data: there are no
 per-administrator overrides, no policy collections, and nothing is editable at runtime.
@@ -17,9 +19,9 @@ Design records: [`../../docs/ADR-003-GRANULAR-PERMISSIONS.md`](../../docs/ADR-00
 
 | Level (`tier`) | Label | Holds | Shape of the job |
 |---|---|---|---|
-| **1** | Developer | 118 of 118 | Everything, including the developer tools and every escalation-flagged action |
-| **2** | Admin | 101 of 118 | The operational tier — runs the platform day to day, including the money |
-| **3** | Support | 31 of 118 | Ticket work, the lookups needed to answer a ticket, and editorial write on articles and bylines. Nothing financial, nothing destructive, and publishing stays a level above |
+| **1** | Developer | 121 of 121 | Everything, including the developer tools and every escalation-flagged action |
+| **2** | Admin | 101 of 121 | The operational tier — runs the platform day to day, including the money |
+| **3** | Support | 31 of 121 | Ticket work, the lookups needed to answer a ticket, and editorial write on articles and bylines. Nothing financial, nothing destructive, and publishing stays a level above |
 
 A level is an administrator's **entire** authorization state. `tier` appears on the profile
 returned by `GET /auth/me`.
@@ -154,7 +156,7 @@ record were one decision, not two. See [ADR-020](../../docs/ADR-020-ADMIN-DATA-D
 ## The matrix
 
 ● granted  ·  not granted  ·  **†** = catalogued policy with **no endpoint built yet**
-(**4** of 118 permissions — down from 27, and the four that remain each have a written reason
+(**4** of 121 permissions — down from 27, and the four that remain each have a written reason
 below. The policy is decided ahead of the surface, deliberately.)
 
 ### `agents`
@@ -394,6 +396,42 @@ size cap still apply to it.
 | `administrators.sessions.revoke` | write | ● | ● | · | — | Sign another administrator out of every device |
 | `administrators.password.reset` | write | ● | ● | · | — | Issue a new one-time password to another administrator, ending all their sessions |
 | `administrators.mfa.reset` | write | ● | · | · | escalation | Clear another administrator’s two-factor enrolment so they can enrol again |
+| `administrators.activate` | write | ● | · | · | escalation | Activate a pending administrator once their employee record is complete |
+
+⚠ **`administrators.activate` is tier 1 not because activation is a senior act, but because it
+requires reading the employee record** — and only tier 1 may. An Admin able to activate would be
+admitting a person whose file they cannot open. The consequence is deliberate: a tier-2 Admin can
+CREATE a Support account and cannot turn it on.
+
+### `employees`
+
+**Added 2026-09-14 (ADR-023). The narrowest family on this service: tier 1 and the subject, and
+nobody else at any tier.**
+
+⚠ **Its existence as a separate family IS the access control.** Tier 2 holds
+`allInFamily('administrators')`, so a permission for the staff record living *there* would be a
+permission an Admin holds — and a colleague's salary, date of birth and home address is not
+something an Admin may read. Neither name carries an `escalation` or `financial`-only guard that
+would keep it out of a family sweep on its own (`employees.read` is an ordinary read, and
+flagging it otherwise would misdescribe it here), so a **boot assertion** refuses the family to
+any tier but 1.
+
+⚠ **Neither of these is how the SUBJECT reads their own record.** That is `selfService` —
+`/employees/me` — because every administrator maintains their own by definition. These two are
+for reading and writing somebody *else's*.
+
+| Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
+|---|---|:-:|:-:|:-:|---|---|
+| `employees.read` | read | ● | · | · | — | Read another administrator’s employee record — identity, contacts, address and salary |
+| `employees.employment.write` | write | ● | · | · | financial | Set another administrator’s position, contract terms and monthly salary |
+
+⚠ **`employees.read` does not disclose the DOCUMENTS.** The record returns file ids; the bytes
+need `files.content.read`, which is audited per file and fail-closed. The two are separate
+exposures and are separately recorded.
+
+⚠ **`employees.employment.write` is narrower than its name.** It cannot touch the personal,
+identity, address, contact or payout halves — those have no administrative write path at all. An
+employee states their own facts; the company states its terms.
 
 ### `approvals`
 
@@ -554,7 +592,9 @@ the sharp fields — raw gateway payload, payload hash, idempotency key — are 
 ### What Admin (tier 2) deliberately does **not** hold
 
 `administrators.tier.set` (changing anyone's level is a Developer act), `administrators.mfa.reset`,
-`files.delete`, `users.roles.manage`, and **all** of `developer_tools`.
+`administrators.activate`, `files.delete`, `users.roles.manage`, **all** of `developer_tools` — and,
+since ADR-023, **all** of `employees`. An Admin can manage the administrator directory and cannot
+open a colleague's employment record.
 
 ### Developer (tier 1)
 

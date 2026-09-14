@@ -16,26 +16,38 @@ import { AdminSnapshotPayload } from '../validators/ticket.validator';
  * would decide — through the scope's `alsoTiers` clause — who may subsequently see it. Both
  * come off the `admin_accounts` row.
  *
- * ── `avatar_url` is RESERVED and always null, and it is documented as such ────
- * `admin_accounts` stores no avatar: there is no upload surface for an administrator's own
- * picture and no storage decision has been made for one. The field is carried because the
- * stored shape has it and because a customer seeing a face is the point of D-5 — so the day
- * an avatar exists, this is the only line that changes. Sending an empty string instead
- * would be worse: a client cannot tell "no picture" from "a picture that failed to load".
+ * ── `avatar_url` is still always null — and ⚠ THE REASON CHANGED AT ADR-023 ──
  *
- * G-2 called this "a promise the API is not keeping" and offered two fixes: build the upload
- * surface, or take the field off the wire. **Neither was taken** (Phase 4, step 4.B.6.1;
- * owner decision 2026-08-20), for two reasons the finding did not have:
+ * ⚠ **This docblock said "`admin_accounts` stores no avatar: there is no upload surface for
+ * an administrator's own picture". BOTH CLAUSES ARE NOW FALSE.** `admin_accounts` carries
+ * `avatar_file_id`, and `PUT /api/v1/employees/me/avatar` sets it. If you are here because
+ * you read that sentence somewhere else, it is stale there too.
  *
- *  - wi-admin has **no write-side file surface at all** — its `files` module is two GETs
- *    delegating to jovi-mall, and a grep for `multer` finds nothing. An administrator avatar
- *    would be this service's first upload path: a feature, not a field.
- *  - `avatar_url` is a field of jovi-mall's **`PublicAdminSnapshot`** — the projection a
- *    customer, vendor, agency or agent is shown. Removing it from wi-admin's DTO would leave
- *    jovi-mall still promising it to every non-admin reader.
+ * What keeps this field null is now narrower, and it is a genuine gap rather than an absent
+ * feature: **the stored field is a URL and this service holds an ID.** Turning one into the
+ * other means reading the `jovi_mall.files` row for its `key` and running it through
+ * `infra/storage/public-url.ts` — and `snapshotOf` is a synchronous pure function on the
+ * ticket-claim path. Making it async and adding a cross-database read to every claim and
+ * every assignment is a real change with a real cost, and it was not in ADR-023's scope.
  *
- * What made a permanently-null field a broken promise is that it was **undocumented**. It is
- * now stated here, on `AdminSnapshotDto.avatarUrl`, and in `api-doc/api/support.md`.
+ * ✅ **So this is now a KNOWN FOLLOW-UP rather than a settled non-feature.** Closing it is
+ * two changes and neither is difficult: resolve the id here (the media library already builds
+ * these URLs locally, BR-015 L-3), or — better — carry `avatar_file_id` in the stored snapshot
+ * and let each reader resolve it, which is the rule every other file reference on this
+ * platform follows. The second is a jovi-mall change, because the snapshot shape is theirs.
+ *
+ * An avatar is a `by-type` upload and therefore lands in a PUBLIC tree, so a resolvable URL
+ * genuinely exists — this is not blocked on an authorization question.
+ *
+ * ── What has NOT changed ─────────────────────────────────────────────────────
+ * The field stays on the wire as `null`, and sending `''` would still be worse: a client
+ * cannot tell "no picture" from "a picture that failed to load". And `avatar_url` remains a
+ * field of jovi-mall's `PublicAdminSnapshot` — the projection a customer, vendor, agency or
+ * agent is shown — so removing it here would leave jovi-mall still promising it.
+ *
+ * G-2 (Phase 4, step 4.B.6.1) called the permanently-null field "a promise the API is not
+ * keeping". Half of what made that acceptable has now gone away; the promise is one step
+ * closer to being keepable and is not kept yet.
  */
 export function snapshotOf(account: IAdminAccount): AdminSnapshotPayload {
     return {

@@ -79,6 +79,11 @@ export interface AdministratorDto {
     suspendedReason: string | null;
     tierChangedAt: string | null;
     tierChangedBy: string | null;
+    /** Null while pending, and null forever on the bootstrapped first administrator. */
+    activatedAt: string | null;
+    activatedBy: string | null;
+    /** An id into `jovi_mall.files`, never a URL. Resolve through `GET /api/v1/files`. */
+    avatarFileId: string | null;
     createdAt: string;
 }
 
@@ -109,6 +114,9 @@ export function toAdministratorDto(admin: IAdminAccount): AdministratorDto {
         suspendedReason: admin.suspended_reason,
         tierChangedAt: admin.tier_changed_at ? admin.tier_changed_at.toISOString() : null,
         tierChangedBy: admin.tier_changed_by ? admin.tier_changed_by.toString() : null,
+        activatedAt: admin.activated_at ? admin.activated_at.toISOString() : null,
+        activatedBy: admin.activated_by ? admin.activated_by.toString() : null,
+        avatarFileId: admin.avatar_file_id ? admin.avatar_file_id.toString() : null,
         createdAt: admin.created_at.toISOString(),
     };
 }
@@ -553,7 +561,7 @@ async function applySuspension(
             const current = await accounts.findById(adminId, session);
             if (!current) throw createAppError(ERROR_CODES.ADMIN_ACCOUNT_NOT_FOUND, 404);
 
-            const result = await accounts.setSuspension(adminId, { by, reason }, session);
+            const result = await accounts.setSuspension(adminId, { by, reason }, session, current.status);
             if (!result) throw createAppError(ERROR_CODES.ADMIN_ACCOUNT_NOT_FOUND, 404);
 
             return {
@@ -596,7 +604,13 @@ async function applyReinstatement(
             const current = await accounts.findById(adminId, session);
             if (!current) throw createAppError(ERROR_CODES.ADMIN_ACCOUNT_NOT_FOUND, 404);
 
-            const result = await accounts.setSuspension(adminId, null, session);
+            // Put back what was there, not `active` — see the repository's ⚠ on this method.
+            const result = await accounts.setSuspension(
+                adminId,
+                null,
+                session,
+                current.suspended_from_status ?? 'active',
+            );
             if (!result) throw createAppError(ERROR_CODES.ADMIN_ACCOUNT_NOT_FOUND, 404);
 
             // The suspension columns are about to be cleared, taking with them the only

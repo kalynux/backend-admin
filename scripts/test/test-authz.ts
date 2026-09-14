@@ -81,6 +81,7 @@ function identity(adminId: string, tier: AdminTier): AdminIdentity {
         status: 'active',
         mfaEnrolled: true,
         pendingMfaEnrolment: false,
+    pendingActivation: false,
         authenticatedAt: new Date(),
         sessionExpiresAt: new Date(Date.now() + 3_600_000),
         authMethod: 'cookie',
@@ -173,9 +174,21 @@ t.assert('an allowlisted financial read is NOT swept in by allInFamily', () =>
 const ESCALATION_PERMISSIONS: readonly string[] = [
     'administrators.tier.set',
     'administrators.mfa.reset',
+    /**
+     * ADR-023 added the third, and it is the first whose reason is NOT that the act itself is
+     * privileged.
+     *
+     * Activating a pending administrator merely lets them hold the level they were already
+     * created at, under `assertMayCreate`. The flag is here because activation REQUIRES
+     * READING THE EMPLOYEE RECORD, which is tier 1 (`employees.read`) — so an Admin able to
+     * activate would be admitting a person whose file they cannot open, which is a rubber
+     * stamp rather than a decision. The flag confines it to tier 1 and keeps it out of
+     * `allInFamily('administrators')`, which tier 2 holds.
+     */
+    'administrators.activate',
 ];
 
-t.assert('exactly the two named escalation permissions exist', () => {
+t.assert('exactly the three named escalation permissions exist', () => {
     const escalation = PERMISSION_NAMES.filter((name) => permissionSpec(name).escalation);
     return escalation.length === ESCALATION_PERMISSIONS.length
         && ESCALATION_PERMISSIONS.every((name) => escalation.includes(name as PermissionName));

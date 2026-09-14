@@ -1002,6 +1002,91 @@ export const PERMISSION_CATALOG = Object.freeze({
         summary: 'Clear another administrator’s two-factor enrolment so they can enrol again',
     },
 
+    /**
+     * Turn a `pending` administrator into a working one (ADR-023 D-1).
+     *
+     * ── Why `escalation`, when activation is not itself a privileged act ──────
+     * The flag is doing two mechanical jobs and neither is about seniority. It keeps this
+     * name out of `allInFamily('administrators')` — which tier 2 holds — and the boot
+     * assertion then confines it to tier 1.
+     *
+     * Tier 1 is required because activation REQUIRES READING THE EMPLOYEE RECORD, and only
+     * tier 1 may read one (`employees.read`). An Admin able to activate would be admitting a
+     * person whose file they cannot open: a rubber stamp dressed as a decision, which is the
+     * precise defect the applicant-side identity module exists to fix.
+     *
+     * ── What it is NOT ───────────────────────────────────────────────────────
+     * Not dual-controlled. Promotion to Developer is, because it creates a peer who could
+     * remove the promoter; activation merely lets somebody hold the level they were CREATED
+     * at, and that level was already chosen under `assertMayCreate`.
+     *
+     * Not a reinstatement. It refuses a suspended account outright — lifting a suspension is
+     * `administrators.suspend`, which is dual-controlled on a Developer, and activation must
+     * never become a way around that.
+     */
+    'administrators.activate': {
+        family: 'administrators', action: 'write', phase: 23,
+        escalation: true,
+        summary: 'Activate a pending administrator once their employee record is complete',
+    },
+
+    // ═══ EMPLOYEES ═══ the staff record ═══════════════════════════════════════
+    //
+    // ⚠ **A family of its own, and that is the entire access-control mechanism** (ADR-023 D-2).
+    //
+    // The obvious design puts these on the `administrators` family beside the directory
+    // permissions, and it would be wrong in a way nothing would catch: `tier-grants.ts` gives
+    // tier 2 `allInFamily('administrators')`, so the permission that lets an Admin manage the
+    // directory would also hand them every colleague's salary, date of birth and home address.
+    // `allInFamily()` refuses to expand SENSITIVE entries, so the instinct is to flag these
+    // `escalation` and leave them in the family — but `escalation` means "can widen who holds
+    // power", and reading somebody's mother's maiden name is not that. Using the flag as a
+    // grant-scoping trick would misdescribe the permission in `GET /permissions/catalog`,
+    // which administrators read.
+    //
+    // A separate family says the true thing: this is a different KIND of data, with a
+    // different audience, and tier 2 does not hold it.
+    //
+    // ⚠ **Neither of these is how the SUBJECT reads their own record.** An employee's own
+    // record is `selfService` — every administrator may read and write their own, by
+    // definition, exactly as `/administrators/me` is. These two are for reading and writing
+    // somebody ELSE's.
+
+    /**
+     * Read another administrator's employee record — identity, contacts, address, salary.
+     *
+     * ⚠ **This does NOT disclose the documents themselves**, and the split is deliberate. The
+     * record returns file IDS; the bytes need `files.content.read`, which is audited per file
+     * and fail-closed. So the picture of somebody holding their identity card is a second,
+     * separately-recorded act — a strictly better trail than one row saying "opened the
+     * screen", and the reason this read is itself not audited (ADR-023 D-7).
+     */
+    'employees.read': {
+        family: 'employees', action: 'read', phase: 23,
+        summary: 'Read another administrator’s employee record — identity, contacts, address and salary',
+    },
+
+    /**
+     * Write the EMPLOYMENT block of another administrator's record: position, contract,
+     * start date, monthly salary.
+     *
+     * ⚠ **Its scope is narrower than the name suggests, and the narrowness is the point.** It
+     * does not grant writing the personal, identity, address, contact or payout halves — those
+     * are self-service and have no administrative write path at all. An employee maintains
+     * their own facts; the company states the terms it is employing them on. A Developer who
+     * could rewrite a colleague's date of birth or payout destination would make the record
+     * evidence of nothing.
+     *
+     * `financial: true` — it sets what a person is paid. That keeps it out of `allInFamily()`
+     * belt-and-braces (the family is tier-1-only anyway) and, more usefully, it is TRUE: the
+     * flag's own definition is "moves money, or changes a record money is computed from".
+     */
+    'employees.employment.write': {
+        family: 'employees', action: 'write', phase: 23,
+        financial: true,
+        summary: 'Set another administrator’s position, contract terms and monthly salary',
+    },
+
     // ═══ APPROVALS ═══ built in THIS phase ════════════════════════════════════
     // Approving is not a permission of its own: the approver must hold the permission the
     // PENDING ACTION names (DualControlSpec.approverPermission). This one only opens the

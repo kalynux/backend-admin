@@ -86,10 +86,12 @@ the workspace root rather than in this folder, because it is not wi-admin's deci
 | [020](./ADR-020-ADMIN-DATA-DOOR.md) | the **data** door into geo-tracker — a second, separate door |
 | [021](./ADR-021-ADMIN-MEDIA-LIBRARY.md) | the media library, and who builds a file URL |
 | [022](./ADR-022-AUTOMATION-FAILURE-AUDIT.md) | the n8n automation failure board — **and why a `success` execution is not evidence the bot worked** |
+| [023](./ADR-023-ADMINISTRATOR-EMPLOYEE-RECORD.md) | the staff employment record, and the `pending` account — **and why this one DOES grade, where the applicant module deliberately does not** |
 
 ⚠ **ADR-022 was absent from this table until 2026-09-08**, and the count read *twenty*. It landed
-on 2026-09-07, the day after this page was written from source. There are **21** `ADR-*.md` files in
-this folder (019 is the workspace-root exception noted above, and 019 is not among them).
+on 2026-09-07, the day after this page was written from source. ADR-023 landed on 2026-09-14 and was added to the table in the same change. There are now **22**
+`ADR-*.md` files in this folder (019 is the workspace-root exception noted above, and 019 is not
+among them).
 
 ---
 

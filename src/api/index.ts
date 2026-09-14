@@ -297,6 +297,28 @@ import { devToolsRoutes } from '../modules/dev-tools/routes/dev-tools.routes';
 apiV1.use('/dev-tools', devToolsRoutes);
 
 /**
+ * The staff employment record (ADR-023) — everything the company holds about its own people.
+ *
+ * ⚠ **The only mount on this service whose subject is an administrator rather than a platform
+ * actor**, and the only one behind the `employees` family, which is tier 1 and the subject
+ * alone. `/me/*` is self-service and takes no id; `/:adminId` is tier 1 and takes one. There
+ * is deliberately no listing route at any tier — see the router's header.
+ */
+import { employeeRoutes } from '../modules/employees/routes/employee.routes';
+apiV1.use('/employees', employeeRoutes);
+
+/**
+ * Address search, delegated to jovi-mall's geocoder (ADR-023).
+ *
+ * The public `/api/geo` mount over there resolves a `users` row, which an administrator does
+ * not have — so the platform's geocoder was reachable by every role except the one staffing
+ * it. Delegating rather than configuring a second provider keeps one chain, one cache and one
+ * shared free-tier quota; see `modules/geo/gateways/geo.gateway.ts`.
+ */
+import { geoRoutes } from '../modules/geo/routes/geo.routes';
+apiV1.use('/geo', geoRoutes);
+
+/**
  * The administrator inbox — the fifth notification stack.
  *
  * jovi-mall has carried four since long before this service existed (vendor, agency, agent,

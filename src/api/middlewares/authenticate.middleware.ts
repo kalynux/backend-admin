@@ -62,16 +62,35 @@ function clientIp(req: Request): string | null {
 }
 
 /**
- * @param allowPendingMfaEnrolment when true, a password-only session belonging to an
- *        admin who still owes MFA enrolment is accepted. ONLY the enrolment routes pass
- *        this. Everything else uses the strict export below, so a new route is protected
- *        by default rather than by remembering to opt in.
+ * What a route is willing to accept from an administrator who is not fully in yet.
+ *
+ * Both flags default to FALSE and are set only from the route manifest, so a route added
+ * next year is closed to both half-states without its author knowing they exist. That is the
+ * same property `access` itself has, and for the same reason.
  */
-function buildAuthenticator(allowPendingMfaEnrolment: boolean) {
+interface AuthenticatorOptions {
+    /**
+     * Accept a password-only session belonging to an admin who still owes MFA enrolment. ONLY
+     * the enrolment routes pass this.
+     */
+    allowPendingMfaEnrolment: boolean;
+    /**
+     * Accept an administrator whose account is still `pending` — created, able to sign in, not
+     * yet activated by a Developer (ADR-023 D-1).
+     *
+     * Set from `ONBOARDING_ROUTE_ALLOWLIST` rather than declared per route, so opening a route
+     * to an unactivated administrator is a one-line change in a list whose whole value is that
+     * reading it tells you exactly what such a person can reach. Same mechanism as
+     * `PUBLIC_ROUTE_ALLOWLIST`.
+     */
+    allowPendingActivation: boolean;
+}
+
+function buildAuthenticator(options: AuthenticatorOptions) {
     // `res` is threaded through now: the per-tier rate limiter attached at the tail of
     // `authenticate` is an Express handler and needs one to write its headers.
     return asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-        await authenticate(req, res, next, allowPendingMfaEnrolment);
+        await authenticate(req, res, next, options);
     });
 }
 
@@ -79,8 +98,9 @@ async function authenticate(
     req: Request,
     res: Response,
     next: NextFunction,
-    allowPendingMfaEnrolment: boolean,
+    options: AuthenticatorOptions,
 ): Promise<void> {
+    const { allowPendingMfaEnrolment, allowPendingActivation } = options;
     const resolved = extractToken(req);
     if (!resolved) {
         return next(createAppError(ERROR_CODES.ADMIN_AUTH_MISSING_TOKEN, 401));
@@ -145,6 +165,43 @@ async function authenticate(
         return next(createAppError(ERROR_CODES.ADMIN_AUTH_ACCOUNT_SUSPENDED, 403));
     }
 
+    /**
+     * ─── The onboarding gate (ADR-023 D-1) ───────────────────────────────────
+     *
+     * A `pending` administrator can SIGN IN and can reach nothing but their own account. They
+     * exist so they can enrol two-factor, upload their identity evidence and fill in the
+     * record that gets them activated.
+     *
+     * ── ⚠ THREE WAYS THIS DIFFERS FROM THE SUSPENSION BRANCH ABOVE ──────────
+     * They look alike and behave differently in every respect that matters:
+     *
+     *   **Sessions survive.** Suspension destroys every session because access has been
+     *   withdrawn. Pending is the state an account is BORN in — evicting the session would
+     *   sign a new administrator out on every request they make while filling in their own
+     *   form, which is the only thing they are here to do.
+     *
+     *   **It is route-scoped, not absolute.** Suspension refuses everything. This refuses
+     *   everything OUTSIDE `ONBOARDING_ROUTE_ALLOWLIST`.
+     *
+     *   **Its code is its own.** `ADMIN_ACTIVATION_REQUIRED`, not
+     *   `ADMIN_AUTH_ACCOUNT_SUSPENDED`. A dashboard that cannot tell "not let in yet" from
+     *   "shut out" shows the wrong screen to every new hire on their first day.
+     *
+     * ── Checked here rather than per route ──────────────────────────────────
+     * This is the single gate every authenticated route passes through, so one condition
+     * makes the rule live everywhere and a route added next year is closed by default. The
+     * same argument the MFA check below it makes, and the same argument the per-tier rate
+     * limiter at the tail makes.
+     *
+     * ⚠ Ordered BEFORE the MFA check deliberately: a pending administrator who also owes MFA
+     * should be told to finish onboarding, of which enrolling is a part, rather than told to
+     * enrol by a service that would refuse them afterwards anyway. Both messages are true;
+     * this one is actionable.
+     */
+    if (admin.status === 'pending' && !allowPendingActivation) {
+        return next(createAppError(ERROR_CODES.ADMIN_ACTIVATION_REQUIRED, 403));
+    }
+
     const pendingMfaEnrolment = lookup.record.pendingMfaEnrolment === true;
 
     // A password-only session for a tier that owes MFA reaches the enrolment endpoints
@@ -171,6 +228,7 @@ async function authenticate(
         status: admin.status,
         mfaEnrolled: admin.mfa_enrolled,
         pendingMfaEnrolment,
+        pendingActivation: admin.status === 'pending',
         authenticatedAt: new Date(lookup.record.startedAt),
         sessionExpiresAt: new Date(lookup.record.absoluteExpiresAt),
         authMethod: resolved.method,
@@ -199,11 +257,38 @@ async function authenticate(
 }
 
 /** The default gate. Use this everywhere except the MFA enrolment routes. */
-export const requireAdmin = buildAuthenticator(false);
+export const requireAdmin = buildAuthenticator({
+    allowPendingMfaEnrolment: false,
+    allowPendingActivation: false,
+});
 
 /**
  * Enrolment-only gate: additionally accepts a scoped, password-only session from an
  * admin who still owes MFA. Mounted on `/auth/mfa/enroll`, `/auth/mfa/activate`,
  * `/auth/me` and `/auth/logout` — the minimum needed to finish setting up or back out.
+ *
+ * ⚠ It accepts a PENDING administrator too, and it must: enrolling two-factor is part of
+ * onboarding, and every route this gate is mounted on is on the onboarding allowlist anyway.
+ * Without this, a new administrator whose tier requires MFA could neither enrol nor log out.
  */
-export const requireAdminAllowingMfaEnrolment = buildAuthenticator(true);
+export const requireAdminAllowingMfaEnrolment = buildAuthenticator({
+    allowPendingMfaEnrolment: true,
+    allowPendingActivation: true,
+});
+
+/**
+ * The onboarding gate: an activated administrator, OR a pending one, and in both cases a
+ * fully-authenticated session.
+ *
+ * Selected by `gateFor()` when a route's full path is in `ONBOARDING_ROUTE_ALLOWLIST` — never
+ * declared per route, so opening a route to an unactivated administrator is a one-line change
+ * in a list a reviewer can read end to end.
+ *
+ * ⚠ `allowPendingMfaEnrolment` stays FALSE. A pending administrator still has to finish MFA
+ * before reaching their employee record: the two half-states are independent, and this gate
+ * lifts exactly one of them.
+ */
+export const requireAdminAllowingPendingActivation = buildAuthenticator({
+    allowPendingMfaEnrolment: false,
+    allowPendingActivation: true,
+});

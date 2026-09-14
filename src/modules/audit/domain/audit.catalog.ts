@@ -109,6 +109,91 @@ export const AUDIT_CATALOG = Object.freeze({
         transport: 'wi_admin_txn',
         summary: "Reset another administrator's password",
     },
+    /**
+     * Letting somebody in — the act that turns a `pending` administrator into a working one
+     * (ADR-023 D-1).
+     *
+     * Its own action rather than a flavour of `administrators.update`, for the reason
+     * `reinstate` is separate from `suspend`: they are opposite acts on the same column, and a
+     * feed that cannot tell "was admitted" from "was edited" cannot answer the one question
+     * this trail is opened for — *when did this person get access, and who decided*.
+     *
+     * ⚠ Deliberately NOT reused for reinstatement, which lifts a suspension and is a different
+     * decision with a different permission and a dual-control rule of its own.
+     */
+    'administrators.activate': {
+        permission: 'administrators.activate',
+        target: 'administrator',
+        transport: 'wi_admin_txn',
+        summary: 'Activated a pending administrator',
+    },
+
+    // ═══ EMPLOYEE RECORDS ═════════════════════════════════════════════════════
+    //
+    // ⚠ **Every payload here names the KEYS that changed and never their VALUES**, and that is
+    // the rule the whole section is built on (ADR-023 D-8). `audit.read` reaches tier 3,
+    // narrowed per row by `auditScopeFilter`; a `before`/`after` carrying a salary, a date of
+    // birth or a mother's maiden name would route this record's contents into a feed it is
+    // specifically withheld from. That the ACTOR is tier 1 does not help — the ROW's audience
+    // is not the actor's.
+    //
+    // The trail still answers what a trail is for: who changed what field, when.
+
+    /**
+     * The employee maintaining their own record. `permission: null` — it is self-service, and
+     * every administrator does it on themselves by definition.
+     */
+    'employees.record.update_self': {
+        permission: null,
+        target: 'administrator',
+        transport: 'wi_admin_txn',
+        summary: 'Updated their own employee record',
+    },
+    /**
+     * ⚠ `external`, not `wi_admin_txn`: the bytes land in jovi-mall's storage and its
+     * database, which no `wi-admin` ClientSession can join. Recorded as an ATTEMPT before the
+     * body is streamed, fail-closed — with the audit store down, no identity document is
+     * stored.
+     */
+    'employees.documents.upload': {
+        permission: null,
+        target: 'administrator',
+        transport: 'external',
+        summary: 'Uploaded an identity document to their own employee record',
+    },
+    /** Filing an uploaded document into a slot — a `wi-admin` write, unlike the upload itself. */
+    'employees.documents.attach': {
+        permission: null,
+        target: 'administrator',
+        transport: 'wi_admin_txn',
+        summary: 'Filed an identity document into a slot on their own record',
+    },
+    'employees.documents.detach': {
+        permission: null,
+        target: 'administrator',
+        transport: 'wi_admin_txn',
+        summary: 'Removed an identity document from their own record',
+    },
+    'employees.avatar.set': {
+        permission: null,
+        target: 'administrator',
+        transport: 'wi_admin_txn',
+        summary: 'Changed their own profile picture',
+    },
+    /**
+     * The one write on this record performed BY somebody else ABOUT the employee: position,
+     * contract terms, monthly salary.
+     *
+     * The only entry in this section with a permission, and that asymmetry is the section's
+     * shape in one line — an employee states their own facts, the company states its terms.
+     */
+    'employees.employment.update': {
+        permission: 'employees.employment.write',
+        target: 'administrator',
+        transport: 'wi_admin_txn',
+        summary: "Set an administrator's position, contract terms or salary",
+    },
+
     /** Redis, not Mongo — see the `external` transport note in `audit.types.ts`. */
     'administrators.sessions.revoke': {
         permission: 'administrators.sessions.revoke',
@@ -174,6 +259,27 @@ export const AUDIT_CATALOG = Object.freeze({
         permission: null, target: 'administrator', transport: 'wi_admin_txn',
         summary: 'Changed their own password',
     },
+    /**
+     * The administrator's own CONTACT phone — set, and proved.
+     *
+     * ⚠ Neither is a login event, and the distinction matters for anybody reading this trail
+     * during an incident: administrators authenticate with a password and TOTP, and nothing in
+     * the auth path reads `phone_verified`. A row here means the platform learned how to REACH
+     * somebody, not that anything about their access changed.
+     *
+     * `phone_set` records because it silently un-verifies a number that was previously proved;
+     * the request that sends a code deliberately records nothing, since a resend is routine and
+     * would bury the outcome below it.
+     */
+    'administrators.profile.phone_set': {
+        permission: null, target: 'administrator', transport: 'wi_admin_txn',
+        summary: 'Set their own contact phone number',
+    },
+    'administrators.profile.phone_verified': {
+        permission: null, target: 'administrator', transport: 'wi_admin_txn',
+        summary: 'Verified their own contact phone number',
+    },
+
     'administrators.auth.logout': {
         permission: null, target: 'administrator', transport: 'external',
         summary: 'Signed out',

@@ -53,3 +53,28 @@ export type LoginInput = z.infer<typeof LoginSchema>;
 export type MfaVerifyInput = z.infer<typeof MfaVerifySchema>;
 export type MfaActivateInput = z.infer<typeof MfaActivateSchema>;
 export type ChangePasswordBody = z.infer<typeof ChangePasswordSchema>;
+
+/**
+ * An administrator's own contact phone.
+ *
+ * ⚠ `.strict()` like every schema here, and deliberately permissive on FORMAT: wi-admin does
+ * not own the phone vocabulary — jovi-mall normalises to E.164 and is the service that will
+ * refuse an unusable number when it tries to send. Duplicating the rule here would make this
+ * the second place it lives, and the two would drift the first time E.164 handling changed.
+ */
+export const SetAdminPhoneSchema = z.object({
+    phone: z.string().min(6).max(20),
+}).strict();
+
+export type SetAdminPhoneBody = z.infer<typeof SetAdminPhoneSchema>;
+
+export const ConfirmAdminPhoneSchema = z.object({
+    /**
+     * ⚠ Only the code. The NUMBER is fixed when the code is minted and re-checked against the
+     * account before the record is stamped — accepting one here would let a caller prove
+     * control of one number and have another marked verified.
+     */
+    code: z.string().min(4).max(12),
+}).strict();
+
+export type ConfirmAdminPhoneBody = z.infer<typeof ConfirmAdminPhoneSchema>;

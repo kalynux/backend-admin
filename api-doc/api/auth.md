@@ -311,8 +311,15 @@ Who am I, and what session is this?
 | | |
 |---|---|
 | **Method / Path** | `GET /api/v1/auth/me` |
-| **Authentication** | Required. **Also reachable by a session that still owes MFA enrolment** |
+| **Authentication** | Required. **Also reachable by a session that still owes MFA enrolment, and by a `pending` account** |
 | **Permission** | None |
+
+⚠ **Check `admin.status` here before routing into the dashboard.** A `pending` administrator
+signs in perfectly normally and is then refused every route outside their own account with
+`403 ADMIN_ACTIVATION_REQUIRED`. Send them to the onboarding screen —
+[`GET /employees/me`](employees.md) carries the checklist — rather than to a dashboard that will
+answer 403 to everything it tries to load. See
+[the account lifecycle](administrators.md#the-account-lifecycle).
 
 ### Response (200)
 

@@ -1,6 +1,8 @@
 # wi-admin — the API contract
 
-**Verified against source on 2026-09-08** — the page count (27, not 26), the mirror path (`admin-dash/api-doc/docs/`, not `api-doc/admin-internal/`) and the five dashboard suites that read the mirror by path, all re-derived from the trees themselves.
+⚠ **Re-counted 2026-09-14: there are 30 pages.** ADR-023 added [`api/employees.md`](./api/employees.md) and [`api/geo.md`](./api/geo.md); a concurrent change added `api/verification.md`.
+
+**Verified against source on 2026-09-08** — the page count as it then stood (27, not 26), the mirror path (`admin-dash/api-doc/docs/`, not `api-doc/admin-internal/`) and the five dashboard suites that read the mirror by path, all re-derived from the trees themselves.
 
 **This half of wi-admin's documentation is written for one reader: a developer building the
 admin dashboard.** Everything here is a promise to a client — a path, a guard, a field, a
@@ -20,7 +22,7 @@ dashboard's behalf and returns the result in its own envelope.
 
 | Directory | What |
 |---|---|
-| [`api/`](./api/) | **The endpoint reference — 27 pages, one per surface.** Start at [`api/README.md`](./api/README.md), which carries the base URL, the envelope, authentication, CSRF, pagination and the list-query vocabulary that every other page assumes. |
+| [`api/`](./api/) | **The endpoint reference — 30 pages, one per surface.** Start at [`api/README.md`](./api/README.md), which carries the base URL, the envelope, authentication, CSRF, pagination and the list-query vocabulary that every other page assumes. |
 | [`dashboard/`](./dashboard/) | The dashboard-facing working record: the [integration matrix](./dashboard/BACKEND-INTEGRATION-MATRIX.md), the [data-exposure register](./dashboard/DATA-EXPOSURE-REGISTER.md), the [frontend architecture assessment](./dashboard/FRONTEND-ARCHITECTURE-ASSESSMENT.md), and [`backend-requests/`](./dashboard/backend-requests/) — the request/answer channel between the dashboard team and this service. |
 | [`FRONTEND-CHANGELOG-phase-2-3.md`](./FRONTEND-CHANGELOG-phase-2-3.md) | What readiness Phases 2–3 changed **for this dashboard**. |
 | [`FRONTEND-CHANGELOG-phase-4-5.md`](./FRONTEND-CHANGELOG-phase-4-5.md) | What readiness Phases 4–5 changed — the largest instalment, and the one with breaking renames in it. |

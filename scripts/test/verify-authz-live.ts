@@ -226,7 +226,10 @@ async function main(): Promise<number> {
             try {
                 let created!: Awaited<ReturnType<typeof accounts.create>>;
                 await session.withTransaction(async () => {
-                    created = await accounts.create({ email, displayName: name, passwordHash, tier }, session);
+                    created = // ⚠ `status: 'active'` because ADR-023 made `pending` the default, and a pending
+                    // fixture is refused every route this suite exercises. Fixtures, not the
+                    // audited path — a real hire is activated by a Developer.
+                    await accounts.create({ email, displayName: name, passwordHash, tier, status: 'active' }, session);
                 });
                 return created;
             } finally {

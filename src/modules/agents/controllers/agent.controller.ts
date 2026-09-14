@@ -23,6 +23,7 @@ import { allocationAgencyIds, toCodAllocationDto } from '../read-models/cod-allo
 import { readAgentPresence } from '../../../infra/geo/geo-tracker-data.client';
 import { discloseAgentPosition, readNonDisclosing } from '../domain/tracking-disclosure';
 import * as gateway from '../gateways/agent.gateway';
+import { verificationRecord } from '../../verification/gateways/verification.gateway';
 import { AgentReadModel, AgentReadRepository } from '../repositories/agent.read.repository';
 import {
     BanAgentBody,
@@ -671,6 +672,41 @@ export class AgentController {
         );
 
         sendSuccess(res, toCodAllocationDto(allocation, agencyRows));
+    });
+
+    /**
+     * GET /api/v1/agents/:agentId/verification — the evidence the KYC verdict rests on.
+     *
+     * ── What this closes ─────────────────────────────────────────────────────────
+     * `PUT /:agentId/kyc` is the write that decides whether an agent may work at all, and
+     * until now the only thing an administrator could see before pressing it was
+     * `legal_identity.national_id_number` — a string the agent typed — plus `kyc.reference`,
+     * a note an administrator had written **themselves**. Nothing checkable. The verdict was
+     * therefore either a rubber stamp or a refusal, and neither was evidence.
+     *
+     * This returns the identity-card scans, the selfie holding the card, the vehicle
+     * photographed with its rider, the geocoded home address and the hand-drawn sketches of
+     * it, plus who has already decided and when.
+     *
+     * ── ⚠ It returns NO VERDICT AND NO SCORE, and that is the design ─────────────
+     * There is no `estimatedVerdict`, no `complete`, and no `required` column anywhere in the
+     * payload. The dashboard owns the required/optional rules per role, computes the badge
+     * from them, and pre-populates a rejection reason. Putting a second copy here would be
+     * the same rule in two repositories, and the one that changes when the reviewers change
+     * their minds is the dashboard's.
+     *
+     * ── ⚠ Every document has `url: null` ─────────────────────────────────────────
+     * These files are in jovi-mall's private `kyc/` tree, so `access` is `authorized` and the
+     * `id` is the handle. Render them through `GET /api/v1/files/:fileId/content`, which is
+     * behind `files.content.read` and **audited** — that read is the disclosure, and it is
+     * where the row belongs. A broken-image icon here means the client used `url`.
+     */
+    static verification = asyncHandler(async (req: Request, res: Response) => {
+        await loadOr404(req.params.agentId);
+        sendSuccess(
+            res,
+            await verificationRecord('agent', req.params.agentId, actorContextOf(req)),
+        );
     });
 
     /**

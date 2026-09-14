@@ -530,9 +530,33 @@ const agentRoutes = routeManifest().filter((r) => r.fullPath.startsWith('/api/v1
 
 /**
  * Fifteen at Phase 5, plus the two geo-tracker data reads at Phase 6.I (ADR-020), plus the
- * assignability diagnostic at Phase 6.J.
+ * assignability diagnostic at Phase 6.J, plus the KYC evidence read (2026-09-14).
  */
-t.assert('eighteen agent routes are registered', () => agentRoutes.length === 18);
+t.assert('nineteen agent routes are registered', () => agentRoutes.length === 19);
+
+/**
+ * ⚠ The KYC evidence read is `agents.read` and is NOT audited, unlike the two tracking reads
+ * beside it — and the contrast is the point rather than an inconsistency.
+ *
+ * `agents.tracking.read` discloses **where a person is right now**, so the row commits before
+ * the read and a `reason` is required. This endpoint discloses file HANDLES and metadata; the
+ * picture itself comes from `files.content.read`, which is audited and commits its row before
+ * the bytes. Auditing both would make every review two rows and tell an investigator nothing
+ * the content rows do not.
+ *
+ * Support holds `agents.read` deliberately: "this agent is not KYC-verified" is one of the
+ * commonest answers to "why can they not take work", and refusing them the evidence escalates
+ * every one of those tickets.
+ */
+t.assert('the KYC evidence read is agents.read, unaudited, and carries no reason', () => {
+    const route = agentRoutes.find((r) => r.fullPath === '/api/v1/agents/:agentId/verification');
+    return !!route
+        && route.method === 'get'
+        && route.access.kind === 'permission'
+        && route.access.permissions.includes('agents.read')
+        && !route.access.permissions.includes('agents.kyc.review')
+        && !route.audit;
+});
 
 t.assert('assignability is a GET under agents.read + agencies.read, and is not audited', () => {
     const route = agentRoutes.find((r) => r.fullPath === '/api/v1/agents/:agentId/assignability');

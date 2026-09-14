@@ -161,12 +161,37 @@ async function main(): Promise<void> {
                 // No creator, and the only account for which that is true. Every
                 // administrator made through the API records who made them.
                 createdBy: null,
+                /**
+                 * ⚠ **`active`, and this is the ONLY place that may pass it** (ADR-023 D-1).
+                 *
+                 * Every other administrator is created `pending` and is let in by a tier-1
+                 * Developer who has read their employee record. This one cannot be: there is
+                 * nobody to activate them, and an account created `pending` here would leave
+                 * the service with no reachable administrator at all — a bootstrap that
+                 * bootstraps nothing.
+                 *
+                 * It is passed explicitly rather than relying on a default, so the exception
+                 * is an argument a reviewer can see rather than an absence they have to
+                 * notice. The corresponding ⚠ is on `CreateAdminInput.status`.
+                 *
+                 * Consequence, recorded on the row: `activated_at` stays null forever on this
+                 * account, so `activated_at === null` does NOT mean "not activated". Read
+                 * `status` for that.
+                 */
+                status: 'active',
             }, session);
 
             return {
                 result: created,
                 target: { id: created._id.toString(), label: created.email },
-                after: { email: created.email, displayName: created.display_name, tier: created.tier },
+                after: {
+                    email: created.email,
+                    displayName: created.display_name,
+                    tier: created.tier,
+                    // Recorded because it is the exception — the trail should say that this
+                    // account skipped a gate every other account passes through.
+                    status: created.status,
+                },
             };
         },
     );

@@ -18,6 +18,7 @@ Design record: [`../../docs/ADR-009-DELIVERY-NETWORK.md`](../../docs/ADR-009-DEL
 | `GET` | `/agents/:agentId/contracts` | `agents.read` **+** `agencies.read` | direct read | — |
 | `GET` | `/agents/:agentId/contract-history` | `agents.read` | direct read | — |
 | `GET` | `/agents/:agentId/activity` | `agents.read` **+** `audit.read` | direct read | — |
+| `GET` | `/agents/:agentId/verification` | `agents.read` | **delegated** | — |
 | `GET` | `/agents/:agentId/tracking-policy` | `agents.read` | **delegated** | — |
 | `GET` | `/agents/:agentId/cod-allocation` | `agents.read` **+** `agencies.read` | **delegated** | — |
 | `GET` | `/agents/:agentId/eligibility` | `agents.read` | **delegated** | — |
@@ -903,6 +904,34 @@ The updated agent, message `"Agent status set to suspended"`.
 ### Audit
 
 `agents.status.set`
+
+---
+
+## `GET /agents/:agentId/verification`
+
+**The evidence the verdict below rests on** — and the write below is the one that decides
+whether an agent may work at all, since eligibility passes only on `verified`.
+
+Until this existed, the whole of what a reviewer could see was `legal_identity.national_id_number`
+(a string the agent typed) and `kyc.reference` — a free-text note an **administrator** had
+written themselves. This returns the identity-card scans, the selfie holding the card, the
+vehicle photographed **with its rider**, the agent's geocoded home address and the hand-drawn
+sketch of it. `plateNumber` comes along from `vehicle_info`.
+
+⚠ `documents.vehicleWithAgent` is **not** the agent's ordinary vehicle photo — that one is
+public and shown to agencies browsing the directory. Two pictures, two questions.
+
+⚠ **No verdict, no score, no `required` column** — the badge and the pre-populated rejection
+reason are the dashboard's. ⚠ **Every document has `url: null`**: private storage tree, rendered
+through the audited `GET /files/:fileId/content`.
+
+Full contract: **[verification.md](verification.md)**.
+
+| | |
+|---|---|
+| **Permission** | `agents.read` — the Support-tier lookup, deliberately not `agents.kyc.review` |
+| **Transport** | Delegated to jovi-mall |
+| **Audited** | **No** — unlike `live-position` beside it. That read discloses where a person *is*; this one discloses handles, and the picture is audited on `files.content.read` |
 
 ---
 

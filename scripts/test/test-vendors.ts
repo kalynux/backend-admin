@@ -785,16 +785,38 @@ const vendorRouteDecls = routeManifest().filter((route) =>
     route.fullPath === '/api/v1/vendors' || route.fullPath.startsWith('/api/v1/vendors/'));
 
 // Eleven at Phase 6; twelve since the product detail landed; thirteen since the
-// agency-connections panel (BR-018).
-t.assert('thirteen routes are declared', () => vendorRouteDecls.length === 13);
+// agency-connections panel (BR-018); fourteen since the KYC evidence read (2026-09-14).
+t.assert('fourteen routes are declared', () => vendorRouteDecls.length === 14);
 
 t.assert('every one carries a permission — none is public or self-service', () =>
     vendorRouteDecls.every((route) => route.access.kind === 'permission'));
 
-t.assert('the six reads need vendors.read', () => {
+t.assert('the seven reads need vendors.read', () => {
     const reads = vendorRouteDecls.filter((route) => route.method === 'get');
-    return reads.length === 6 && reads.every((route) =>
+    return reads.length === 7 && reads.every((route) =>
         route.access.kind === 'permission' && route.access.permissions.includes('vendors.read'));
+});
+
+/**
+ * ⚠ The KYC evidence read is `vendors.read`, NOT `vendors.kyc.review`, and that is a decision
+ * rather than an oversight.
+ *
+ * Support holds `vendors.read` and answers "why was my shop rejected" tickets; a status alone
+ * cannot answer one. The review permission governs the WRITE — the act that has consequences.
+ * The DISCLOSURE is looking at the picture, and that happens on `files.content.read`, which is
+ * audited and which this endpoint deliberately does not duplicate.
+ *
+ * If this is ever narrowed to the review permission, narrow the agency and agent ones in the
+ * same change — three screens, one rule.
+ */
+t.assert('…and the KYC evidence read is not narrowed to the review permission', () => {
+    const route = vendorRouteDecls.find((r) => r.fullPath === '/api/v1/vendors/:vendorId/verification');
+    return !!route
+        && route.method === 'get'
+        && route.access.kind === 'permission'
+        && route.access.permissions.includes('vendors.read')
+        && !route.access.permissions.includes('vendors.kyc.review')
+        && !route.audit;
 });
 
 /**

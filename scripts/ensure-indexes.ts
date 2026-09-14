@@ -52,6 +52,7 @@ import { AdminNotificationModel } from '../src/modules/notifications/models/admi
 import { NotificationPreferenceModel } from '../src/modules/notifications/models/notification-preference.model';
 import { NotificationWatermarkModel } from '../src/modules/notifications/models/notification-watermark.model';
 import { AutomationFailureModel } from '../src/modules/automation/models/automation-failure.model';
+import { EmployeeRecordModel } from '../src/modules/employees/models/employee-record.model';
 
 export const MIGRATION_NAME = 'ensure:indexes';
 
@@ -132,6 +133,16 @@ async function main(): Promise<string> {
         // `test:index-coverage` now does on every run — the header calls a growing list
         // this service's most exposed failure mode, and it had already happened.
         { name: 'admin_automation_failures', model: AutomationFailureModel() },
+
+        // The staff employment record (ADR-023). ONE index, and it is the unique constraint
+        // on `admin_id` — the relationship is 1:1 and the record is created lazily by an
+        // upsert, so without it two concurrent first writes from one administrator produce
+        // two rows and every later read silently picks whichever `findOne` returns first.
+        //
+        // Deliberately NOT a `2dsphere` on `home_address.coordinates`, unlike every other
+        // geocoded address on the platform: nothing ranks staff by distance, and that index
+        // shape is the one whose failure mode is a document that cannot be written at all.
+        { name: 'admin_employee_records', model: EmployeeRecordModel() },
     ];
 
     // The ledger's own index, built here rather than through `targets` above: it has to

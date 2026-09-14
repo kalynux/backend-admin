@@ -383,6 +383,24 @@ export function assertGrantTableValid(): void {
             if (spec.family === 'developer_tools' && tier !== 1) {
                 problems.push(`${label} grants "${name}" — the developer_tools family is tier 1 only`);
             }
+            /**
+             * The staff employment record is tier 1 and the subject, and nothing else
+             * (ADR-023 D-2).
+             *
+             * ⚠ **This assertion is the guard, because the FLAGS are not.** `employees.read`
+             * carries no `escalation`, `financial` or `destructive` flag — it is an ordinary
+             * read, and flagging it otherwise would misdescribe it in the catalog that
+             * administrators actually read. So `allInFamily('employees')` WOULD expand it, and
+             * one line added to the tier-2 list beside the fifteen family grants already there
+             * would hand every Admin their colleagues' salaries, dates of birth and home
+             * addresses. Nothing about that line would look wrong in review.
+             *
+             * Same shape as the `developer_tools` rule above, for a different reason: that one
+             * guards capability, this one guards personal data about the staff themselves.
+             */
+            if (spec.family === 'employees' && tier !== 1) {
+                problems.push(`${label} grants "${name}" — the employees family is tier 1 only (ADR-023 D-2)`);
+            }
         }
     }
 

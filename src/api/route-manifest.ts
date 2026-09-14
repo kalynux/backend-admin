@@ -4,7 +4,11 @@ import { createAppError } from '../core/errors/app-error';
 import { ERROR_CODES } from '../core/errors/error-codes';
 import { validate } from '../core/validation/validate';
 import { PermissionName } from '../modules/authorization/domain/permission.catalog';
-import { requireAdmin, requireAdminAllowingMfaEnrolment } from './middlewares/authenticate.middleware';
+import {
+    requireAdmin,
+    requireAdminAllowingMfaEnrolment,
+    requireAdminAllowingPendingActivation,
+} from './middlewares/authenticate.middleware';
 import { requireAnyPermission, requirePermission } from './middlewares/authorize.middleware';
 import { requireCsrfToken } from './middlewares/csrf.middleware';
 import { requireServiceToken } from './middlewares/service-token.middleware';
@@ -190,6 +194,86 @@ export const SERVICE_ROUTE_ALLOWLIST: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The complete list of routes a **pending** administrator may reach — an account that has been
+ * created, can sign in, and has not yet been activated by a Developer (ADR-023 D-1).
+ *
+ * Keyed `METHOD /full/path`, mirroring the two allowlists above and for the same reason:
+ * opening a route to somebody who has not been let in yet is a one-line change in a list whose
+ * whole value is that reading it tells you exactly what such a person can reach. A route not
+ * listed here is closed to them, so one added next year is closed by default.
+ *
+ * ── ⚠ WHY AN ALLOWLIST RATHER THAN "any `selfService` route" ────────────────
+ * That rule is the obvious one, it is one line instead of thirty, and it is WRONG — which is
+ * worth recording, because it will be proposed again.
+ *
+ * `selfService` means "authenticated, no permission, because the route acts on the caller's
+ * own identity". Three of the routes carrying it are the DUAL-CONTROL approval endpoints —
+ * `POST /approvals/:id/approve`, `/reject`, `/withdraw` — and they are declared that way
+ * because the permission they need is resolved PER REQUEST against the queued action rather
+ * than at mount time. They are not self-service in any other sense: approving is the single
+ * most consequential act on this service, and a kind-based rule would hand it to an
+ * administrator nobody has admitted yet.
+ *
+ * ── What is here, and the one rule that puts it here ─────────────────────────
+ * Everything a new administrator needs to finish onboarding, and nothing else:
+ *   - their session (who am I, sign out, change my password, list and revoke my devices)
+ *   - two-factor enrolment (also reachable through the MFA gate, which lifts both half-states)
+ *   - their own profile and their own employee record, including document upload
+ *   - address search, so they can geocode their home address
+ *   - the permission vocabulary, so the dashboard can render at all
+ *
+ * ⚠ `GET /permissions/me` is here and is safe: a pending administrator's grants are real —
+ * their tier is set at creation — and the answer tells them what they WILL be able to do.
+ * Withholding it means the dashboard cannot decide which shell to render and falls back to
+ * an error page. It grants nothing; `requireAdmin` still refuses every route it names.
+ *
+ * ⚠ `GET /administrators/me/activity` is here deliberately. An audit trail somebody cannot
+ * see their own entry in is one they have no way to challenge, and that argument does not
+ * start applying on the day they are activated. It is scoped to their own rows.
+ *
+ * ── ⚠ THIS LIST IS NOT THE COMPLETE INVENTORY, AND THE GAP IS DELIBERATE ────
+ * FOUR more routes are reachable by a pending administrator and are NOT here, because this
+ * list is not what opens them: `GET /auth/me`, `POST /auth/logout`, `POST /auth/mfa/enroll`
+ * and `POST /auth/mfa/activate` declare `mfaEnrolment()` access, and that gate lifts BOTH
+ * half-states — an administrator mid-enrolment and an administrator awaiting activation.
+ *
+ * They are not listed because a route here that this list does not actually gate would be
+ * worse than an omission: somebody deleting the entry to close the route would close nothing,
+ * and believe they had. The boot assertion refuses any non-`self` entry for that reason.
+ *
+ * So: to answer *"what can a pending administrator reach"*, read this list AND the four
+ * `mfaEnrolment()` routes. To answer *"what does this list control"*, read this list alone.
+ */
+export const ONBOARDING_ROUTE_ALLOWLIST: ReadonlySet<string> = new Set([
+    // ── Session and credentials ──────────────────────────────────────────────
+    // The MFA enrolment pair and `/auth/me` and `/auth/logout` are absent on purpose — see
+    // the ⚠ above. They come through `mfaEnrolment()`, which lifts both half-states.
+    'GET /api/v1/auth/sessions',
+    'POST /api/v1/auth/logout-all',
+    'POST /api/v1/auth/password',
+    'DELETE /api/v1/auth/sessions/:sessionId',
+
+    // ── Their own directory record ───────────────────────────────────────────
+    'GET /api/v1/administrators/me',
+    'PATCH /api/v1/administrators/me',
+    'GET /api/v1/administrators/me/activity',
+
+    // ── Their own employee record — the point of the whole state ─────────────
+    'GET /api/v1/employees/me',
+    'PATCH /api/v1/employees/me',
+    'PUT /api/v1/employees/me/avatar',
+    'POST /api/v1/employees/me/documents/:slot',
+    'DELETE /api/v1/employees/me/documents/:slot/:fileId',
+
+    // ── Geocoding, so the home address can be resolved ───────────────────────
+    'GET /api/v1/geo/search',
+    'GET /api/v1/geo/reverse',
+
+    // ── So the dashboard can render a shell ──────────────────────────────────
+    'GET /api/v1/permissions/me',
+]);
+
+/**
  * The complete list of MUTATING routes that record nothing.
  *
  * Keyed `METHOD /full/path`, mirroring `PUBLIC_ROUTE_ALLOWLIST` and for the same reason:
@@ -313,12 +397,27 @@ function joinPath(prefix: string, mountedAt: string, path: string): string {
     return `${base}${path}`;
 }
 
-function gateFor(access: RouteAccess): RequestHandler[] {
+/**
+ * @param routeKey `METHOD /full/path`, used to look this route up in
+ *        `ONBOARDING_ROUTE_ALLOWLIST`. Passed in rather than derived, because the caller has
+ *        already built it for the manifest and the two must be the same string.
+ */
+function gateFor(access: RouteAccess, routeKey: string): RequestHandler[] {
+    /**
+     * ⚠ The allowlist is consulted for `self` ONLY.
+     *
+     * A `permission` route is never opened to a pending administrator, whatever the list says,
+     * and that is enforced here rather than by trusting the list to stay correct: an
+     * unactivated account reaching anything behind a permission would defeat the entire state.
+     * The boot assertion refuses such an entry outright, so this is the second of two locks.
+     */
+    const onboarding = access.kind === 'self' && ONBOARDING_ROUTE_ALLOWLIST.has(routeKey);
+
     switch (access.kind) {
         case 'public':
             return [];
         case 'self':
-            return [requireAdmin];
+            return [onboarding ? requireAdminAllowingPendingActivation : requireAdmin];
         case 'mfa-enrolment':
             return [requireAdminAllowingMfaEnrolment];
         // Note what is absent: `requireAdmin`. A service caller is not a person, and
@@ -394,6 +493,7 @@ function auditProbe(audit: RouteAudit, label: string): RequestHandler {
  */
 export function defineRoute(router: Router, definition: RouteDefinition): void {
     const fullPath = joinPath(definition.apiPrefix ?? '/api/v1', definition.mountedAt, definition.path);
+    const routeKey = `${definition.method.toUpperCase()} ${fullPath}`;
 
     if (definition.access.kind === 'permission' && definition.access.permissions.length === 0) {
         throw createAppError(
@@ -407,7 +507,7 @@ export function defineRoute(router: Router, definition: RouteDefinition): void {
         // First, so the emission scope covers the guards too — a denial writes a row.
         ...(definition.audit ? [auditProbe(definition.audit, `${definition.method.toUpperCase()} ${fullPath}`)] : []),
         ...(definition.before ?? []),
-        ...gateFor(definition.access),
+        ...gateFor(definition.access, routeKey),
         requireCsrfToken,
         ...(definition.validate ? [validate(definition.validate)] : []),
         definition.handler,
@@ -527,6 +627,36 @@ export function assertRouteManifestComplete(app: Express): void {
         // administrator gate on a path no administrator can reach, and look merely broken.
         if (route.fullPath.startsWith('/api/internal') && route.access.kind !== 'service') {
             problems.push(`${key} is on /api/internal but does not declare serviceToken() access`);
+        }
+    }
+
+    /**
+     * The onboarding allowlist, checked in BOTH directions (ADR-023 D-1).
+     *
+     * ── Entry names a real route ─────────────────────────────────────────────
+     * An entry with a typo, a renamed path or a stale method is worse than useless: it
+     * silently grants nothing, so the route it was meant to open stays closed to every new
+     * administrator and the list still *reads* as though it had been handled. That failure
+     * mode has no symptom until somebody's first day.
+     *
+     * ── Entry is `self` ──────────────────────────────────────────────────────
+     * The stronger of the two. `gateFor` already refuses to apply the relaxed gate to anything
+     * but a `self` route, so an entry naming a `permission` route grants nothing — but it
+     * would sit in the list looking like a decision somebody made, and the next person to
+     * "fix" the apparent inconsistency would be removing the second lock rather than the
+     * mistake. Refusing at boot means such an entry never survives a first run.
+     */
+    for (const key of ONBOARDING_ROUTE_ALLOWLIST) {
+        const route = declared.get(key);
+        if (!route) {
+            problems.push(`${key} is in ONBOARDING_ROUTE_ALLOWLIST but no such route is declared`);
+            continue;
+        }
+        if (route.access.kind !== 'self') {
+            problems.push(
+                `${key} is in ONBOARDING_ROUTE_ALLOWLIST but declares ${route.access.kind} access — `
+                + 'only selfService() routes may be reached before activation (ADR-023 D-1)',
+            );
         }
     }
 

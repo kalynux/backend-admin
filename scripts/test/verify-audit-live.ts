@@ -71,6 +71,10 @@ async function seedAdministrator(suffix: string): Promise<Types.ObjectId> {
                 passwordHash: await hash('verify-audit-placeholder-password'),
                 tier: 3,
                 createdBy: null,
+                // ⚠ `status: 'active'` because ADR-023 made `pending` the default, and a
+                // pending fixture is refused every route this suite exercises. Fixtures, not
+                // the audited path — a real hire is activated by a Developer.
+                status: 'active',
             }, session);
             id = admin._id;
         });

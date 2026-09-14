@@ -57,6 +57,7 @@ function identity(): AdminIdentity {
         status: 'active',
         mfaEnrolled: true,
         pendingMfaEnrolment: false,
+    pendingActivation: false,
         authenticatedAt: new Date(),
         sessionExpiresAt: new Date(Date.now() + 3_600_000),
         authMethod: 'cookie',

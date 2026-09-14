@@ -82,6 +82,31 @@ defineRoute(router, {
 });
 
 /**
+ * The identity documents behind the KYC verdict — the evidence `PUT /:agentId/kyc` acts on.
+ *
+ * ⚠ **`agents.read`, deliberately NOT `agents.kyc.review`.** Support answers "why can this
+ * agent not take work" tickets, and `kyc.status !== 'verified'` is one of the commonest
+ * answers; refusing them the documents escalates every one of those. The review permission
+ * governs the WRITE, which is what decides whether somebody may work.
+ *
+ * ⚠ This is **not** a `agents.tracking.read`-shaped disclosure and is not audited here. It
+ * returns metadata and file HANDLES; the picture comes from `GET /api/v1/files/:fileId/content`,
+ * which is behind `files.content.read`, commits its audit row **before** the bytes are fetched,
+ * and is where the disclosure actually happens. Auditing both would make every review two rows
+ * and tell an investigator nothing the content rows do not.
+ *
+ * A DELEGATED read — see the gateway for why the private-tree rule stays on jovi-mall's side.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/:agentId/verification',
+    access: permission('agents.read'),
+    validate: { params: AgentIdParamSchema },
+    handler: AgentController.verification,
+});
+
+/**
  * The contract list carries the agency it is with, so it needs `agencies.read` too — the
  * same dependency the agency roster states in the other direction. Both tiers holding
  * either hold both, so it costs nobody access and states the coupling.

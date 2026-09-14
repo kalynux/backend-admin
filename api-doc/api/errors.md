@@ -283,6 +283,26 @@ logs.
 | `ADMIN_ACCOUNT_ALREADY_EXISTS` | 409 | `conflict` | Email collision. Named rather than hidden — creating an administrator is an authorized act, unlike the login form. |
 | `ADMIN_SESSION_NOT_FOUND` | 404 | `not_found` | No such session for this administrator. |
 
+### Administrator activation (ADR-023)
+
+Five codes rather than one, because the remedy differs for each and "activation failed" tells a
+Developer nothing about which of five things to do next.
+
+| Code | Status | Category | Meaning |
+|---|---|---|---|
+| `ADMIN_ACTIVATION_REQUIRED` | 403 | `authorization` | **The caller's own account is still `pending`** and this route is not on the onboarding allowlist. Distinct from `ADMIN_AUTH_ACCOUNT_SUSPENDED` on purpose: *not let in yet* is not *shut out*, and the remedy is to finish the employee record rather than to contact somebody. Render the onboarding screen, not an error page. |
+| `ADMIN_ACTIVATION_INCOMPLETE` | 422 | `business_rule` | The target's employee record is missing something the required set names. **`details.gaps` carries the full checklist** — the same `{ code, section, message }` entries the employee sees on their own record — so render that list rather than a generic message. |
+| `ADMIN_ACTIVATION_SUSPENDED` | 409 | `conflict` | The target is suspended. Activation deliberately does not lift a suspension — that is `POST /administrators/:adminId/reinstate`, which is dual-controlled when the target is a Developer. |
+| `ADMIN_ACTIVATION_SELF` | 403 | `authorization` | A Developer tried to activate their own account. Another Developer must do it. |
+| `ADMIN_ACTIVATION_CONFLICT` | 409 | `conflict` | The compare-and-set missed: somebody moved the status between the check and the write. Reload and look at the current status. |
+
+### Employee records (ADR-023)
+
+| Code | Status | Category | Meaning |
+|---|---|---|---|
+| `EMPLOYEE_SLOT_FULL` | 422 | `business_rule` | A single-value document slot was offered more than one file, or a multi-value slot is at its ceiling. `details` carries `{ slot, max, current, offered }`. |
+| `EMPLOYEE_DOCUMENT_NOT_FOUND` | 404 | `not_found` | That slot does not hold that file id. **Always 404, never 403** — the record is loaded by the caller's own id, so another administrator's file is simply not in the slot, and a 403 would confirm the id names a real staff document belonging to somebody else. |
+
 ### Audit
 
 | Code | Status | Category | Meaning |

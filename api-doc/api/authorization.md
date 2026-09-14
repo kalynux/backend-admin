@@ -75,7 +75,7 @@ Every permission that exists, with its metadata.
 | Field | Type | Notes |
 |---|---|---|
 | `families[]` | array | The 20 families in declaration order, each listing its permission names |
-| `permissions[]` | array | All 118 permissions |
+| `permissions[]` | array | All 121 permissions |
 | `permissions[].action` | `"read"` \| `"write"` \| `"approve"` | |
 | `permissions[].summary` | string | Written for an administrator, not an engineer — safe to render in a UI |
 | `permissions[].financial` etc. | boolean | The four sensitivity flags. **The dual-control *predicate* is never exposed** — only whether one exists |

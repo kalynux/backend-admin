@@ -63,6 +63,22 @@ export const STORAGE_TREE_VISIBILITY: Readonly<Record<string, TreeVisibility>> =
     // PRIVATE. Served only by an authorized route.
     digital: 'private',
     shipments: 'private',
+    kyc: 'private',
+    /**
+     * Identity evidence for a member of PLATFORM STAFF — an administrator's own identity card,
+     * the selfie holding it, a photograph of their front door, a sketch of how to reach it.
+     * Written by `POST /api/internal/admin/identity-documents` (ADR-023).
+     *
+     * ⚠ A SEPARATE tree from `kyc` above, not a reuse of it: `kyc` holds applicants the
+     * platform is deciding whether to admit, this holds employees whose documents are an
+     * employment record. Different legal basis, different retention clock.
+     *
+     * ⚠ Private, and this copy is what makes `toFileDetail` here answer `url: null`. Getting
+     * it wrong publishes a URL to a staff member's national identity card — which is exactly
+     * the failure this whole file exists to prevent, aimed at the one audience that could not
+     * report it.
+     */
+    'admin-identity': 'private',
     'ticket-attachments': 'private',
 });
 

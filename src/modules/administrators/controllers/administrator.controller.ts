@@ -5,6 +5,7 @@ import { toPageMeta } from '../../../core/http/list-query';
 import { sendCreated, sendPaginated, sendSuccess } from '../../../core/http/responses';
 import { AdminStatus, AdminTier, requireAdminIdentity } from '../../admin-identity/domain/admin-identity.types';
 import * as administrators from '../domain/administrator.service';
+import { activateAdministrator } from '../domain/activation.service';
 import { AuditRepository } from '../../audit/repositories/audit.repository';
 import { toAuditEntryDto } from '../../audit/domain/audit.dto';
 import { ListAuditQuery } from '../../audit/validators/audit.validator';
@@ -176,6 +177,24 @@ export class AdministratorController {
         sendOutcome(
             res,
             await administrators.reinstateAdministrator(identity, req.params.adminId, requestContext(req)),
+        );
+    });
+
+    /**
+     * POST /api/v1/administrators/:adminId/activate
+     *
+     * `sendSuccess`, not `sendOutcome` — activation is never queued for a second Developer.
+     * Promotion to tier 1 is dual-controlled because it creates a peer; activation merely lets
+     * somebody hold the level they were already created at, under `assertMayCreate`. See
+     * `domain/activation.service.ts`.
+     */
+    static activate = asyncHandler(async (req: Request, res: Response) => {
+        const identity = requireAdminIdentity(req);
+
+        sendSuccess(
+            res,
+            await activateAdministrator(identity, req.params.adminId, requestContext(req)),
+            { message: 'Administrator activated' },
         );
     });
 

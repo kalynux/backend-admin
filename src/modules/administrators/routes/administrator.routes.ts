@@ -156,12 +156,45 @@ defineRoute(router, {
     handler: AdministratorController.reinstate,
 });
 
+/**
+ * Let a pending administrator in (ADR-023 D-1).
+ *
+ * ── Tier 1, through an `escalation`-flagged permission ───────────────────────
+ * Not because activation is an especially senior act, but because it REQUIRES READING THE
+ * EMPLOYEE RECORD, and only tier 1 may read one. An Admin able to activate would be waving
+ * through a person whose file they cannot open.
+ *
+ * The consequence was accepted deliberately: a tier-2 Admin can create a Support account and
+ * cannot turn it on, so every new hire waits on a Developer.
+ *
+ * ── `mayRecord`, not `records` ───────────────────────────────────────────────
+ * Activating an already-active account returns it unchanged and writes nothing, which is an
+ * idempotent success rather than a failure — two Developers clicking one button, or one
+ * retrying after a timeout. The audit probe checks a `records` declaration against ANY 2xx, so
+ * `records` here would log a `fatal` AUDIT GAP on every such retry.
+ *
+ * Same reasoning as `administrators.tier.set` below, reached from a different direction: there
+ * a success may record nothing because it QUEUED, here because it did nothing.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/:adminId/activate',
+    access: permission('administrators.activate'),
+    validate: { params: AdminIdParamSchema },
+    audit: mayRecord('administrators.activate'),
+    handler: AdministratorController.activate,
+});
+
 defineRoute(router, {
     mountedAt,
     method: 'put',
     path: '/:adminId/tier',
-    // The only escalation-flagged permission in the catalog — Developer tier only, and
-    // promoting TO Developer additionally queues for a second Developer.
+    // ⚠ This said "the only escalation-flagged permission in the catalog" and there are now
+    // THREE — `administrators.mfa.reset` joined at Phase 12 and `administrators.activate` at
+    // ADR-023. What is still true of this one, and is the point the comment was making:
+    // Developer tier only, and promoting TO Developer additionally queues for a second
+    // Developer.
     access: permission('administrators.tier.set'),
     validate: { params: AdminIdParamSchema, body: SetTierSchema },
     /**

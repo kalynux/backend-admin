@@ -21,6 +21,16 @@ export interface CreateAdminInput {
     department?: string | null;
     /** The administrator who created this one. Null for the bootstrap CLI. */
     createdBy?: string | null;
+    /**
+     * The status to create at. Defaults to `pending` (ADR-023 D-1) — a new administrator is an
+     * unverified person until a Developer has read their employee record.
+     *
+     * ⚠ **Exactly ONE caller passes `'active'`, and it must stay exactly one**: the bootstrap
+     * CLI, creating the first administrator, who has nobody to activate them. Anything else
+     * passing it is creating an account that skipped the gate, and the parameter exists so
+     * that doing so is a visible argument at a call site rather than a default nobody reads.
+     */
+    status?: AdminStatus;
 }
 
 /** Fields an administrator may change on a profile — their own or someone else's. */
@@ -61,7 +71,8 @@ export class AdminAccountRepository {
             password_hash: input.passwordHash,
             password_updated_at: new Date(),
             tier: input.tier,
-            status: 'active',
+            // `pending` unless a caller says otherwise — see the ⚠ on `CreateAdminInput.status`.
+            status: input.status ?? ('pending' as AdminStatus),
             job_title: input.jobTitle ?? null,
             department: input.department ?? null,
             created_by: input.createdBy ? new Types.ObjectId(input.createdBy) : null,
@@ -217,11 +228,29 @@ export class AdminAccountRepository {
         );
     }
 
-    /** Suspend with provenance, or reinstate and clear it. */
+    /**
+     * Suspend with provenance, or reinstate and clear it.
+     *
+     * ── ⚠ REINSTATEMENT RESTORES THE PRIOR STATUS, NOT `active` ─────────────
+     * It used to write `'active'` unconditionally, which was correct while `active` and
+     * `suspended` were the only two states. ADR-023 added `pending`, and the unconditional
+     * write became a privilege escalation with no actor: suspending a not-yet-activated
+     * administrator and reinstating them would ACTIVATE them, past the tier-1 decision that
+     * exists to let somebody in — and the audit trail would show a reinstatement, which is
+     * exactly what it was, rather than an activation, which is what it did.
+     *
+     * `suspendedFromStatus` is passed by the caller from the row it already loaded, and
+     * defaults to `'active'` so a Phase-3 row that predates the column reinstates as it always
+     * did. Restoring from a stored value rather than inferring it: `activated_at === null`
+     * looks like it would work and does not — the bootstrapped first administrator is active
+     * with a null `activated_at` by construction, so inference would demote the one account
+     * that may have nobody left to re-activate it.
+     */
     async setSuspension(
         adminId: string,
         suspension: { by: string; reason: string } | null,
         session: ClientSession,
+        suspendedFromStatus: AdminStatus = 'active',
     ): Promise<IAdminAccount | null> {
         if (!Types.ObjectId.isValid(adminId)) return null;
 
@@ -231,15 +260,76 @@ export class AdminAccountRepository {
                 suspended_at: new Date(),
                 suspended_by: new Types.ObjectId(suspension.by),
                 suspended_reason: suspension.reason,
+                // What to put back on reinstatement. Recorded at suspension time because it
+                // is the only moment the answer is known.
+                suspended_from_status: suspendedFromStatus,
             }
             : {
-                status: 'active' as AdminStatus,
+                // Never `suspended` — that would be a no-op reinstatement. A row somehow
+                // carrying it falls back to the historical behaviour rather than refusing,
+                // because a reinstatement that cannot complete strands the account.
+                status: (suspendedFromStatus === 'suspended' ? 'active' : suspendedFromStatus) as AdminStatus,
                 suspended_at: null,
                 suspended_by: null,
                 suspended_reason: null,
             };
 
         return AdminAccountModel().findByIdAndUpdate(adminId, { $set: update }, { new: true, session });
+    }
+
+    /**
+     * Activate a pending administrator, guarded by their CURRENT status.
+     *
+     * `{ _id, status: 'pending' }` is a compare-and-set, and it is the same defence
+     * `setTier`'s `expectedTier` provides: two Developers activating one account concurrently
+     * would both read `pending`, both write, and `activated_by` would name whoever committed
+     * last while the audit trail carried two activations of an account that was only ever
+     * activated once. A miss returns `null` and the service reports a conflict.
+     *
+     * ⚠ It also refuses to activate a SUSPENDED account, by the same clause and deliberately.
+     * Re-admitting a suspended administrator is a reinstatement — a different act, a different
+     * permission, a different audit action, and one that is dual-controlled when the target is
+     * a Developer. Letting activation double as a back door around that would be the single
+     * most useful thing an attacker with tier-1 access could find.
+     */
+    async activate(
+        adminId: string,
+        activatedBy: string,
+        session: ClientSession,
+    ): Promise<IAdminAccount | null> {
+        if (!Types.ObjectId.isValid(adminId)) return null;
+        return AdminAccountModel().findOneAndUpdate(
+            { _id: adminId, status: 'pending' as AdminStatus },
+            {
+                $set: {
+                    status: 'active' as AdminStatus,
+                    activated_at: new Date(),
+                    activated_by: new Types.ObjectId(activatedBy),
+                },
+            },
+            { new: true, session },
+        );
+    }
+
+    /**
+     * Point the account at an avatar file, or clear it.
+     *
+     * Its own method rather than a field on `updateProfile`, because the two have different
+     * audiences: `updateProfile` is reachable both self-service and by an administrator
+     * editing somebody else (`PATCH /administrators/:adminId`), and an avatar is the
+     * caller's own picture. Folding it in would silently let one administrator set another's.
+     */
+    async setAvatar(
+        adminId: string,
+        fileId: string | null,
+        session?: ClientSession,
+    ): Promise<IAdminAccount | null> {
+        if (!Types.ObjectId.isValid(adminId)) return null;
+        return AdminAccountModel().findByIdAndUpdate(
+            adminId,
+            { $set: { avatar_file_id: fileId ? new Types.ObjectId(fileId) : null } },
+            { new: true, session: session ?? null },
+        );
     }
 
     /**

@@ -53,4 +53,22 @@ export const NON_ROUTE_AUDIT_PRODUCERS: Readonly<Record<string, readonly AuditAc
      * `actor.kind` is `system` and the context says `CLI`.
      */
     'scripts/bootstrap-admin.ts': ['administrators.create'],
+
+    /**
+     * The staff identity-document upload (ADR-023).
+     *
+     * ⚠ It IS reached by a route — `POST /employees/me/documents/:slot` — and still belongs
+     * here, which is the one case in this registry that needs explaining.
+     *
+     * That route declares `employees.documents.attach`, the `wi-admin` write that files the
+     * returned id into a slot. `employees.documents.upload` is emitted one step earlier, by
+     * the gateway, as an ATTEMPT committed BEFORE the bytes are streamed — the fail-closed
+     * posture that means an unreachable audit store stores no identity document.
+     *
+     * The route cannot declare both: the audit probe checks a `records` declaration against
+     * any 2xx, and the attempt row is written under a different transport (`external` — the
+     * bytes land in jovi-mall's database, which no wi-admin ClientSession can join). Declaring
+     * the attempt would make every SUCCESSFUL upload look like an unmet declaration.
+     */
+    'employees/gateways/employee-document.gateway.ts#uploadStaffDocument': ['employees.documents.upload'],
 });

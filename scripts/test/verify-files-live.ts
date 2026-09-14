@@ -363,7 +363,10 @@ async function main(): Promise<number> {
             const session = await adminConnection().startSession();
             try {
                 await session.withTransaction(async () => {
-                    await accounts.create({ email, displayName, passwordHash, tier }, session);
+                    // ⚠ `status: 'active'` because ADR-023 made `pending` the default, and a pending
+                    // fixture is refused every route this suite exercises. Fixtures, not the
+                    // audited path — a real hire is activated by a Developer.
+                    await accounts.create({ email, displayName, passwordHash, tier, status: 'active' }, session);
                 });
             } finally {
                 await session.endSession();

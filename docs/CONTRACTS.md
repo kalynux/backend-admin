@@ -71,9 +71,11 @@ Small, but free to avoid.
 
 ---
 
-## 2 · Authorization — 118 permissions, granted by tier
+## 2 · Authorization — 121 permissions, granted by tier
 
-`npm run authz:matrix` on **2026-09-08**: **118 permissions across 20 families**.
+⚠ Re-measured **2026-09-14**: **121 permissions across 21 families** (ADR-023 added the `employees` family and `administrators.activate`, all tier 1). The 2026-09-08 measurement below read 118 across 20.
+
+`npm run authz:matrix` on **2026-09-14**: **121 permissions across 21 families**.
 
 | Tier | Holds |
 |---|---|

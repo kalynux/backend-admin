@@ -350,6 +350,53 @@ export const ERROR_CODES = Object.freeze({
      */
     ADMIN_ACCOUNT_ALREADY_EXISTS: 'ADMIN_ACCOUNT_ALREADY_EXISTS',
 
+    // ── ADMINISTRATOR ACTIVATION (ADR-023) ────────────────────────────────────
+    //
+    // Four codes rather than one, because a client's remedy differs for each and "activation
+    // failed" tells a Developer nothing about which of four things to do next.
+
+    /**
+     * The employee record is missing something the required set names.
+     *
+     * `details.gaps` carries the full checklist — the SAME codes the employee sees on their
+     * own record — so the dashboard can render one list rather than two that drift.
+     * `business_rule` category, so `details` reaches the client.
+     */
+    ADMIN_ACTIVATION_INCOMPLETE: 'ADMIN_ACTIVATION_INCOMPLETE',
+    /**
+     * The account is suspended, and activation deliberately does not lift a suspension —
+     * that is a reinstatement, with its own permission and its own dual-control rule.
+     */
+    ADMIN_ACTIVATION_SUSPENDED: 'ADMIN_ACTIVATION_SUSPENDED',
+    /** A Developer tried to activate themselves. Another Developer must do it. */
+    ADMIN_ACTIVATION_SELF: 'ADMIN_ACTIVATION_SELF',
+    /** The compare-and-set missed: somebody moved the status between the check and the write. */
+    ADMIN_ACTIVATION_CONFLICT: 'ADMIN_ACTIVATION_CONFLICT',
+
+    /**
+     * A `pending` administrator reached a route outside `ONBOARDING_ROUTE_ALLOWLIST`.
+     *
+     * ⚠ Its own code rather than reusing `ADMIN_AUTH_ACCOUNT_SUSPENDED` or a bare 403, and the
+     * distinction is the whole point: a suspended administrator has been shut OUT and the
+     * remedy is a conversation; a pending one has not been let IN yet and the remedy is to
+     * finish their record. A dashboard that cannot tell them apart shows the wrong screen to
+     * every new hire on their first day.
+     */
+    ADMIN_ACTIVATION_REQUIRED: 'ADMIN_ACTIVATION_REQUIRED',
+
+    // ── EMPLOYEE RECORD (ADR-023) ─────────────────────────────────────────────
+    /** A single-value slot was offered more than one file, or a multi-value slot is full. */
+    EMPLOYEE_SLOT_FULL: 'EMPLOYEE_SLOT_FULL',
+    /**
+     * The slot does not hold that file id.
+     *
+     * ⚠ 404 rather than 403, always. The record was loaded by the CALLER's own id, so another
+     * administrator's file is simply not in the slot — and answering 403 would confirm the id
+     * names a real staff document belonging to somebody else, which is exactly the fact this
+     * surface must not disclose.
+     */
+    EMPLOYEE_DOCUMENT_NOT_FOUND: 'EMPLOYEE_DOCUMENT_NOT_FOUND',
+
     // ── CONTRACTS ─────────────────────────────────────────────────────────────
 
     /**

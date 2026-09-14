@@ -93,6 +93,9 @@ export interface AdminProfileDto {
     displayName: string;
     tier: AdminTier;
     status: string;
+    /** Contact number. NOT a login factor — see admin-phone.service.ts. */
+    phone: string | null;
+    phoneVerified: boolean;
     jobTitle: string | null;
     department: string | null;
     timezone: string;
@@ -110,6 +113,8 @@ export function toAdminProfile(admin: IAdminAccount): AdminProfileDto {
         displayName: admin.display_name,
         tier: admin.tier,
         status: admin.status,
+        phone: admin.phone,
+        phoneVerified: admin.phone_verified,
         jobTitle: admin.job_title,
         department: admin.department,
         timezone: admin.timezone,

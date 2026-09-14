@@ -55,6 +55,32 @@ defineRoute(router, {
 });
 
 /**
+ * The identity documents behind the verification verdict.
+ *
+ * ⚠ **`agencies.read`, the Support-tier lookup**, deliberately rather than a review-scoped
+ * permission: Support answers "why was my agency rejected" tickets and cannot do it from a
+ * status alone. The verdict WRITE (`/verify`, `/reject`) is the act with consequences and keeps
+ * its own permission.
+ *
+ * Metadata and file HANDLES only, never bytes — the picture comes from
+ * `GET /api/v1/files/:fileId/content`, behind `files.content.read` and **audited**.
+ *
+ * A DELEGATED read, unlike the detail above. Two reasons, both in the gateway: the documents
+ * are in a private storage tree whose rule must not be re-implemented here, and an agency's
+ * depot addresses live on the **Magazin** rather than on the agency document.
+ *
+ * Declared above `/:agencyId/roster` and the rest; no `/:agencyId/…` sibling can shadow it.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/:agencyId/verification',
+    access: permission('agencies.read'),
+    validate: { params: AgencyIdParamSchema },
+    handler: AgencyController.verification,
+});
+
+/**
  * The roster needs BOTH permissions, in `all` mode.
  *
  * `agencies.read` because the subject is an agency, and `agents.read` because the rows

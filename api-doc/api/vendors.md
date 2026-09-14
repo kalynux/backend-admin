@@ -17,6 +17,7 @@ Design record: [`../../docs/ADR-008-VENDOR-MANAGEMENT.md`](../../docs/ADR-008-VE
 | `GET` | `/vendors/:vendorId/products` | `vendors.read` | direct read | — |
 | `GET` | `/vendors/:vendorId/agencies` | `vendors.read` **+** `agencies.read` | direct read | — |
 | `GET` | `/vendors/:vendorId/activity` | `vendors.read` **+** `audit.read` | direct read | — |
+| `GET` | `/vendors/:vendorId/verification` | `vendors.read` | **delegated** | — |
 | `POST` | `/vendors/:vendorId/suspend` | `vendors.suspend` | **delegated** | ✅ |
 | `POST` | `/vendors/:vendorId/restore` | `vendors.suspend` | **delegated** | ✅ |
 | `POST` | `/vendors/:vendorId/kyc/approve` | `vendors.kyc.review` | **delegated** | ✅ |
@@ -866,6 +867,31 @@ The vendor DTO with `status: "active"`, plus `restoredProductCount` and `restore
 ### Audit
 
 `vendors.reinstate`
+
+---
+
+## `GET /vendors/:vendorId/verification`
+
+**The evidence the two verdicts below rest on** — identity-card scans, the selfie holding the
+card, the vendor's own geocoded home address, the hand-drawn location sketches, and the shop
+addresses on the account with a `geocoded` flag on each.
+
+Until this existed, the whole of what a reviewer could see here was
+`kyc_details.national_id_number` — a string the vendor typed, checkable against nothing.
+
+⚠ **It returns no verdict, no score and no `required` column.** The estimated-verdict badge and
+the pre-populated rejection reason are the dashboard's to compute; this endpoint supplies facts.
+⚠ **Every document has `url: null`** — the files are in a private storage tree. Render them
+through the audited `GET /files/:fileId/content`.
+
+Full contract, including the per-role checklist and the queue-filtering trap:
+**[verification.md](verification.md)**.
+
+| | |
+|---|---|
+| **Permission** | `vendors.read` — the Support-tier lookup, deliberately not `vendors.kyc.review` |
+| **Transport** | Delegated to jovi-mall |
+| **Audited** | No — the disclosure is the *picture*, and that is audited on `files.content.read` |
 
 ---
 

@@ -334,46 +334,37 @@ t.assert('snapshotOf produces the stored shape, with avatar_url null', () => {
         && Object.keys(built).sort().join(',') === 'avatar_url,department,id,job_title,name,source,tier';
 });
 /**
- * ⚠ **REPLACED 2026-08-25 (BR-015). The property still holds; the PROOF had to change.**
+ * ⚠ **RE-AIMED 2026-09-14 (ADR-023). The property survived; its REASON did not, for the
+ * second time.**
  *
- * This read:
+ * The 2026-08-25 version scanned `admin-identity`, `administrators` and `files` for the word
+ * "avatar" and asserted it appeared nowhere — a proxy for "no administrator-avatar surface
+ * exists". That surface now EXISTS: `admin_accounts.avatar_file_id` is a real column and
+ * `PUT /api/v1/employees/me/avatar` writes it. The scan duly went red, and it was right to:
+ * the sentence it was defending had become false.
  *
- *     !readCode('src/modules/files').some((f) => /multer|upload/i.test(f.code))
+ * **What is still true is narrower.** `snapshotOf` hardcodes `avatar_url: null` and does not
+ * read the new column, because the stored field is a URL and this service holds an ID —
+ * resolving one into the other needs a `jovi_mall.files` read, and `snapshotOf` is a
+ * synchronous pure function on the ticket-claim path. See its docblock: this is now a known
+ * follow-up, not a settled non-feature.
  *
- * — "no upload surface exists in this service" — and it was a fair proxy for
- * "nothing can populate `avatarUrl`" only while it was true service-wide. **It is not any
- * more:** decision L-2 deliberately built `POST /api/v1/files/upload`, a stream proxy that
- * pipes a multipart body to jovi-mall so an administrator can attach an image to an article
- * or a ticket. Eight files under `modules/files/` now match that grep, and the assertion
- * went red for a change that does not touch this property at all.
+ * So the assertion is aimed at the ONE function whose behaviour the wire contract depends on,
+ * rather than at a word across three modules. That is a better guard as well as a surviving
+ * one: it fails the day somebody populates the field (which should come with a doc change and
+ * a jovi-mall-side decision) and it no longer fails the day somebody merely mentions avatars.
  *
- * **What actually keeps `avatarUrl` null is narrower than "no uploads exist":**
- * `admin_accounts` stores no avatar, and no administrator-facing surface accepts one. The
- * new upload writes a `files` row in *jovi-mall* stamped `ownerType: 'admin'` — a platform
- * file owned by an administrator — and touches administrator IDENTITY nowhere. `snapshotOf`
- * still hardcodes `avatar_url: null`, which the assertion above proves directly by feeding
- * it a stored value and watching it be ignored.
- *
- * So the scan is re-aimed at the three modules where an administrator-avatar surface would
- * HAVE to live — the identity model, the administrator routes, and the file surface itself
- * — and looks for the concept rather than for the transport. Comments are stripped by
- * `readCode`, so the several prose mentions of "avatar" in those files (all about *platform*
- * avatars this service resolves for other people) do not trip it.
- *
- * It still fails the day somebody builds one, which is the whole job. **Deleting it was the
- * alternative and is worse**: the field would stay on the wire with nothing checking the
- * reason it is null.
+ * ⚠ It deliberately does NOT assert that `avatar_file_id` is unread service-wide — it is read,
+ * by the administrator DTO, which is correct and unrelated.
  */
-t.assert('no administrator-AVATAR surface exists — the reason the field stays null', () => {
-    const src = join(__dirname, '..', '..', 'src', 'modules');
-    const guarded = ['admin-identity', 'administrators', 'files']
-        .flatMap((module) => readCode(join(src, module)));
+t.assert('snapshotOf still hardcodes a null avatar and does not read avatar_file_id', () => {
+    const snapshot = files.find((f) => f.file.endsWith('admin-snapshot.ts'));
 
-    // It is looking at something — a path typo would make this pass by reading nothing,
-    // which is exactly how a guard ends up never running.
-    if (guarded.length < 10) return false;
+    // It is looking at something — a rename would make this pass by reading nothing, which
+    // is exactly how a guard ends up never running.
+    if (!snapshot) return false;
 
-    return !guarded.some((f) => /avatar/i.test(f.code));
+    return /avatar_url:\s*null/.test(snapshot.code) && !/avatar_file_id/.test(snapshot.code);
 });
 
 /**

@@ -28,16 +28,19 @@ the dashboard's behalf and returns the result in its own envelope.
 | [../FRONTEND-CHANGELOG-phase-2-3.md](../FRONTEND-CHANGELOG-phase-2-3.md) | **What readiness Phases 2 and 3 changed for this dashboard.** No endpoint changed; Tracking Allow became reliable, the database screen's permanent phantom index drift is gone, and there is still no geo-tracker data door |
 | [../FRONTEND-CHANGELOG-phase-4-5.md](../FRONTEND-CHANGELOG-phase-4-5.md) | **What readiness Phases 4 and 5 changed for this dashboard — the largest instalment so far.** 🔴 Every note this service created was filed **public**; an expired approval was still approvable; `resolvedByUserId` → `resolvedBy`. Plus **three new modules** (`content`, `files` orphans + permanent delete, `messaging`), a deleted `GET /audit/legacy`, and the deleted `customers.*` permissions |
 | [errors.md](errors.md) | The complete error-code registry, the nine categories, and the exposure rule |
-| [permissions.md](permissions.md) | All 118 permissions, the three administrator levels, and the grant matrix |
+| [permissions.md](permissions.md) | All 121 permissions, the three administrator levels, and the grant matrix |
 | [health.md](health.md) | `/health/live`, `/health/ready` — unversioned probes |
 | [auth.md](auth.md) | `/auth` — login, MFA, refresh, sessions, own password |
-| [administrators.md](administrators.md) | `/administrators` — administrator management, levels, suspension, sessions |
+| [administrators.md](administrators.md) | `/administrators` — administrator management, levels, **the `pending` → `active` lifecycle**, suspension, sessions |
+| [employees.md](employees.md) | `/employees` — **the staff employment record.** Identity documents, personal details, home address, payout destination and salary. ⚠ Tier 1 and the subject ONLY — an Admin who can manage the directory cannot open one of these. No listing route at any tier |
+| [geo.md](geo.md) | `/geo` — address search and reverse geocoding, delegated to jovi-mall's provider chain |
 | [authorization.md](authorization.md) | `/permissions`, `/approvals` — the policy, and the four-eyes queue |
 | [audit.md](audit.md) | `/audit` — the audit trail and exports |
 | [users.md](users.md) | `/users` — platform user directory, suspension, login identifiers |
 | [vendors.md](vendors.md) | `/vendors` — vendor directory, KYC, catalogue, suspension, settings |
 | [agencies.md](agencies.md) | `/agencies` — delivery agencies, verification, rosters, contracts |
 | [agents.md](agents.md) | `/agents` — delivery agents, KYC, tracking, COD threshold, bans, transfer |
+| [verification.md](verification.md) | **The evidence behind a KYC verdict**, for all three parties — identity scans, the selfie, the geocoded addresses, the sketches. ⚠ Read the "the backend grades nothing" section before building the badge: there is deliberately no `estimatedVerdict` field, and the required/optional rules are the dashboard's |
 | [contracts.md](contracts.md) | `/contracts` — one agent↔agency contract: the full terms, and the three administrative interventions |
 | [support.md](support.md) | `/support/tickets` — the support queue: assignment, lifecycle, followers, notes, attachments |
 | [orders.md](orders.md) | `/orders` — order directory, timeline, disputes, cancel, dispatch, refund |
@@ -60,6 +63,12 @@ Counted from the live route manifest, not from this table — re-counted **2026-
 figure stood at "230 across 23" and was stale by seven**, which is what a number written by hand
 beside a number produced by a boot does; it has now been stale twice, so **derive it rather than
 quoting it.** The route group is the 24th because ADR-022 added `/automation`.
+
+⚠ **It has moved again since that count and is stale a third time.** Identity verification added
+three on 2026-09-14 — one `GET /:id/verification` inside each of `/vendors`, `/agencies` and
+`/agents`, so no route group was added — and other work is in flight beside it. The figure above
+is deliberately **not** bumped by hand: doing that is how it was wrong the first two times.
+Derive it.
 
 There is **one further route that is not on this surface at all** and that the dashboard must
 never call: `POST /api/internal/automation/failures`, which the n8n automation layer uses to

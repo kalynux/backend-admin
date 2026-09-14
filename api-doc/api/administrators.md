@@ -1,6 +1,8 @@
 # `/administrators` — administrator management
 
-**Verified against source on 2026-09-08** — all seventeen routes, their guards and their audit actions against `administrators/routes/administrator.routes.ts` and the live route manifest; every request schema against `administrators/validators/administrator.validator.ts`; the three escalation refusals, the `409 AUTHZ_APPROVAL_REQUIRED` on creating a Developer and the idempotent tier no-op against `administrators/domain/administrator.service.ts:280-292,633-661`; and the ten `endReason` values against `admin-identity/models/admin-session.model.ts:24-53` (the page said eleven and listed ten).
+⚠ **Re-verified 2026-09-14: there are now EIGHTEEN routes, and every new account starts `pending` rather than `active` (ADR-023).** Read [the account lifecycle](#the-account-lifecycle) before building a creation or a sign-in screen.
+
+**Verified against source on 2026-09-08** — all seventeen routes then existing, their guards and their audit actions against `administrators/routes/administrator.routes.ts` and the live route manifest; every request schema against `administrators/validators/administrator.validator.ts`; the three escalation refusals, the `409 AUTHZ_APPROVAL_REQUIRED` on creating a Developer and the idempotent tier no-op against `administrators/domain/administrator.service.ts:280-292,633-661`; and the ten `endReason` values against `admin-identity/models/admin-session.model.ts:24-53` (the page said eleven and listed ten).
 
 Base path: `/api/v1/administrators`
 
@@ -22,6 +24,7 @@ the one question an administrator audit trail exists to answer.
 | `PATCH` | `/administrators/:adminId` | `administrators.update` | ✅ |
 | `GET` | `/administrators/:adminId/activity` | `audit.read` | — |
 | `GET` | `/administrators/:adminId/history` | `audit.read` | — |
+| `POST` | `/administrators/:adminId/activate` | `administrators.activate` | ✅ (may) |
 | `POST` | `/administrators/:adminId/suspend` | `administrators.suspend` | ✅ |
 | `POST` | `/administrators/:adminId/reinstate` | `administrators.suspend` | ✅ |
 | `PUT` | `/administrators/:adminId/tier` | `administrators.tier.set` | ✅ (may) |
@@ -33,6 +36,73 @@ the one question an administrator audit trail exists to answer.
 
 Every write on this surface additionally runs the **escalation rules** — see below. Two of
 them are **dual-controlled** and can answer `202`.
+
+---
+
+## The account lifecycle
+
+**⚠ Added 2026-09-14 (ADR-023). A newly created administrator is `pending`, not `active`, and
+this changed the meaning of `POST /administrators`.**
+
+```
+     POST /administrators                POST /:adminId/activate
+  ──────────────────────────►  pending  ──────────────────────────►  active
+                                  │        (tier 1, gated on the       │
+                                  │         employee record)           │
+                                  │                                    │
+                                  └────────────┐          ┌────────────┘
+                                        POST /:adminId/suspend
+                                               ▼
+                                          suspended
+                                               │
+                                     POST /:adminId/reinstate
+                                               │
+                       ┌───────────────────────┴───────────────────────┐
+                       ▼                                               ▼
+                    pending                                         active
+        (if it was pending when suspended)          (if it was active when suspended)
+```
+
+### What a `pending` administrator can do
+
+**They can sign in.** The credential check, MFA and refresh all work normally, and their session
+is a full one — it is not revoked and not scoped by a challenge.
+
+**They can reach their own account and nothing else.** Every other route answers
+**`403 ADMIN_ACTIVATION_REQUIRED`**. The complete set they *can* reach:
+
+| | |
+|---|---|
+| `GET /auth/me` · `POST /auth/logout` · `POST /auth/mfa/enroll` · `POST /auth/mfa/activate` | reached through the MFA-enrolment gate |
+| `GET /auth/sessions` · `DELETE /auth/sessions/:sessionId` · `POST /auth/logout-all` · `POST /auth/password` | their own session and credentials |
+| `GET`/`PATCH` `/administrators/me` · `GET /administrators/me/activity` | their own directory record |
+| The whole of [`/employees/me`](employees.md) | their own employee record — the reason the state exists |
+| [`GET /geo/search`](geo.md) · `GET /geo/reverse` | so they can geocode their home address |
+| `GET /permissions/me` | so the dashboard can render a shell |
+
+**⚠ `ADMIN_ACTIVATION_REQUIRED` is a different thing from `ADMIN_AUTH_ACCOUNT_SUSPENDED`, and a
+dashboard must not collapse them.** "Not let in yet" is not "shut out": the remedy for the first
+is to finish the employee record, and the remedy for the second is a conversation with somebody.
+Render the onboarding screen on `ADMIN_ACTIVATION_REQUIRED`, not an error page — otherwise every
+new hire's first morning looks like a fault.
+
+`GET /auth/me` and `GET /administrators/me` both carry `status`, so one call tells the dashboard
+which shell to render.
+
+### Why creation and activation are separate
+
+The person who can *create* an administrator is not always the person who can *vet* one. A
+tier-2 Admin holds `administrators.create` and can mint a Support account — and cannot activate
+it, because activating requires reading the employee record, which is tier 1 only. **So every
+new hire waits on a Developer.** That was accepted deliberately; it is the cost of the rule that
+staff records are tier-1-and-the-subject.
+
+### ⚠ Reinstating a suspended account restores what it was, not `active`
+
+A `pending` administrator who is suspended and then reinstated goes back to `pending`. Before
+ADR-023 reinstatement wrote `active` unconditionally, which was correct while `active` and
+`suspended` were the only two states — and became a way to activate somebody past the tier-1
+gate, with a trail that read "reinstated" because that is what was asked for.
 
 ---
 
@@ -81,7 +151,7 @@ the DTO is built by naming fields, not by deleting them from a spread.
 | `displayName` | string | |
 | `tier` | `1` \| `2` \| `3` | |
 | `tierLabel` | string | `"Developer"` \| `"Admin"` \| `"Support"` |
-| `status` | `"active"` \| `"suspended"` | |
+| `status` | `"pending"` \| `"active"` \| `"suspended"` | ⚠ **`pending` was added 2026-09-14 (ADR-023) and is now the DEFAULT for every new account.** See [the lifecycle](#the-account-lifecycle) below |
 | `jobTitle` | string \| null | |
 | `department` | string \| null | |
 | `timezone` | string | IANA zone |
@@ -94,6 +164,9 @@ the DTO is built by naming fields, not by deleting them from a spread.
 | `suspendedReason` | string \| null | |
 | `tierChangedAt` | ISO-8601 \| null | |
 | `tierChangedBy` | string \| null | |
+| `activatedAt` | ISO-8601 \| null | When a Developer let this account in. ⚠ **`null` does NOT mean "not activated"** — the bootstrapped first administrator is `active` with a null `activatedAt` forever, because nobody activated them. Read `status` for that |
+| `activatedBy` | string \| null | Administrator id |
+| `avatarFileId` | string \| null | A `jovi_mall.files` id, **never a URL**. Resolve it through [`GET /files?ids=`](files.md). Set by the owner at [`PUT /employees/me/avatar`](employees.md) |
 | `createdAt` | ISO-8601 | |
 
 > **Reinstating clears `suspendedAt`, `suspendedBy` and `suspendedReason`.** A suspension that
@@ -202,6 +275,15 @@ The administrator directory.
 ## `POST /administrators`
 
 Create an administrator.
+
+⚠ **The created account is `pending`, not `active` (ADR-023).** They can sign in immediately and
+can reach nothing but their own account until a tier-1 Developer activates them at
+[`POST /:adminId/activate`](#post-administratorsadminidactivate) — which requires their
+[employee record](employees.md) to be complete.
+
+**A tier-2 Admin holds this permission and does NOT hold `administrators.activate`**, so an
+Admin can create a Support account and cannot turn it on. Say so on the creation screen; a
+"created!" toast that does not mention the wait produces a ticket a week later.
 
 | | |
 |---|---|
@@ -320,6 +402,52 @@ Both:
 |---|---|
 | **Permission** | `audit.read` |
 | **Query / response / pagination / sorting** | Identical to `GET /audit` — see [audit.md](audit.md#get-audit) |
+
+---
+
+## `POST /administrators/:adminId/activate`
+
+Let a pending administrator in. **Added 2026-09-14 (ADR-023).**
+
+| | |
+|---|---|
+| **Permission** | `administrators.activate` — `escalation`-flagged, therefore **tier 1 only** |
+| **Dual control** | No |
+| **Body** | None |
+
+**Tier 1 not because activation is a senior act, but because it requires READING the employee
+record** — and only tier 1 may read one. An Admin able to activate would be admitting a person
+whose file they are not allowed to open, which is a rubber stamp rather than a decision.
+
+**Not dual-controlled**, unlike promotion to Developer. Promotion creates a peer who could
+remove the promoter; activation merely lets somebody hold the level they were already created
+at, and that level was chosen under the escalation rules when the account was made.
+
+### Response (200)
+
+The `Administrator`, now `status: "active"` with `activatedAt` and `activatedBy` set.
+
+**Idempotent.** Activating an already-active account returns it unchanged, writes nothing and
+records nothing — two Developers clicking the same button is not a fault.
+
+### Errors
+
+| Code | Status | What the client should do |
+|---|---|---|
+| `ADMIN_ACTIVATION_INCOMPLETE` | 422 | **Render `details.gaps`.** The employee record is missing something the required set names — same `{ code, section, message }` entries the employee sees on their own record. See [`employees.md`](employees.md#the-activation-gate) |
+| `ADMIN_ACTIVATION_SUSPENDED` | 409 | The account is suspended. Offer **reinstate**, not activate — activation deliberately does not lift a suspension |
+| `ADMIN_ACTIVATION_SELF` | 403 | A Developer tried to activate themselves. Another Developer must do it |
+| `ADMIN_ACTIVATION_CONFLICT` | 409 | Somebody moved the status between the check and the write. Reload |
+| `ADMIN_ACCOUNT_NOT_FOUND` | 404 | |
+
+**⚠ Activation is not a back door around a suspension**, and the `409` is the guard. Re-admitting
+a suspended administrator is a *reinstatement*: a different permission, a different audit action,
+and dual-controlled when the target is a Developer.
+
+### Audit
+
+`administrators.activate`, `wi_admin_txn` — the status change and its row commit together. The
+idempotent no-op records nothing, which is why the route declares *may record*.
 
 ---
 

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { AuthController } from '../controllers/auth.controller';
+import { AdminPhoneController } from '../controllers/admin-phone.controller';
 import { defineRoute, mayRecord, mfaEnrolment, publicRoute, records, selfService } from '../../../api/route-manifest';
 import {
     authRateLimiter,
@@ -11,6 +12,8 @@ import {
     MfaVerifySchema,
     MfaActivateSchema,
     SessionIdParamSchema,
+    SetAdminPhoneSchema,
+    ConfirmAdminPhoneSchema,
 } from '../validators/auth.validator';
 
 /**
@@ -212,3 +215,59 @@ defineRoute(router, {
 });
 
 export const authRoutes = router;
+
+/**
+ * ── An administrator's own phone number ──────────────────────────────────────
+ *
+ * Proved by a WhatsApp OTP that **jovi-mall** sends and judges — it owns the Cloud API
+ * credentials, the 24-hour window bookkeeping and the templates — while the record stays here,
+ * because administrators live in this database and jovi-mall has no row to stamp. ADR-004 D-2's
+ * split applied to a new case.
+ *
+ * ⚠ **This is a CONTACT detail, not a second login factor.** Administrators already have TOTP,
+ * which is stronger than a WhatsApp OTP; nothing in the auth path reads `phone_verified`, and
+ * wiring it in would weaken the login rather than harden it.
+ *
+ * `selfService` for the same reason as the rest of `/me`: these act on the caller's own
+ * identity, and a permission granted to all three tiers is noise rather than policy.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'patch',
+    path: '/me/phone',
+    access: selfService('Sets the caller’s own contact phone'),
+    validate: { body: SetAdminPhoneSchema },
+    // Recorded: it changes how the platform reaches an administrator, and it silently
+    // un-verifies a number that was previously proved.
+    audit: records('administrators.profile.phone_set'),
+    handler: AdminPhoneController.setPhone,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/me/phone/verify/request',
+    access: selfService('Sends a verification code to the caller’s own number'),
+    /**
+     * `mayRecord`, and a successful send records NOTHING — the same shape as `/refresh` above
+     * and for the same reason: a resend is routine (the cooldown permits one a minute) and a
+     * row per code would bury the outcome underneath it. What matters is the verification, and
+     * that records on the confirm below.
+     *
+     * ⚠ It cannot simply OMIT `audit`: `defineRoute` requires one on every mutating method, so
+     * "records nothing" has to be stated rather than left off. That is the point of the rule —
+     * a missing audit and a deliberate silence look identical in a diff otherwise.
+     */
+    audit: mayRecord('administrators.profile.phone_set'),
+    handler: AdminPhoneController.requestCode,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/me/phone/verify/confirm',
+    access: selfService('Proves the caller’s own number'),
+    validate: { body: ConfirmAdminPhoneSchema },
+    audit: records('administrators.profile.phone_verified'),
+    handler: AdminPhoneController.confirmCode,
+});

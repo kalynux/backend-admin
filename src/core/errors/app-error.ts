@@ -125,6 +125,23 @@ export const DEFAULT_MESSAGES: Partial<Record<ErrorCode, string>> = {
     [ERROR_CODES.ADMIN_ACCOUNT_NOT_FOUND]: 'Administrator not found',
     [ERROR_CODES.ADMIN_SESSION_NOT_FOUND]: 'Session not found',
     [ERROR_CODES.ADMIN_ACCOUNT_ALREADY_EXISTS]: 'An administrator with this email already exists',
+
+    // Activation (ADR-023). Four messages, because four different people act on them: the
+    // employee, the Developer activating, whoever suspended the account, and nobody at all.
+    [ERROR_CODES.ADMIN_ACTIVATION_INCOMPLETE]: 'This employee record is not complete enough to activate',
+    [ERROR_CODES.ADMIN_ACTIVATION_SUSPENDED]: 'This account is suspended — reinstate it rather than activating it',
+    [ERROR_CODES.ADMIN_ACTIVATION_SELF]: 'You cannot activate your own account',
+    [ERROR_CODES.ADMIN_ACTIVATION_CONFLICT]: 'This account is no longer pending',
+    /**
+     * The message a new administrator sees on every route they cannot reach yet, so it has to
+     * say what to DO rather than what went wrong. "Forbidden" would send them to support on
+     * their first morning.
+     */
+    [ERROR_CODES.ADMIN_ACTIVATION_REQUIRED]:
+        'Your account is awaiting activation. Complete your employee record — a Developer activates it from there',
+
+    [ERROR_CODES.EMPLOYEE_SLOT_FULL]: 'This document slot is full',
+    [ERROR_CODES.EMPLOYEE_DOCUMENT_NOT_FOUND]: 'Document not found in this slot',
     [ERROR_CODES.PAYOUT_DESTINATION_ABSENT]: 'This payout request carries no destination on file',
 
     // Live tracking (Phase 6.I). Three messages, because three different people fix them:

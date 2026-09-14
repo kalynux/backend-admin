@@ -15,6 +15,7 @@ import { ContractEventReadRepository, distinctAgentIds } from '../repositories/c
 import { ContractReadRepository } from '../repositories/contract.read.repository';
 import { toContractEventDto, toRosterEntryDto } from '../read-models/contract.dto';
 import { AgencyPoliciesDto, toAgencyPoliciesDto } from '../read-models/agency-policies.dto';
+import { verificationRecord } from '../../verification/gateways/verification.gateway';
 /**
  * The contract-history feed names agents, and this is the name-only read of them.
  *
@@ -389,6 +390,45 @@ export class AgencyController {
         );
 
         sendPaginated(res, page.items.map(toAuditEntryDto), page.meta);
+    });
+
+    /**
+     * GET /api/v1/agencies/:agencyId/verification — the evidence the verdict rests on.
+     *
+     * ── What this closes ─────────────────────────────────────────────────────────
+     * The two verdicts below decide whether an agency may operate — which means whether it
+     * may hold a vendor's stock and collect a customer's cash — and the whole of what an
+     * administrator could see before pressing either was `registration_number` and
+     * `transport_license_id`. Both describe a COMPANY. Neither identifies the person who will
+     * be holding the money.
+     *
+     * This returns the identity-card scans of that person, the selfie holding the card, their
+     * own geocoded home address, the hand-drawn location sketches, and the magazin's
+     * `headquarters_addresses` with a `geocoded` flag on each. `national_id_number` is new on
+     * the agency block and is here too.
+     *
+     * ⚠ **The depot addresses come from the MAGAZIN, not from this document** — business
+     * identity is not kept on the agency profile — which is one of the two reasons this read
+     * is delegated to jovi-mall rather than performed directly. The other is that the
+     * documents must pass through the service that owns the private-tree rule; see the
+     * gateway.
+     *
+     * ── ⚠ It returns NO VERDICT AND NO SCORE ─────────────────────────────────────
+     * No `estimatedVerdict`, no `complete`, no `required` column. The dashboard owns the
+     * required/optional rules — including the conditional one, where a home address matters
+     * only for an agency with no premises of its own — computes the badge, and pre-populates
+     * the reason it sends to `/reject`.
+     *
+     * ── ⚠ Every document has `url: null` ─────────────────────────────────────────
+     * Private `kyc/` tree; `access` is `authorized` and the `id` is the handle. Render through
+     * the audited `GET /api/v1/files/:fileId/content`.
+     */
+    static verification = asyncHandler(async (req: Request, res: Response) => {
+        await loadOr404(req.params.agencyId);
+        sendSuccess(
+            res,
+            await verificationRecord('agency', req.params.agencyId, actorContextOf(req)),
+        );
     });
 
     /**

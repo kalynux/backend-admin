@@ -44,9 +44,32 @@ export function isAdminTier(value: unknown): value is AdminTier {
     return value === 1 || value === 2 || value === 3;
 }
 
-export type AdminStatus = 'active' | 'suspended';
+/**
+ * An administrator account's lifecycle state — and note that `pending` is not a flavour of
+ * `suspended`, it is the state every account starts in.
+ *
+ *   `pending`    Created, can SIGN IN, and can reach nothing but their own account.
+ *                A new administrator is an unverified person until a Developer has read
+ *                their employee record and said otherwise (ADR-023 D-1). They exist so they
+ *                can enrol two-factor, upload their identity evidence and fill in the record
+ *                that gets them activated — that, and nothing else.
+ *   `active`     Activated by a tier-1 Developer. Permissions apply normally.
+ *   `suspended`  Access withdrawn. Sessions are destroyed on the next request.
+ *
+ * ⚠ **The ORDER of this union and of `ADMIN_STATUSES` is a contract.** It is the Mongoose
+ * enum, the dashboard's filter vocabulary and the `z.enum` on the directory query. Adding a
+ * value is additive; reordering is not, and neither is renaming one.
+ *
+ * ⚠ **`pending` and `suspended` are not interchangeable and must never be merged.** They
+ * answer opposite questions — "has this person been let in yet" versus "has this person been
+ * shut out" — and a directory that cannot tell them apart cannot answer either. They also
+ * behave differently at the gate: a suspended administrator's sessions are destroyed and the
+ * request is refused, while a pending one keeps their session and is refused only the routes
+ * outside `ONBOARDING_ROUTE_ALLOWLIST`.
+ */
+export type AdminStatus = 'pending' | 'active' | 'suspended';
 
-export const ADMIN_STATUSES: readonly AdminStatus[] = ['active', 'suspended'] as const;
+export const ADMIN_STATUSES: readonly AdminStatus[] = ['pending', 'active', 'suspended'] as const;
 
 /** How a request proved its identity. The CSRF guard depends on this distinction. */
 export type AdminAuthMethod = 'cookie' | 'bearer';
@@ -66,6 +89,17 @@ export interface AdminIdentity {
      * nothing else — `requireAdmin` rejects it everywhere else.
      */
     pendingMfaEnrolment: boolean;
+    /**
+     * True when this administrator's account is still `pending` — created, able to sign in,
+     * and not yet activated by a Developer.
+     *
+     * Such a session reaches only `ONBOARDING_ROUTE_ALLOWLIST` and nothing else;
+     * `requireAdmin` refuses it everywhere outside that set, for the same reason and by the
+     * same mechanism as `pendingMfaEnrolment` above. Handlers should not branch on this — the
+     * gate has already decided — but a DTO may surface it so the dashboard can render the
+     * onboarding screen instead of a dashboard the caller cannot load.
+     */
+    pendingActivation: boolean;
     /** When the session was established — not when this request arrived. */
     authenticatedAt: Date;
     /** The session's ABSOLUTE deadline; idle expiry is enforced separately by the Redis TTL. */

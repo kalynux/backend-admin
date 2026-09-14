@@ -16,6 +16,7 @@ Design record: [`../../docs/ADR-009-DELIVERY-NETWORK.md`](../../docs/ADR-009-DEL
 | `GET` | `/agencies/:agencyId/agents` | `agencies.read` **+** `agents.read` | direct read | — |
 | `GET` | `/agencies/:agencyId/contract-history` | `agencies.read` | direct read | — |
 | `GET` | `/agencies/:agencyId/activity` | `agencies.read` **+** `audit.read` | direct read | — |
+| `GET` | `/agencies/:agencyId/verification` | `agencies.read` | **delegated** | — |
 | `POST` | `/agencies/:agencyId/verify` | `agencies.verify` | **delegated** | ✅ |
 | `POST` | `/agencies/:agencyId/reject` | `agencies.verify` | **delegated** | ✅ |
 | `POST` | `/agencies/:agencyId/deactivate` | `agencies.deactivate` | **delegated** | ✅ |
@@ -396,6 +397,33 @@ domains behind other permissions.
 ### Response (200)
 
 Audit entries — identical shape to [`GET /audit`](audit.md#get-audit).
+
+---
+
+## `GET /agencies/:agencyId/verification`
+
+**The evidence the two verdicts below rest on.** `registration_number` and
+`transport_license_id` — the whole of what a reviewer could previously see — both describe a
+*company*; neither identifies the person who will be holding a customer's cash. This returns
+that person's identity-card scans, the selfie holding the card, their geocoded home address, the
+hand-drawn sketches, and the magazin's depot addresses with a `geocoded` flag on each.
+`national_id_number` is new on the agency block and is here too.
+
+⚠ **No verdict, no score, no `required` column** — the badge and the pre-populated rejection
+reason are the dashboard's. ⚠ **Every document has `url: null`**: private storage tree, rendered
+through the audited `GET /files/:fileId/content`.
+
+⚠ The depot addresses come from the **Magazin**, not from the agency document — which is one of
+the two reasons this read is delegated rather than performed directly like the rest of this
+screen.
+
+Full contract: **[verification.md](verification.md)**.
+
+| | |
+|---|---|
+| **Permission** | `agencies.read` — the Support-tier lookup |
+| **Transport** | Delegated to jovi-mall |
+| **Audited** | No — the disclosure is the picture, audited on `files.content.read` |
 
 ---
 

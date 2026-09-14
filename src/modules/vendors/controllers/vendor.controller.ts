@@ -30,6 +30,7 @@ import {
 import { toVendorAgencyConnectionDto } from '../read-models/vendor-agency-connection.dto';
 import { VendorReadModel, VendorReadRepository } from '../repositories/vendor.read.repository';
 import { toVendorPoliciesDto } from '../read-models/vendor-policies.dto';
+import { verificationRecord } from '../../verification/gateways/verification.gateway';
 import {
     ListVendorActivityQuery,
     ListVendorAgenciesQuery,
@@ -697,6 +698,40 @@ export class VendorController {
         sendSuccess(res, updated, {
             message: `Vendor restored — ${updated.restoredProductCount ?? 0} listing(s) back on sale`,
         });
+    });
+
+    /**
+     * GET /api/v1/vendors/:vendorId/verification — the evidence the KYC verdict rests on.
+     *
+     * ── What this closes ─────────────────────────────────────────────────────────
+     * The two writes below decide whether a vendor is a real, accountable trader, and the
+     * only thing an administrator could see before pressing either was
+     * `kyc_details.national_id_number` — a string the vendor typed in, checkable against
+     * nothing. This returns the identity-card scans, the selfie holding the card, the
+     * vendor's own geocoded home address, the hand-drawn location sketches, and — read from
+     * the vendor's `business_addresses` — the shop addresses on the account with a
+     * `geocoded` flag on each.
+     *
+     * ── ⚠ It returns NO VERDICT AND NO SCORE, and that is the design ─────────────
+     * No `estimatedVerdict`, no `complete`, no `required` column. The dashboard owns the
+     * required/optional rules — including the conditional ones, where a home address matters
+     * only for a vendor with no physical shop — computes the badge, and pre-populates the
+     * rejection reason it sends to `/kyc/reject`. A second copy of those rules here would be
+     * the same policy in two repositories, and the one that moves when the reviewers change
+     * their minds is the dashboard's.
+     *
+     * ── ⚠ Every document has `url: null` ─────────────────────────────────────────
+     * The files live in jovi-mall's private `kyc/` tree, so `access` is `authorized` and the
+     * `id` is the handle. Render them through `GET /api/v1/files/:fileId/content` — behind
+     * `files.content.read` and **audited**, because looking at the picture is the disclosure
+     * and that is where the row belongs. A broken image here means the client used `url`.
+     */
+    static verification = asyncHandler(async (req: Request, res: Response) => {
+        await loadOr404(req.params.vendorId);
+        sendSuccess(
+            res,
+            await verificationRecord('vendor', req.params.vendorId, actorContextOf(req)),
+        );
     });
 
     /** POST /api/v1/vendors/:vendorId/kyc/approve */

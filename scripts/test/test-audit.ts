@@ -93,6 +93,7 @@ const identity = (tier: 1 | 2 | 3, adminId = ADMIN_ID): AdminIdentity => ({
     status: 'active',
     mfaEnrolled: true,
     pendingMfaEnrolment: false,
+    pendingActivation: false,
     authenticatedAt: new Date('2026-08-11T09:00:00.000Z'),
     sessionExpiresAt: new Date('2026-08-18T09:00:00.000Z'),
     authMethod: 'cookie',
@@ -819,7 +820,7 @@ t.assert('no service or gateway imports AuditLogModel directly — only the writ
     return offenders.every((file) => file.endsWith('audit-export.service.ts'));
 });
 
-t.assert('exactly the 6 escalation-critical writes take a REQUIRED ClientSession', () => {
+t.assert('exactly the 7 escalation-critical writes take a REQUIRED ClientSession', () => {
     const repo = readFileSync(
         join(SRC, 'modules', 'admin-identity', 'repositories', 'admin-account.repository.ts'),
         'utf8',
@@ -833,9 +834,19 @@ t.assert('exactly the 6 escalation-critical writes take a REQUIRED ClientSession
      * `clearMfa` earns the sixth slot on the same argument as the other five: it removes the
      * strongest control on a privileged account, which belongs in the same column as
      * creating one or changing its level.
+     *
+     * ── ADR-023 adds the seventh: `activate` ─────────────────────────────────
+     * It is the act that turns a `pending` account into a working one, so it belongs squarely
+     * in this column — an activation nobody can point at a row for is an administrator who
+     * appeared from nowhere.
+     *
+     * ⚠ **`setAvatar` arrived in the same change and is deliberately NOT here.** It takes
+     * `session?: ClientSession` and does not count, because it is not escalation-critical:
+     * it points an account at a picture in a public tree. Adding it would say this list is
+     * "every write", and the list's value is that it is *the consequential ones*.
      */
     const required = repo.match(/[^?]session: ClientSession/g) ?? [];
-    return required.length === 6;
+    return required.length === 7;
 });
 
 /**

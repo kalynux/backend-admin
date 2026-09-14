@@ -140,6 +140,35 @@ defineRoute(router, {
  * this costs nobody access; it states the dependency so that a future tier change cannot
  * quietly open a side door.
  */
+/**
+ * The identity documents behind the KYC verdict.
+ *
+ * ⚠ **`vendors.read`, the same Support-tier lookup as the detail** — deliberately, rather than
+ * `vendors.kyc.review`. Support answers "why was my shop rejected" tickets and cannot do it
+ * from a status alone; the review permission governs the WRITE, which is the act with
+ * consequences. That is the same call the header above makes for the rest of this module.
+ *
+ * What it returns is metadata and file HANDLES, never bytes. The picture comes from
+ * `GET /api/v1/files/:fileId/content`, behind `files.content.read` and **audited** — looking at
+ * somebody's identity card is the disclosure, and that is where the row belongs. Same split as
+ * `files.resolve` versus `files.content.read`, for the same reason.
+ *
+ * A DELEGATED read, unusually for this module: the documents are in a private storage tree and
+ * the rule that hides their URLs must not be applied a second time on this side. See the
+ * gateway.
+ *
+ * Declared among the `/:vendorId/…` siblings, which cannot shadow each other — different
+ * literal second segments.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/:vendorId/verification',
+    access: permission('vendors.read'),
+    validate: { params: VendorIdParamSchema },
+    handler: VendorController.verification,
+});
+
 defineRoute(router, {
     mountedAt,
     method: 'get',

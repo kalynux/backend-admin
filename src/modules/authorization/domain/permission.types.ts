@@ -58,12 +58,22 @@ export type PermissionFamily =
     // This service's own surfaces
     | 'permissions'
     | 'approvals'
-    | 'audit';
+    | 'audit'
+    /**
+     * The staff employment record (ADR-023).
+     *
+     * ⚠ Its own family rather than part of `administrators`, and the separation IS the access
+     * control: tier 2 holds `allInFamily('administrators')`, so a permission living there is a
+     * permission an Admin holds. A salary, a date of birth and a home address are a different
+     * kind of data with a different audience, and only tier 1 and the subject may see them.
+     */
+    | 'employees';
 
 export const PERMISSION_FAMILIES: readonly PermissionFamily[] = [
     'agents', 'agencies', 'billing', 'cod', 'money', 'orders', 'support', 'content',
     'files', 'messaging', 'users', 'vendors', 'shipments', 'administrators',
     'notifications', 'system', 'developer_tools', 'permissions', 'approvals', 'audit',
+    'employees',
 ] as const;
 
 /**
@@ -167,7 +177,7 @@ export interface PermissionSpec {
      * a permission for an unbuilt endpoint is the POINT of writing the catalog now, so
      * Phase 5 and 6 consume a decided policy instead of inventing one per endpoint.
      */
-    phase: 3 | 3.5 | 5 | 6 | 7 | 9 | 11 | 12 | 14 | 15 | 16 | 22;
+    phase: 3 | 3.5 | 5 | 6 | 7 | 9 | 11 | 12 | 14 | 15 | 16 | 22 | 23;
 }
 
 /** The four flags that make a permission too sharp to be granted by a wildcard. */

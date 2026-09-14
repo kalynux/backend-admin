@@ -337,7 +337,27 @@ t.section('5. Routes, permissions and the audit catalog');
 
 const agencyRoutes = routeManifest().filter((r) => r.fullPath.startsWith('/api/v1/agencies'));
 
-t.assert('nine agency routes are registered', () => agencyRoutes.length === 9);
+// Nine through Phase 6; ten since the KYC evidence read (2026-09-14).
+t.assert('ten agency routes are registered', () => agencyRoutes.length === 10);
+
+/**
+ * ⚠ The KYC evidence read is `agencies.read`, the Support-tier lookup, and is not audited.
+ *
+ * Same call as the vendor and agent screens, for the same reason: Support answers "why was my
+ * agency rejected" and cannot do it from a status. The verdict WRITES (`/verify`, `/reject`)
+ * keep their own permission, and the DISCLOSURE — looking at the identity card — happens on
+ * the audited `files.content.read`, not here.
+ *
+ * Narrowing this means narrowing all three in the same change.
+ */
+t.assert('the KYC evidence read is agencies.read and is not audited', () => {
+    const route = agencyRoutes.find((r) => r.fullPath === '/api/v1/agencies/:agencyId/verification');
+    return !!route
+        && route.method === 'get'
+        && route.access.kind === 'permission'
+        && route.access.permissions.includes('agencies.read')
+        && !route.audit;
+});
 
 t.assert('every one declares a permission', () =>
     agencyRoutes.every((r) => r.access.kind === 'permission'));
