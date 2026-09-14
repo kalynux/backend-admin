@@ -384,6 +384,28 @@ export const ERROR_CODES = Object.freeze({
      */
     ADMIN_ACTIVATION_REQUIRED: 'ADMIN_ACTIVATION_REQUIRED',
 
+    // ── PHONE VERIFICATION (ADR-023) ──────────────────────────────────────────
+    /**
+     * Verification was asked for on an account carrying no number.
+     *
+     * ⚠ Its own code rather than `VALIDATION_ERROR`, and the reason is the taxonomy rather
+     * than taste: the body was perfectly valid — there is no field to point at and no
+     * `details.fields` to carry. `VALIDATION_ERROR` is documented as a 400 schema failure, so
+     * raising it at 422 produced a code saying "validation" inside an envelope whose derived
+     * category said `business_rule`. `test:error-docs` § 3 is what catches that, by comparing
+     * every documented status against the sites that actually throw.
+     */
+    ADMIN_PHONE_NOT_SET: 'ADMIN_PHONE_NOT_SET',
+    /**
+     * The number jovi-mall proved is not the number now on the account.
+     *
+     * An administrator can change their number in the ten minutes between requesting a code
+     * and typing it, and jovi-mall — which holds no administrator row — cannot know that
+     * happened. 409 because it is exactly a conflict: two writes to one record raced, and the
+     * remedy is to request a new code rather than to correct anything in the request.
+     */
+    ADMIN_PHONE_VERIFICATION_MISMATCH: 'ADMIN_PHONE_VERIFICATION_MISMATCH',
+
     // ── EMPLOYEE RECORD (ADR-023) ─────────────────────────────────────────────
     /** A single-value slot was offered more than one file, or a multi-value slot is full. */
     EMPLOYEE_SLOT_FULL: 'EMPLOYEE_SLOT_FULL',

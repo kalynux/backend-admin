@@ -296,6 +296,13 @@ Developer nothing about which of five things to do next.
 | `ADMIN_ACTIVATION_SELF` | 403 | `authorization` | A Developer tried to activate their own account. Another Developer must do it. |
 | `ADMIN_ACTIVATION_CONFLICT` | 409 | `conflict` | The compare-and-set missed: somebody moved the status between the check and the write. Reload and look at the current status. |
 
+### Phone verification (ADR-023)
+
+| Code | Status | Category | Meaning |
+|---|---|---|---|
+| `ADMIN_PHONE_NOT_SET` | 422 | `business_rule` | Verification was requested on an account carrying no number. The body was valid — there is no field to point at and no `details.fields` — so this is deliberately **not** `VALIDATION_ERROR`. Send them to `PATCH /auth/me/phone` first. |
+| `ADMIN_PHONE_VERIFICATION_MISMATCH` | 409 | `conflict` | jovi-mall proved a number that is no longer the one on the account — the administrator changed it between requesting the code and typing it. Nothing is stamped. Request a new code against the current number. |
+
 ### Employee records (ADR-023)
 
 | Code | Status | Category | Meaning |

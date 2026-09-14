@@ -51,7 +51,7 @@ export class AdminPhoneService {
 
         if (!account.phone) {
             throw createAppError(
-                ERROR_CODES.VALIDATION_ERROR,
+                ERROR_CODES.ADMIN_PHONE_NOT_SET,
                 422,
                 'Set a phone number on your profile before verifying it',
             );
@@ -94,7 +94,7 @@ export class AdminPhoneService {
 
         if (!account.phone || data.phone !== account.phone) {
             throw createAppError(
-                ERROR_CODES.VALIDATION_ERROR,
+                ERROR_CODES.ADMIN_PHONE_VERIFICATION_MISMATCH,
                 409,
                 'That code was sent for a different number. Request a new one.',
             );

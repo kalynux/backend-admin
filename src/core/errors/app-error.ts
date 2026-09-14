@@ -140,6 +140,10 @@ export const DEFAULT_MESSAGES: Partial<Record<ErrorCode, string>> = {
     [ERROR_CODES.ADMIN_ACTIVATION_REQUIRED]:
         'Your account is awaiting activation. Complete your employee record — a Developer activates it from there',
 
+    [ERROR_CODES.ADMIN_PHONE_NOT_SET]: 'Set a phone number on your profile before verifying it',
+    [ERROR_CODES.ADMIN_PHONE_VERIFICATION_MISMATCH]:
+        'That code was sent for a different number. Request a new one',
+
     [ERROR_CODES.EMPLOYEE_SLOT_FULL]: 'This document slot is full',
     [ERROR_CODES.EMPLOYEE_DOCUMENT_NOT_FOUND]: 'Document not found in this slot',
     [ERROR_CODES.PAYOUT_DESTINATION_ABSENT]: 'This payout request carries no destination on file',
