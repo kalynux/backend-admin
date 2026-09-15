@@ -119,13 +119,19 @@ interface CascadeResult {
 }
 
 /**
- * Approve the agency's business verification.
+ * Approve the agency's business verification — record that a human has vetted it.
  *
- * jovi-mall performs it as a compare-and-set on `status: 'pending_verification'` and
- * answers `409 DELIVERY_AGENCY_STATUS_CONFLICT` on a miss — two administrators can hold
- * one agency's screen open, and the loser must be told the state moved rather than
- * overwrite the winner's stamp. That code reaches the dashboard unchanged in
- * `details.platformCode`.
+ * ⚠ **It does NOT activate the agency, and this comment used to say it compared on
+ * `status: 'pending_verification'`.** Since 2026-09-15 an agency promotes itself on a proved
+ * phone, so `status` and the KYC verdict are two questions with two owners, and jovi-mall's
+ * compare-and-set moved to the verdict axis.
+ *
+ * It is predicated on the verdict NOT already being `verified`, so it refuses a repeat and
+ * admits everything else — a rejected agency is approvable, which is the re-review loop, and
+ * two administrators on one screen still produce one winner and one `409`. jovi-mall answers
+ * `DELIVERY_AGENCY_VERIFICATION_CONFLICT` (renamed from `DELIVERY_AGENCY_STATUS_CONFLICT` in
+ * the same change, because the old name pointed at a field it no longer touches — BR-026 § 3).
+ * That code reaches the dashboard unchanged in `details.platformCode`.
  */
 export async function verify(
     agencyId: string,
@@ -153,19 +159,25 @@ export async function verify(
 /**
  * Refuse the agency's business verification.
  *
- * The same compare-and-set as `verify` above, on the same status, answering the same
- * `409 DELIVERY_AGENCY_STATUS_CONFLICT` on a miss — one review, two possible verdicts,
- * and the loser of a race is told rather than allowed to overwrite.
+ * The same compare-and-set as `verify` above, mirrored onto this verdict: refused only when
+ * the agency is already `rejected`, answering the same
+ * `409 DELIVERY_AGENCY_VERIFICATION_CONFLICT` — one review, two possible verdicts, and the
+ * loser of a race is told rather than allowed to overwrite.
  *
  * ⚠ **The reason is FORWARDED, not just audited** — the opposite of `deactivate` below.
  * jovi-mall stores it on `kyc_details.rejection_reason` because the agency is shown it,
  * and they cannot read this database. It is in the audit payload as well; the two serve
  * different readers.
  *
- * Note what jovi-mall does *not* do with this: it changes no status. The agency stays
- * `pending_verification`, which is already refused by product activation, pickup
- * resolution, COD eligibility and vendor default-agency selection. So there is no
- * un-reject verb and none is needed — a fixed application goes back through `verify`.
+ * Note what jovi-mall does *not* do with this: it changes no status. ⚠ **This paragraph used
+ * to add "the agency stays `pending_verification`, which is already refused by product
+ * activation, pickup resolution, COD eligibility and vendor default-agency selection", and
+ * since 2026-09-15 neither half holds** — a refused agency that proved its phone is `active`,
+ * and three of those four gate on `active`. What a refusal costs is cash: COD eligibility
+ * tests the KYC flag explicitly now, and an unverified owner's payouts can be capped.
+ *
+ * There is still no un-reject verb and none is needed — a fixed application goes back through
+ * `verify`, whose predicate admits a rejected agency.
  */
 export async function reject(
     agencyId: string,

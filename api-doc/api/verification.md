@@ -1,5 +1,7 @@
 # `/verification` — the evidence behind a KYC verdict
 
+**Amended 2026-09-15 (BR-024)** — the error table named `KYC_SUBJECT_NOT_FOUND` as an `error.code`. It is not one: this read is delegated, so the code arrives in `details.platformCode`. Fixed below.
+
 **Written against source on 2026-09-14** — the three routes and their guards against the live
 route manifest; the payload shape against
 `jovi-mall/src/modules/identity-verification/dto/kyc.dto.ts`; the per-role slot table against
@@ -287,9 +289,9 @@ badge computes is sent as that reason** — the backend stores what you send and
 
 ## Errors
 
-| Status | Code | When |
+| Status | `error.code` | When |
 |---|---|---|
-| `404` | `KYC_SUBJECT_NOT_FOUND` | No such vendor / agency / agent, or an account in a state that has no verification record |
+| `404` | **`PLATFORM_OPERATION_REJECTED`**, with `details.platformCode: "KYC_SUBJECT_NOT_FOUND"` | No such vendor / agency / agent, or an account in a state that has no verification record. ⚠ **`KYC_SUBJECT_NOT_FOUND` is NOT an `error.code` here** — it is declared in jovi-mall's registry, in neither of wi-admin's, and this read is delegated, so it arrives *inside* `details`. A client branching on `error.code` would never match it. Corrected 2026-09-15 (BR-024) |
 | `403` | `AUTHZ_PERMISSION_DENIED` | Caller lacks `{vendors,agencies,agents}.read` |
 | `503` | `SERVICE_DEPENDENCY_UNAVAILABLE` | `JOVI_MALL_BASE_URL` is not configured — this read is delegated |
 

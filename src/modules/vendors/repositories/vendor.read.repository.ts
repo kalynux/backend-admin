@@ -200,6 +200,30 @@ export class VendorReadRepository extends PlatformReadRepository<VendorReadModel
         return this.findOneBy({ _id: new ObjectId(vendorId) } as Filter<VendorReadModel>);
     }
 
+    /**
+     * Where each of these vendors' KYC review stands — the raw verdict string, batched.
+     *
+     * ⚠ **Returns the STRING, not a boolean, and interpreting it is the caller's job.**
+     * `money/domain/owner-verification.ts` does that, fail-closed, for all three roles at
+     * once. A repository that returned `verified: boolean` would be a third place holding
+     * an opinion about which values count as approval, and the three would drift.
+     *
+     * Here rather than in the money module for the reason `findNamesByIds` gives: a second
+     * projection of this collection declared elsewhere is a second thing to get right.
+     *
+     * `null` for a row whose `kyc_details.status` is absent, which is a different fact from a
+     * verdict this service has not been taught — the caller treats both as unverified, but
+     * only after being told which it got.
+     */
+    async findKycVerdictsByIds(ids: ObjectId[]): Promise<Map<string, string | null>> {
+        if (ids.length === 0) return new Map();
+        const rows = await this.findBy({ _id: { $in: ids } } as Filter<VendorReadModel>, {
+            projection: { _id: 1, 'kyc_details.status': 1 },
+            limit: ids.length,
+        });
+        return new Map(rows.map((row) => [row._id.toString(), row.kyc_details?.status ?? null]));
+    }
+
     /** The detail view — the wider projection, one document. */
     async findDetailById(vendorId: string): Promise<VendorReadModel | null> {
         if (!Types.ObjectId.isValid(vendorId)) return null;

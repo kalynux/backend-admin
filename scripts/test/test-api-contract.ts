@@ -544,6 +544,55 @@ t.assert('the tracking throw site still uses the allowlisted key names', () => {
     return source.includes('upstreamCode: result.code') && source.includes('upstreamStatus: result.status');
 });
 
+/**
+ * ── The 429 decision, and the 403 non-decision beside it (BR-025 § 2, 2026-09-15) ────
+ *
+ * These two assertions are a PAIR and neither is meaningful alone. `platformCode` was added
+ * to the `rate_limit` allowlist and deliberately NOT to the `authorization` one, so the
+ * property worth pinning is the asymmetry rather than either half of it — a later reader
+ * "tidying up the inconsistency" in either direction breaks one of these.
+ *
+ * The 429 half exists because jovi-mall raises two of them on one flow with OPPOSITE
+ * remedies, and the second carries no `details` at all:
+ *   RESEND_TOO_SOON    → wait; the code already in their hand still works
+ *   TOO_MANY_ATTEMPTS  → that code is destroyed; request a new one
+ * Without the code they are indistinguishable, and guessing is not symmetric.
+ */
+t.assert('a forwarded 429 keeps platformCode — the two rate-limit remedies are opposite', () => {
+    const err = createAppError(ERROR_CODES.PLATFORM_OPERATION_REJECTED, 429, undefined, {
+        platformCode: 'PHONE_VERIFICATION_TOO_MANY_ATTEMPTS',
+    });
+    const error = errorOf(render(err));
+    const details = error.details as Record<string, unknown> | undefined;
+    return error.category === 'rate_limit'
+        && details?.platformCode === 'PHONE_VERIFICATION_TOO_MANY_ATTEMPTS';
+});
+
+t.assert('…and retryAfterSeconds still travels beside it, not instead of it', () => {
+    const err = createAppError(ERROR_CODES.PLATFORM_OPERATION_REJECTED, 429, undefined, {
+        platformCode: 'PHONE_VERIFICATION_RESEND_TOO_SOON',
+        retryAfterSeconds: 42,
+        // Not on the allowlist: a rate-limit refusal is still a closed key set.
+        internalBucket: 'otp:resend:admin:665f',
+    });
+    const details = errorOf(render(err)).details as Record<string, unknown>;
+    return details.platformCode === 'PHONE_VERIFICATION_RESEND_TOO_SOON'
+        && details.retryAfterSeconds === 42
+        && !('internalBucket' in details);
+});
+
+t.assert('a forwarded 403 STILL drops platformCode — the asymmetry is the decision', () => {
+    const err = createAppError(ERROR_CODES.PLATFORM_OPERATION_REJECTED, 403, undefined, {
+        platformCode: 'VENDOR_SUSPENDED',
+        required: 'vendors.suspend',
+    });
+    const error = errorOf(render(err));
+    const details = error.details as Record<string, unknown> | undefined;
+    return error.category === 'authorization'
+        && !('platformCode' in (details ?? {}))
+        && details?.required === 'vendors.suspend';
+});
+
 t.assert('a malformed automation report is its own code, not generic validation', () => {
     const err = createAppError(ERROR_CODES.AUTOMATION_REPORT_MALFORMED, 400, undefined, {
         fields: [{ path: 'workflowId', message: 'Required', code: 'invalid_type' }],

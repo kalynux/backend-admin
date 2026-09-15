@@ -171,6 +171,17 @@ with the approval object; nothing has happened yet.
 | `POST /administrators/:adminId/suspend` | target is a Developer | `administrators.suspend` | `administrators.suspend` |
 | `POST /administrators/:adminId/reinstate` | target is a Developer | `administrators.suspend` | `administrators.suspend` |
 | `POST /money/payouts/:payoutId/mark-paid` | amount ≥ 2 000 000 XAF | `money.payouts.mark_paid` | `money.payouts.mark_paid` |
+| `POST /money/payouts/:payoutId/send` | amount ≥ 2 000 000 XAF | `money.payouts.mark_paid` | `money.payouts.mark_paid` |
+
+⚠ **The last two rows are the same action in two modes, not two actions.** Both assert that
+money left the platform — one by instructing the gateway, one by recording that a human already
+did — so they share a permission and therefore one threshold. The queued approval carries a
+`mode` (`gateway` or `manual`) and it participates in the idempotency key, so **an approval for
+one can never be spent on the other**: an administrator who agreed to record an out-of-band
+payment has not thereby authorised a live transfer.
+
+⚠ Neither `money.payouts.triage` nor `cod.triage` is dual-controlled at any amount. Nothing
+moves on either, so there is nothing for a quorum to protect.
 
 **There is no `approvals.approve` permission, deliberately.** The approver must hold the
 permission the *pending action* names, checked per request. A single "may approve things"

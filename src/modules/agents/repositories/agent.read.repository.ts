@@ -339,6 +339,35 @@ export class AgentReadRepository extends PlatformReadRepository<AgentReadModel> 
     }
 
     /**
+     * Where each of these agents' KYC review stands — the raw verdict string, batched.
+     *
+     * ⚠ **Returns the STRING, not a boolean, and interpreting it is the caller's job.**
+     * `money/domain/owner-verification.ts` does that, fail-closed, for all three roles at
+     * once. A repository that returned `verified: boolean` would be a third place holding
+     * an opinion about which values count as approval, and the three would drift.
+     *
+     * Here rather than in the money module for the reason `findNamesByIds` gives: a second
+     * projection of this collection declared elsewhere is a second thing to get right. And this one holds
+     * `legal_identity` and `payout_details`, so that reason is at its strongest here.
+     *
+     * `null` for a row whose `kyc.status` is absent, which is a different fact from a
+     * verdict this service has not been taught — the caller treats both as unverified, but
+     * only after being told which it got.
+     */
+    async findKycVerdictsByIds(ids: ObjectId[]): Promise<Map<string, string | null>> {
+        if (ids.length === 0) return new Map();
+        const rows = await this.findBy({ _id: { $in: ids } } as Filter<AgentReadModel>, {
+            // ⚠ The agent's verdict lives on `kyc`; the vendor's and the agency's on
+            // `kyc_details`. One name would have been nicer — renaming either is a data
+            // migration, so the difference is spelled out at each of the three call sites
+            // rather than papered over.
+            projection: { _id: 1, 'kyc.status': 1 },
+            limit: ids.length,
+        });
+        return new Map(rows.map((row) => [row._id.toString(), row.kyc?.status ?? null]));
+    }
+
+    /**
      * The COD context for a page of holders: the name, plus the trust score and the
      * ceiling it drives.
      *

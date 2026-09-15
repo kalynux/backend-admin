@@ -337,6 +337,100 @@ export async function markPayoutPaid(
 }
 
 /**
+ * Endorse a payout request — record that a reviewer has checked it and believes it genuine.
+ *
+ * ⚠ **Moves no money, changes no status, and gates nothing.** A payout with an endorsement is
+ * exactly as payable as one without; the endorsement is a note from one administrator to the
+ * next, which is what keeps the reviewing tier off the critical path for cash.
+ *
+ * The other triage verdict is not here, because it is not a separate operation: a triage
+ * REJECTION is `rejectPayout` below, called by a reviewer instead of an approver. One
+ * terminal outcome, one code path, one set of fields — rather than a second way to close a
+ * payout that writes something subtly different.
+ */
+export async function triagePayout(
+    payoutId: string,
+    note: string | null,
+    audit: PayoutAuditContext,
+    context: ActorContext,
+): Promise<PlatformPayoutRequest> {
+    return auditedDelegation(
+        'money.payouts.triage',
+        context,
+        { type: 'payout', id: payoutId, label: audit.label },
+        {
+            ownerType: audit.ownerType,
+            ownerId: audit.ownerId,
+            amount: audit.amount,
+            currency: audit.currency,
+            note,
+        },
+        audit.before,
+        payoutState,
+        async () => {
+            const result = await platformRequest<PlatformPayoutRequest>({
+                method: 'POST',
+                path: `/payout-requests/${payoutId}/triage`,
+                // Omitted rather than null, for the reason `mark-paid` documents: jovi-mall
+                // declares it `.optional()`, not nullable, so an explicit null is a 400.
+                body: note === null ? {} : { note },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return { result: result.data };
+        },
+    );
+}
+
+/**
+ * Send a payout through the payment gateway — the automated half of marking one paid.
+ *
+ * ⚠ **This is `money.payouts.mark_paid`, not a permission of its own**, and the reuse is the
+ * point: the `LARGE_PAYOUT` four-eyes rule already hangs off that name, so the ≥2,000,000 XAF
+ * quorum applies to a gateway send with no second threshold to drift from the first. The two
+ * routes are two ways to perform one action — assert that money left — and they differ only
+ * in who does the sending.
+ *
+ * ⚠ **A 200 here does NOT mean the money arrived.** The usual answer is a payout in
+ * `processing`: the transfer has been accepted by the gateway and is confirmed later by
+ * callback. Only `paid` means settled.
+ */
+export async function sendPayout(
+    payoutId: string,
+    audit: PayoutAuditContext,
+    context: ActorContext,
+    viaApprovalId: string | null = null,
+): Promise<PlatformPayoutRequest> {
+    return auditedDelegation(
+        'money.payouts.mark_paid',
+        context,
+        { type: 'payout', id: payoutId, label: audit.label },
+        {
+            ownerType: audit.ownerType,
+            ownerId: audit.ownerId,
+            amount: audit.amount,
+            currency: audit.currency,
+            // Distinguishes this row from a manual settlement at a glance, and is the same
+            // discriminator the dual-control payload carries.
+            mode: 'gateway',
+        },
+        audit.before,
+        payoutState,
+        async () => {
+            const result = await platformRequest<PlatformPayoutRequest>({
+                method: 'POST',
+                path: `/payout-requests/${payoutId}/send`,
+                body: {},
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return { result: result.data };
+        },
+        viaApprovalId,
+    );
+}
+
+/**
  * Reject a payout request — the money returns to the owner's available balance.
  *
  * Not dual-controlled at any amount, and the asymmetry with `mark-paid` is deliberate

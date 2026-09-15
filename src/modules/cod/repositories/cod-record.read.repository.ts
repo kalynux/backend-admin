@@ -62,6 +62,14 @@ export interface AgencyRemittanceReadModel extends Document {
     resolved_by_source?: string;
     resolved_by_name?: string | null;
     rejection_reason?: string | null;
+    /** The reviewer's endorsement. Absent until somebody has reviewed the record. */
+    triage?: {
+        verdict: string;
+        note: string | null;
+        by_admin_id: string | null;
+        by_name: string | null;
+        at: Date | null;
+    } | null;
     created_at: Date;
     updated_at: Date;
 }
@@ -91,6 +99,15 @@ const REMITTANCE_PROJECTION = {
     resolved_by_source: 1,
     resolved_by_name: 1,
     rejection_reason: 1,
+    /**
+     * The reviewer's endorsement. Named field by field like everything else in this whitelist —
+     * a whole sub-document would be one entry that grows without anybody re-reading the list.
+     */
+    'triage.verdict': 1,
+    'triage.note': 1,
+    'triage.by_admin_id': 1,
+    'triage.by_name': 1,
+    'triage.at': 1,
     created_at: 1,
     updated_at: 1,
 } as const;
@@ -134,6 +151,14 @@ export interface AgentDepositReadModel extends Document {
     recorded_by_name?: string | null;
     resolved_at?: Date | null;
     rejection_reason?: string | null;
+    /** The reviewer's endorsement. Absent until somebody has reviewed the record. */
+    triage?: {
+        verdict: string;
+        note: string | null;
+        by_admin_id: string | null;
+        by_name: string | null;
+        at: Date | null;
+    } | null;
     created_at: Date;
     updated_at: Date;
 }
@@ -155,6 +180,15 @@ const DEPOSIT_PROJECTION = {
     recorded_by_name: 1,
     resolved_at: 1,
     rejection_reason: 1,
+    /**
+     * The reviewer's endorsement. Named field by field like everything else in this whitelist —
+     * a whole sub-document would be one entry that grows without anybody re-reading the list.
+     */
+    'triage.verdict': 1,
+    'triage.note': 1,
+    'triage.by_admin_id': 1,
+    'triage.by_name': 1,
+    'triage.at': 1,
     created_at: 1,
     updated_at: 1,
 } as const;

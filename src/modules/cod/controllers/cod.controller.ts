@@ -40,6 +40,7 @@ import {
     RecordDepositBody,
     RejectDepositBody,
     RejectRemittanceBody,
+    TriageCodBody,
     ResolveDiscrepancyBody,
     TrustAdjustmentBody,
 } from '../validators/cod.validator';
@@ -290,6 +291,51 @@ export class CodController {
         );
 
         sendSuccess(res, result, { message: 'Remittance confirmed' });
+    });
+
+    /**
+     * POST /api/v1/cod/remittances/:remittanceId/triage — a reviewer vouches for it.
+     *
+     * Moves no cash and gates nothing. The weakest write on this surface, and the only one a
+     * Support administrator can reach.
+     */
+    static triageRemittance = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as TriageCodBody;
+        const before = await loadRemittanceOr404(req.params.remittanceId);
+
+        const result = await cod.triageRemittance(
+            req.params.remittanceId,
+            body.note ?? null,
+            { label: labelOfCashRecord(before), before: toCashRecordAuditState(before) },
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, result, {
+            message: 'Remittance endorsed — confirmation is still required before the liability moves',
+        });
+    });
+
+    /**
+     * POST /api/v1/cod/deposits/:depositId/triage — a reviewer vouches for it.
+     *
+     * ⚠ Refused by jovi-mall on an AGENCY-recipient deposit, and deliberately: that handover
+     * is already counter-signed by two organisations, and the platform has no way to verify
+     * cash it never received. Only platform-recipient deposits are reviewable here.
+     */
+    static triageDeposit = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as TriageCodBody;
+        const before = await loadDepositOr404(req.params.depositId);
+
+        const result = await cod.triageDeposit(
+            req.params.depositId,
+            body.note ?? null,
+            { label: labelOfCashRecord(before), before: toCashRecordAuditState(before) },
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, result, {
+            message: 'Deposit endorsed — confirmation is still required before the cash chain settles',
+        });
     });
 
     /** POST /api/v1/cod/remittances/:remittanceId/reject */

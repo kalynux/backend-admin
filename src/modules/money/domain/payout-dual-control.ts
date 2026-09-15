@@ -40,6 +40,22 @@ import {
  * the queue and somebody has agreed to it.
  */
 
+/**
+ * How a payout is settled.
+ *
+ * `manual` — an administrator sent the money themselves and is recording an external
+ * reference. The only route for a bank or card destination, and the fallback when the
+ * gateway is unavailable.
+ *
+ * `gateway` — the platform sends it through the payment gateway. Answers with the payout in
+ * `processing`, not `paid`: the transfer is confirmed asynchronously.
+ *
+ * Both are `money.payouts.mark_paid`, deliberately. They are two ways to perform one
+ * action — assert that money left — so they share a permission, and therefore share the
+ * ≥2,000,000 XAF four-eyes rule with no second threshold to drift from the first.
+ */
+export type PayoutMode = 'manual' | 'gateway';
+
 const payouts = new PayoutRequestReadRepository();
 
 /**
@@ -120,8 +136,22 @@ export function auditContextOfPayout(
  * administrator that cannot succeed however they decide, and the approval queue is not a
  * place to discover that.
  */
-function assertPending(row: PayoutRequestReadModel): void {
-    if (row.status !== 'pending') {
+/**
+ * What each mode may act on.
+ *
+ * ⚠ **`failed` is sendable and `processing` is not**, and both halves matter. A payout whose
+ * transfer failed is precisely the one an administrator needs to retry, so refusing it would
+ * strand the money with no way forward but rejection. A payout whose transfer is IN FLIGHT
+ * must be refused by both modes: sending again risks a second transfer, and recording a
+ * manual payment claims a settlement the gateway is about to report on its own.
+ *
+ * jovi-mall enforces the same rule — this is the pre-flight, not the control.
+ */
+const SENDABLE_FROM = ['pending', 'failed'] as const;
+
+function assertPending(row: PayoutRequestReadModel, mode: PayoutMode = 'manual'): void {
+    const allowed: readonly string[] = mode === 'gateway' ? SENDABLE_FROM : ['pending'];
+    if (!allowed.includes(row.status)) {
         throw createAppError(ERROR_CODES.PAYOUT_NOT_PENDING, 409, undefined, {
             status: row.status,
         });
@@ -136,6 +166,11 @@ function assertPending(row: PayoutRequestReadModel): void {
  * amount that somehow differed between two requests yields a different key and cannot join
  * a pending approval signed for the other number.
  *
+ * `mode` participates for a reason worth stating: approving a GATEWAY send and approving a
+ * MANUAL record are not the same act, even for the same payout and the same amount. One
+ * instructs the platform to move money; the other asserts a human already did. Hashing the
+ * mode means an approver who agreed to one cannot have their signature spent on the other.
+ *
  * `reference` is normalised to `null` rather than left `undefined` for the same reason —
  * `JSON.stringify` drops an undefined value, so omitting the key and sending it explicitly
  * as null would otherwise hash the same and one operator's reference would silently ride on
@@ -144,6 +179,7 @@ function assertPending(row: PayoutRequestReadModel): void {
 function markPaidPayload(
     row: PayoutRequestReadModel,
     reference: string | null,
+    mode: PayoutMode,
 ): Record<string, unknown> {
     return {
         payoutId: row._id.toString(),
@@ -152,6 +188,7 @@ function markPaidPayload(
         amount: row.amount,
         currency: row.currency,
         reference,
+        mode,
     };
 }
 
@@ -170,11 +207,12 @@ export async function markPaid(
     payoutId: string,
     reference: string | null,
     context: ActorContext,
+    mode: PayoutMode = 'manual',
 ): Promise<PayoutWriteOutcome> {
     const row = await loadPayoutOr404(payoutId);
-    assertPending(row);
+    assertPending(row, mode);
 
-    const payload = markPaidPayload(row, reference);
+    const payload = markPaidPayload(row, reference, mode);
 
     if (approvals.dualControlRequired('money.payouts.mark_paid', payload)) {
         /**
@@ -202,12 +240,9 @@ export async function markPaid(
         return { kind: 'queued', approval: outcome.approval, created: outcome.created };
     }
 
-    const payout = await gateway.markPayoutPaid(
-        payoutId,
-        reference,
-        auditContextOfPayout(row),
-        context,
-    );
+    const payout = mode === 'gateway'
+        ? await gateway.sendPayout(payoutId, auditContextOfPayout(row), context)
+        : await gateway.markPayoutPaid(payoutId, reference, auditContextOfPayout(row), context);
 
     return { kind: 'applied', payout };
 }
@@ -278,8 +313,10 @@ registerDualControlHandler(
             ? approval.payload.reference
             : null;
 
+        const mode: PayoutMode = approval.payload.mode === 'gateway' ? 'gateway' : 'manual';
+
         const row = await loadPayoutOr404(payoutId);
-        assertPending(row);
+        assertPending(row, mode);
 
         /**
          * The payout must still be the one that was signed for.
@@ -308,6 +345,23 @@ registerDualControlHandler(
          * to avoid the queue. The check earns its place by documenting that the case was
          * considered — the alternative is a reader wondering whether it was.
          */
+
+        /**
+         * The approver's request performs the write, in whichever mode was signed for.
+         *
+         * Reading the mode off the APPROVAL rather than re-deciding it here is the point: the
+         * second administrator agreed to a specific act, and `approvalRequestKey` hashed the
+         * mode, so an approval for one can never be spent on the other.
+         */
+        if (mode === 'gateway') {
+            await gateway.sendPayout(
+                payoutId,
+                auditContextOfPayout(row),
+                { ...context, actor: approver },
+                approval._id.toString(),
+            );
+            return;
+        }
 
         await gateway.markPayoutPaid(
             payoutId,

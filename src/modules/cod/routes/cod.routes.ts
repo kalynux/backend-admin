@@ -13,6 +13,7 @@ import {
     RecordDepositSchema,
     RejectDepositSchema,
     RejectRemittanceSchema,
+    TriageCodSchema,
     RemittanceIdParamSchema,
     ResolveDiscrepancySchema,
     TrustAdjustmentSchema,
@@ -120,6 +121,26 @@ defineRoute(router, {
     handler: CodController.confirmRemittance,
 });
 
+/**
+ * A reviewer endorses a declared remittance as genuine.
+ *
+ * Unflagged in the catalogue, so no tier-3 exemption was needed — and the reason is worth
+ * knowing: a `declared` remittance holds no cash at all. Only confirming settles anything.
+ * That is the whole difference from `money.payouts.triage`, which IS financial because a
+ * payout request holds the owner's balance from the moment it opens.
+ *
+ * Not dual-controlled either. Nothing moves, so there is nothing for a quorum to protect.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/remittances/:remittanceId/triage',
+    access: permission('cod.triage'),
+    validate: { params: RemittanceIdParamSchema, body: TriageCodSchema },
+    audit: records('cod.triage'),
+    handler: CodController.triageRemittance,
+});
+
 defineRoute(router, {
     mountedAt,
     method: 'post',
@@ -176,6 +197,25 @@ defineRoute(router, {
     validate: { params: DepositIdParamSchema },
     audit: records('cod.deposits.confirm'),
     handler: CodController.confirmDeposit,
+});
+
+/**
+ * A reviewer endorses a declared deposit as genuine.
+ *
+ * ⚠ **jovi-mall refuses this on an AGENCY-recipient deposit, which is the normal route.**
+ * That handover is confirmed by the agency itself — a counter-signature between two
+ * ORGANISATIONS, which is a stronger control than two admin tiers — and the platform never
+ * saw the cash, so it has nothing to verify. Only platform-recipient deposits are reviewable
+ * here, which makes this a genuinely smaller surface than the route list suggests.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/deposits/:depositId/triage',
+    access: permission('cod.triage'),
+    validate: { params: DepositIdParamSchema, body: TriageCodSchema },
+    audit: records('cod.triage'),
+    handler: CodController.triageDeposit,
 });
 
 defineRoute(router, {

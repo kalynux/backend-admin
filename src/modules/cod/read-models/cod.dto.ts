@@ -124,6 +124,21 @@ export interface RemittanceDto {
      */
     resolvedBy: ActorStampDto | null;
     rejectionReason: string | null;
+    /**
+     * The reviewer's endorsement, or null when nobody has reviewed it.
+     *
+     * ⚠ **Advisory, never a precondition.** An un-endorsed record is exactly as confirmable as
+     * an endorsed one — do not disable a confirm control on a null here.
+     *
+     * There is no rejected verdict: a triage rejection is terminal and shows up as
+     * `status: "rejected"` with a `rejectionReason`, like any other.
+     */
+    triage: {
+        verdict: string;
+        note: string | null;
+        by: { id: string | null; name: string | null };
+        at: string | null;
+    } | null;
     createdAt: string | null;
     updatedAt: string | null;
 }
@@ -167,6 +182,14 @@ export function toRemittanceDto(
             }
             : null,
         rejectionReason: row.rejection_reason ?? null,
+        triage: row.triage
+            ? {
+                  verdict: row.triage.verdict,
+                  note: row.triage.note ?? null,
+                  by: { id: row.triage.by_admin_id ?? null, name: row.triage.by_name ?? null },
+                  at: row.triage.at ? new Date(row.triage.at).toISOString() : null,
+              }
+            : null,
         createdAt: toIso(row.created_at),
         updatedAt: toIso(row.updated_at),
     };
@@ -206,6 +229,21 @@ export interface DepositDto {
     /** The stamp whose `source` carries BOTH an agency user and an administrator. */
     recordedBy: ActorStampDto | null;
     rejectionReason: string | null;
+    /**
+     * The reviewer's endorsement, or null when nobody has reviewed it.
+     *
+     * ⚠ **Advisory, never a precondition.** An un-endorsed record is exactly as confirmable as
+     * an endorsed one — do not disable a confirm control on a null here.
+     *
+     * There is no rejected verdict: a triage rejection is terminal and shows up as
+     * `status: "rejected"` with a `rejectionReason`, like any other.
+     */
+    triage: {
+        verdict: string;
+        note: string | null;
+        by: { id: string | null; name: string | null };
+        at: string | null;
+    } | null;
     /** jovi-mall's name for `created_at` on this record. Kept, per the superset rule. */
     recordedAt: string | null;
     createdAt: string | null;
@@ -252,6 +290,14 @@ export function toDepositDto(row: AgentDepositReadModel, names: CodPartyNames): 
             }
             : null,
         rejectionReason: row.rejection_reason ?? null,
+        triage: row.triage
+            ? {
+                  verdict: row.triage.verdict,
+                  note: row.triage.note ?? null,
+                  by: { id: row.triage.by_admin_id ?? null, name: row.triage.by_name ?? null },
+                  at: row.triage.at ? new Date(row.triage.at).toISOString() : null,
+              }
+            : null,
         recordedAt: toIso(row.created_at),
         createdAt: toIso(row.created_at),
         updatedAt: toIso(row.updated_at),

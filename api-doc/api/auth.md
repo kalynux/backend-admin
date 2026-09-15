@@ -1,12 +1,15 @@
 # `/auth` — administrator authentication
 
+**Amended 2026-09-15 (BR-025 § 1)** — the **three `/auth/me/phone*` routes** were served, audited and reachable but appeared on no contract page at all, so a route map extended from the contract could not see them. They are documented below, together with the `phone` / `phoneVerified` pair the profile object has always carried. ⚠ Two behaviours BR-025 reported are **already stale**: the `422` and the `409` were given named codes on 2026-09-14 and are no longer `VALIDATION_ERROR`. The `status` row was corrected too — it has carried three values since ADR-023.
+
 **Verified against source on 2026-09-08** — all eleven routes, their access kinds and their audit declarations against `admin-identity/routes/auth.routes.ts`; every request schema against `admin-identity/validators/auth.validator.ts`; the eight lifetime/limit defaults against `admin/src/config/env.ts:87-139`; the two rate-limit buckets against `api/middlewares/auth-rate-limit.middleware.ts`; the password policy against `admin-identity/domain/password.service.ts:30-71`; and the `422` detail exposure against `core/errors/detail-policy.ts` + `password.service.ts:75-95` (the detail key is now `failedRules`; pinned by `test:contract` § 11).
 
 Base path: `/api/v1/auth`
 
-Login, two-factor, session rotation, session listing and self-service password change. These
-are the only routes on the service that can be reached with no identity, and the list is
-closed — a fourth public route requires editing a boot-checked allowlist.
+Login, two-factor, session rotation, session listing, self-service password change — and the
+administrator’s own contact phone number. The first three are the only routes on the service
+that can be reached with no identity, and the list is closed — a fourth public route requires
+editing a boot-checked allowlist.
 
 | Method | Path | Access | Audited |
 |---|---|---|---|
@@ -21,6 +24,9 @@ closed — a fourth public route requires editing a boot-checked allowlist.
 | `DELETE` | `/auth/sessions/:sessionId` | authenticated (self) | ✅ |
 | `POST` | `/auth/mfa/enroll` | authenticated *(reachable mid-enrolment)* | ✅ |
 | `POST` | `/auth/mfa/activate` | authenticated *(reachable mid-enrolment)* | ✅ |
+| `PATCH` | `/auth/me/phone` | authenticated (self) **— activated only** | ✅ |
+| `POST` | `/auth/me/phone/verify/request` | authenticated (self) **— activated only** | only on failure |
+| `POST` | `/auth/me/phone/verify/confirm` | authenticated (self) **— activated only** | ✅ |
 
 No endpoint on this surface requires a permission — every route acts on the caller's own
 identity, and requiring a permission would let a level be locked out of its own account.
@@ -148,7 +154,9 @@ Returned identically by `/auth/login`, `/auth/mfa/verify`, `/auth/refresh` and `
 | `email` | string | |
 | `displayName` | string | |
 | `tier` | `1` \| `2` \| `3` | 1 Developer, 2 Admin, 3 Support. **Lower = more privilege** |
-| `status` | `"active"` \| `"suspended"` | A suspended administrator cannot reach this response |
+| `status` | `"pending"` \| `"active"` \| `"suspended"` | ⚠ **Three values, not two.** A suspended administrator cannot reach this response at all; a `pending` one **can log in**, and is then refused with `403 ADMIN_ACTIVATION_REQUIRED` on everything outside the onboarding allowlist |
+| `phone` | string \| null | The administrator's contact number. ⚠ **A contact detail, never a login factor** — see [the phone section](#the-administrators-own-phone-number) |
+| `phoneVerified` | boolean | Proved by a WhatsApp OTP. ⚠ **Cleared by every write to `phone`**, including a write of the value already held |
 | `jobTitle` | string \| null | |
 | `department` | string \| null | |
 | `timezone` | string \| null | IANA zone |
@@ -675,6 +683,182 @@ and route to the login screen.
 ### Audit
 
 `administrators.auth.mfa_activated`
+
+---
+
+## The administrator's own phone number
+
+**Three routes, all self-service, and none of them touches the login.** Added with ADR-023.
+
+| | |
+|---|---|
+| **Method / Path** | `PATCH /api/v1/auth/me/phone` · `POST /api/v1/auth/me/phone/verify/request` · `POST /api/v1/auth/me/phone/verify/confirm` |
+| **Authentication** | Required (self) — **and an ACTIVATED account**, see below |
+| **CSRF** | Required for cookie clients |
+| **Rate limit** | The ordinary per-identity ceiling here. ⚠ The *real* limits are jovi-mall's, on the code itself |
+
+⛔ **This is a CONTACT detail, not a second login factor, and please do not "complete" it by
+making it one.** Administrators already hold TOTP, which is stronger than a WhatsApp OTP, so
+gating the login on `phone_verified` would *weaken* it rather than harden it. Nothing in the
+auth path reads either field — verified by scan, and `auth.routes.ts` says so at the routes
+themselves. It exists so the platform knows how to reach a human being.
+
+⚠ **A `pending` administrator cannot reach any of the three.** They are not on
+`ONBOARDING_ROUTE_ALLOWLIST`, so the gate answers `403 ADMIN_ACTIVATION_REQUIRED` — and that is
+correct rather than an oversight: **a verified phone is not part of activation.** The readiness
+check requires *a phone number on the employee record* (gap code `phone_missing`, section
+`contact`) and never consults `phone_verified`. Render the card only once the account is
+`active`.
+
+### Where the two fields live
+
+`phone` and `phoneVerified` are on the **`admin` profile object** documented above — so
+`/auth/login`, `/auth/mfa/verify`, `/auth/refresh` and `/auth/me` all carry the current state,
+and no separate read is needed after a write.
+
+### `PATCH /auth/me/phone`
+
+| Field | Type | Rules |
+|---|---|---|
+| `phone` | string | Required, **6–20 characters**. `.strict()` — any other key is a `400` |
+
+```json
+{ "phone": "+237677001122" }
+```
+
+Response: `{ "phone": "+237677001122", "verified": false }`
+
+⚠ **Saving a number ALWAYS clears `phone_verified` — including saving the value already held.**
+There is no "same number, keep the flag" path, and the alternative is worse than it looks: a row
+claiming a number is proved while holding a *different* number is worse than an unverified one,
+because unverified is at least honest. **Warn before the write**; afterwards there is nothing to
+undo but the whole OTP round trip.
+
+Audited: `administrators.profile.phone_set`.
+
+### `POST /auth/me/phone/verify/request`
+
+**No body.** The number is read from the account — a caller cannot name one.
+
+Response: `{ "phoneMasked": "+237•••••1122", "expiresAt": "…", "delivery": "text" | "template" }`
+
+⚠ `delivery` reports which side of WhatsApp's 24-hour window the code went out on. It is
+`'template'` for **either** template, so no client can come to depend on which one was used.
+
+Audited: **nothing on success.** A resend is routine (the cooldown permits one a minute) and a
+row per code would bury the outcome underneath it. The declaration is `mayRecord`, not a missing
+audit — `defineRoute` requires every mutating route to state one, so "records nothing" has to be
+written down rather than left off.
+
+### `POST /auth/me/phone/verify/confirm`
+
+| Field | Type | Rules |
+|---|---|---|
+| `code` | string | Required, **4–12 characters**. `.strict()` |
+
+```json
+{ "code": "483920" }
+```
+
+Response: `{ "phone": "+237677001122", "verified": true }`
+
+⚠ **The body takes `code` alone. Sending `phone` is a `400`**, and the reason is worth keeping
+in front of you: a caller that could name the number would be able to prove control of *one*
+number and have *another* marked verified. The number is fixed when the code is minted.
+
+⚠ **`409` when the proved number no longer matches the account.** An administrator can change
+their number in the ten minutes between requesting a code and typing it, and jovi-mall — which
+holds no administrator record — cannot know that happened. wi-admin re-checks before stamping,
+and **nothing is written** on the mismatch. Request a new code against the current number.
+
+Audited: `administrators.profile.phone_verified`.
+
+### Errors
+
+Two of these are **wi-admin's own**; the rest arrive from jovi-mall as `details.platformCode`.
+
+| Status | `error.code` | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Bad length, or an extra key past `.strict()` — including `phone` on the confirm |
+| 403 | `ADMIN_ACTIVATION_REQUIRED` | The account is still `pending` |
+| 422 | **`ADMIN_PHONE_NOT_SET`** | Verification requested with no number saved. ⚠ **wi-admin's own code, not a delegated `PHONE_VERIFICATION_NO_TARGET`** — the call is refused before it is made. There is no field to point at, so there is no `details.fields`, and it is deliberately not `VALIDATION_ERROR` |
+| 409 | **`ADMIN_PHONE_VERIFICATION_MISMATCH`** | The proved number is no longer the account's. ⚠ **A named code — it was `VALIDATION_ERROR` until 2026-09-14** |
+| 422 / 429 | `PLATFORM_OPERATION_REJECTED` | The code was wrong, expired, resent too soon, or spent. Branch on `details.platformCode` — the six values are in [errors.md](errors.md#the-six-that-arrive-from-jovi-mall) |
+| 502 | `SERVICE_DEPENDENCY_UNAVAILABLE` | Delivery failed. `details.platformCode` is `PHONE_VERIFICATION_DELIVERY_FAILED` |
+| 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | `JOVI_MALL_BASE_URL` is unset on this deployment — there is no OTP service at all |
+
+⚠ **`platformCode` now survives a 429** (2026-09-15, BR-025 § 2) and it is the only thing
+separating two **opposite** remedies: `PHONE_VERIFICATION_RESEND_TOO_SOON` means *wait,
+`details.retryAfterSeconds`, the code in your hand still works*, and
+`PHONE_VERIFICATION_TOO_MANY_ATTEMPTS` means *that code is destroyed, request a new one*.
+
+⚠ **A delegated 5xx keeps its code and LOSES its message.** jovi-mall's sentence for a delivery
+failure names the templates it tried; `projectMessage` replaces the message of any `internal` or
+`external_service` error with the registry default, on jovi-mall's boundary and again on ours.
+So `platformCode` survives the hop and the prose does not. **Do not plan to render that
+message** — write your own copy keyed on the code.
+
+### Delivery: fixed 2026-09-15 — build the ordinary path, not a workaround
+
+✅ **The two faults that made `PHONE_VERIFICATION_DELIVERY_FAILED` the ordinary outcome are
+fixed.** Build the straightforward flow: request → the code arrives on WhatsApp → confirm.
+
+⛔ **A THIRD, UNRELATED FAULT IS STILL OPEN, SO NO CODE ACTUALLY ARRIVES YET.** A live send on
+2026-09-15 returned `(#131037) WhatsApp provided number needs display name approval before
+message can be sent.` — the platform's WhatsApp number has **never had a display name submitted**
+(`name_status: "NON_EXISTS"`). ⚠ **It blocks free-form messages too**, so the workaround below
+does not rescue it either. This is an account action on Meta's side, not a backend change.
+
+**Build the flow anyway, and keep the failure path honest**: render
+`PHONE_VERIFICATION_DELIVERY_FAILED` as *"we couldn't send the code — try again"* with a retry,
+not as *"your phone is wrong"*. When the display name clears, the flow starts working with no
+frontend change.
+
+⚠ **This section said the opposite until 2026-09-15, and if you are working from a copy of this
+page taken before then, that copy told you to ship a workaround as the primary path.** Two
+separate faults closed within a day of each other:
+
+| What was broken | Fixed |
+|---|---|
+| **The out-of-window template.** An OTP outside WhatsApp's 24-hour window needs an approved template, and `wi_mall_phone_verification` (AUTHENTICATION) could not even be *created* — code 10 / subcode 2388185 — because Meta gates that category behind business verification and the owning business was `business_verification_status: "rejected"` | The business reached **`verified`**; the template was submitted and **APPROVED in `en` and `fr` within seconds**, with no code change on either side |
+| **The 24-hour window was never recorded**, so *every* request took the template path — including one from someone who had just messaged the bot | `POST /api/internal/bot/identity/sync` now stamps the window on every inbound message |
+
+⛔ **One thing did NOT get fixed and never will: `wi_mall_phone_verification_utility` (UTILITY)
+stays rejected** — `INCORRECT_CATEGORY`, both languages, and rejected again *synchronously*
+under `allow_category_change: true`. That verdict is about OTP **content**, not about the
+business, so the verification did not revive it. It is now dead weight behind the working path.
+⛔ **Do not reword OTP copy to get past the classifier** — Meta classifies OTP content as
+AUTHENTICATION and accepts it nowhere else, so rewording is evading enforcement rather than
+satisfying it, and the WABA carrying the platform's other 189 templates is what would be at risk.
+
+⚠ **What the administrator actually receives, so your copy can match it:** Meta writes and
+localises the body itself — *"**123456** is your verification code. For your security, do not
+share this code."* — with a footer reading *"Expires in 10 minutes."* and a **Copy code** button.
+None of that is ours to change, and **the footer's ten minutes is frozen inside the approved
+template**: if the platform's `PHONE_VERIFY_TTL_SECONDS` is ever lowered, the message keeps
+saying ten. Do not build a countdown from the WhatsApp text; use `expiresAt` from the request
+response.
+
+<details>
+<summary>The manual workaround, kept for the case where delivery fails anyway</summary>
+
+In-window delivery needs no template, and the window is keyed on the **phone number alone** —
+not on an account — so this still works as a fallback an operator can be told:
+
+> **Send any WhatsApp message to the platform's business number from the phone you are
+> verifying, then press Verify within the next 23 hours.** The code arrives as ordinary text.
+
+⚠ One side effect to state honestly if you surface this: messaging the bot **creates a customer
+account against that phone number** on the platform side. It is harmless to the administrator
+record — administrator identity lives in this database and the OTP subject is namespaced
+`admin:<id>` precisely so the two cannot collide — but the row does come into existence. That
+cost was worth paying when this was the only route; it is not worth putting in the primary flow
+now.
+
+⚠ **The window tracked is 23 hours, not Meta's 24**, so free-form sends stop a safe margin
+before the real boundary rather than racing it.
+
+</details>
 
 ---
 

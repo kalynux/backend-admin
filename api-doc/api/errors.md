@@ -17,6 +17,14 @@ client; `TRACKING_DOOR_REFUSED` now keeps `upstreamCode`/`upstreamStatus`, which
 one per upstream, deliberately not interchangeable. `AUTOMATION_REPORT_MALFORMED` is also raised
 now. All three are pinned by `npm run test:contract` § 11.
 
+**Amended 2026-09-15 (BR-025 § 2)** — the second pass's finding about **429** was fixed in the
+code rather than documented away, so one of the rows it corrected has changed meaning again:
+`platformCode` now **survives a forwarded 429**. The 403 half of that finding stands and was
+deliberately left alone — a 403 is the one place where naming what refused tells a caller what
+to go after next. ⚠ **The asymmetry between the two is now the decision**, not an oversight;
+`detail-policy.ts` carries the reasoning at the allowlist itself. The six jovi-mall
+`PHONE_VERIFICATION_*` codes a client branches on are also catalogued below for the first time.
+
 The error contract is shared across all three backend services (wi-admin, jovi-mall,
 geo-tracker). One envelope, one nine-value taxonomy, one exposure rule.
 
@@ -204,7 +212,8 @@ answer from the caller's point of view.
 
 | Field | When |
 |---|---|
-| `platformCode` | **On every forwarded status EXCEPT 403 and 429.** It is a published contract and the dashboard's only handle on *why* a delegated write was refused — but the boundary scrub above is keyed on **category**, and `authorization` and `rate_limit` are the two categories with a closed key allowlist that `platformCode` is not on. ⚠ **Verified 2026-09-08**: a forwarded 403 keeps only `required`/`requiredAny`/`mode`/`resource`/`action`/`hint`, and a forwarded 429 keeps only `retryAfterSeconds`/`limit`/`windowSeconds`. On those two, branch on the **status** and read the message |
+| `platformCode` | **On every forwarded status EXCEPT 403.** It is a published contract and the dashboard's only handle on *why* a delegated call was refused. The boundary scrub above is keyed on **category**, and `authorization` is the one remaining category with a closed key allowlist that `platformCode` is not on: a forwarded 403 keeps only `required`/`requiredAny`/`mode`/`resource`/`action`/`hint`. On a 403, branch on the **status** and read the message. ⚠ **429 changed on 2026-09-15 and used to behave like 403** — see the row below |
+| `platformCode` **on a 429** | **Since 2026-09-15 (BR-025 § 2), yes** — `rate_limit` keeps `retryAfterSeconds`/`limit`/`windowSeconds` **and** `platformCode`. It was added because two of jovi-mall's 429s want **opposite** remedies and the second carries no `details` at all: `PHONE_VERIFICATION_RESEND_TOO_SOON` means *wait, the code in your hand still works*, `PHONE_VERIFICATION_TOO_MANY_ATTEMPTS` means *that code has been destroyed, request a new one*. Without the code they were indistinguishable, and guessing is not symmetric — telling somebody to wait when their code is already dead leaves them at a form that cannot succeed. ⚠ **This is every delegated 429**, not just the phone flow |
 | `platformStatus` | On a forwarded **5xx** only, alongside `operation` — a 4xx already carries the platform's status on the status line |
 | jovi-mall's own `details` | **Only when jovi-mall's envelope declares a client-safe category.** An older platform build that sends no `category` forwards nothing — failing closed on a service whose exposure rules cannot be read from here |
 
@@ -302,6 +311,22 @@ Developer nothing about which of five things to do next.
 |---|---|---|---|
 | `ADMIN_PHONE_NOT_SET` | 422 | `business_rule` | Verification was requested on an account carrying no number. The body was valid — there is no field to point at and no `details.fields` — so this is deliberately **not** `VALIDATION_ERROR`. Send them to `PATCH /auth/me/phone` first. |
 | `ADMIN_PHONE_VERIFICATION_MISMATCH` | 409 | `conflict` | jovi-mall proved a number that is no longer the one on the account — the administrator changed it between requesting the code and typing it. Nothing is stamped. Request a new code against the current number. |
+
+#### The six that arrive from jovi-mall
+
+⚠ **These are jovi-mall's codes, not ours.** The OTP is sent and judged there (it owns the
+WhatsApp credentials, the 24-hour window and the templates) and this service only holds the
+record, so every one of them reaches a client as **`details.platformCode` on a
+`PLATFORM_OPERATION_REJECTED`** — never as `error.code`. Branch on `details.platformCode`.
+
+| Code | Status here | Category | Meaning |
+|---|---|---|---|
+| `PHONE_VERIFICATION_RESEND_TOO_SOON` | 429 | `rate_limit` | A code was requested again inside the cooldown. **The code already in their hand still works** — `details.retryAfterSeconds` says how long until another may be sent. ⚠ The cooldown is checked *before* a new code is minted, so a refused resend never destroys the outstanding one. |
+| `PHONE_VERIFICATION_TOO_MANY_ATTEMPTS` | 429 | `rate_limit` | Too many wrong codes. **The code has been DESTROYED** — the only remedy is requesting a new one. Carries no `details` at all, which is why `platformCode` had to survive a 429 before the two 429s could be told apart. |
+| `PHONE_VERIFICATION_CODE_INVALID` | 422 | `business_rule` | Wrong code, tries remaining. **`details.attemptsLeft` survives to the client** and is disclosed deliberately — the secret is the code, not the counter. |
+| `PHONE_VERIFICATION_CODE_EXPIRED` | 422 | `business_rule` | The code timed out, or no verification is in progress at all. Both land here; request a new code. |
+| `PHONE_VERIFICATION_NO_TARGET` | 422 | `business_rule` | jovi-mall could not use the number it was handed. ⚠ **Rarely reached on the admin path** — wi-admin's own `ADMIN_PHONE_NOT_SET` refuses an empty number before the call is made, so this one means the stored number is present but unusable (it failed E.164 normalisation). |
+| `PHONE_VERIFICATION_DELIVERY_FAILED` | **502 → `SERVICE_DEPENDENCY_UNAVAILABLE`** | `external_service` | WhatsApp would not take it. ⚠ **The `error.code` you receive is `SERVICE_DEPENDENCY_UNAVAILABLE`, not `PLATFORM_OPERATION_REJECTED`** — a delegated 5xx is remapped — and **the message does not survive the hop**: `projectMessage` replaces it with the registry default for masked categories. `platformCode` *does* survive, which is the only way to recognise it. See [auth.md](auth.md#why-verification-usually-fails-today) for why this is the ordinary outcome for an administrator right now, and what actually works. |
 
 ### Employee records (ADR-023)
 

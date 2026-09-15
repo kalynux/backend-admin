@@ -1218,6 +1218,14 @@ export const AUDIT_CATALOG = Object.freeze({
         permission: 'money.payouts.mark_paid', target: 'payout', transport: 'delegated',
         summary: 'Marked a payout request paid — money has left the platform',
     },
+    'cod.triage': {
+        permission: 'cod.triage', target: 'agency', transport: 'delegated',
+        summary: 'Endorsed a declared COD deposit or remittance as genuine — a review note, not a confirmation',
+    },
+    'money.payouts.triage': {
+        permission: 'money.payouts.triage', target: 'payout', transport: 'delegated',
+        summary: 'Endorsed a payout request as genuine — a review note, not a payment',
+    },
     'money.payouts.reject': {
         permission: 'money.payouts.reject', target: 'payout', transport: 'delegated',
         summary: 'Rejected a payout request and returned the funds to the available balance',

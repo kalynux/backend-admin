@@ -227,8 +227,53 @@ t.assert('privilege nests: tier 3 ⊆ tier 2 ⊆ tier 1', () =>
     TIER_GRANTS[3].every((name) => grantedTo(2).has(name))
     && TIER_GRANTS[2].every((name) => grantedTo(1).has(name)));
 
-t.assert('tier 3 holds no financial permission', () =>
-    TIER_GRANTS[3].every((name) => permissionSpec(name).financial !== true));
+/**
+ * The financial permissions tier 3 may hold, pinned BY NAME.
+ *
+ * ⚠ **This list is a copy of `TIER_3_FINANCIAL_ALLOWLIST` in `tier-grants.ts`, and the
+ * duplication is the point** — the same shape as `FINANCIAL_READ_ALLOWLIST` below. The boot
+ * assertion enforces the rule; this pins what the exception currently IS. Admitting a second
+ * financial permission to Support therefore has to be typed in two files by two deliberate
+ * edits, and cannot arrive as a side effect of adding a flag somewhere.
+ *
+ * The line it draws: **Support may release a hold back to the owner it belongs to; Support
+ * may never send money out of the platform.** `money.payouts.triage` qualifies because its
+ * reject verdict returns the owner's own balance to them — the reversible direction, nothing
+ * leaves, and the owner can simply request again. If a candidate fails that test, the answer
+ * is not to lengthen this list.
+ */
+const TIER_3_FINANCIAL_ALLOWLIST = ['money.payouts.triage'];
+
+t.assert('tier 3 holds no financial permission beyond the named allowlist', () =>
+    TIER_GRANTS[3].every(
+        (name) => permissionSpec(name).financial !== true || TIER_3_FINANCIAL_ALLOWLIST.includes(name),
+    ));
+
+t.assert('every name on the tier-3 financial allowlist is actually granted to tier 3', () =>
+    TIER_3_FINANCIAL_ALLOWLIST.every((name) => grantedTo(3).has(name as never)));
+
+/**
+ * The exemption is for financial permissions only. Support still holds nothing destructive
+ * and nothing escalating, and `money.payouts.triage` must not quietly acquire either flag —
+ * that would widen what the allowlist admits without the allowlist changing.
+ */
+t.assert('the tier-3 financial allowlist admits nothing destructive or escalating', () =>
+    TIER_3_FINANCIAL_ALLOWLIST.every((name) => {
+        const spec = permissionSpec(name as never);
+        return spec.destructive !== true && spec.escalation !== true;
+    }));
+
+/**
+ * Support may endorse. Support may not send, may not reject on the money surface, and may
+ * not see a beneficiary's digits. Asserted by name because these are the four permissions a
+ * well-meaning widening would reach for next.
+ */
+t.assert('Support holds triage and none of the money writes it precedes', () =>
+    grantedTo(3).has('money.payouts.triage' as never)
+    && grantedTo(3).has('money.payouts.read' as never)
+    && !grantedTo(3).has('money.payouts.mark_paid' as never)
+    && !grantedTo(3).has('money.payouts.reject' as never)
+    && !grantedTo(3).has('money.payouts.destination.read' as never));
 
 t.assert('tier 3 holds no destructive permission', () =>
     TIER_GRANTS[3].every((name) => permissionSpec(name).destructive !== true));

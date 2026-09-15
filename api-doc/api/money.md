@@ -2,6 +2,9 @@
 
 **Verified against source on 2026-09-08** — all fourteen routes and their guards against the live route manifest; every query parameter, sort allowlist, bounded-string decision and the 366-day span against `money/validators/money.validator.ts`; and both `PayoutDestination` shapes — including `full` being the literal `null` on the masked path and the `revealed` discriminator, which the examples had wrong — against `money/read-models/payout-destination.dto.ts:82-240`.
 
+⚠ The payout row's **`verification`** field was added on 2026-09-15 and is NOT covered by that
+verification date — see the section under `GET /money/payouts` (BR-026 § 1).
+
 Base path: `/api/v1/money`
 
 Fourteen routes; eight had no legacy equivalent at all.
@@ -19,8 +22,45 @@ Design record: [`../../docs/ADR-011-ACCOUNTS-AND-FINANCE.md`](../../docs/ADR-011
 | `GET` | `/money/payouts/:payoutId` | `money.payouts.read` | direct read | — |
 | `GET` | `/money/payouts/:payoutId/destination` | **`money.payouts.destination.read`** | direct read | ✅ **audited read** |
 | `GET` | `/money/payouts/:payoutId/activity` | `money.payouts.read` **+** `audit.read` | direct read | — |
+| `POST` | `/money/payouts/:payoutId/triage` | `money.payouts.triage` | **delegated** | ✅ |
+| `POST` | `/money/payouts/:payoutId/send` | `money.payouts.mark_paid` | **delegated** | ✅ **dual-controlled** |
 | `POST` | `/money/payouts/:payoutId/mark-paid` | `money.payouts.mark_paid` | **delegated** | ✅ **dual-controlled** |
 | `POST` | `/money/payouts/:payoutId/reject` | `money.payouts.reject` | **delegated** | ✅ |
+
+### Payout review is two stages, and only one of them moves money
+
+**`/triage` is the pre-screen.** A reviewer endorses the request as genuine; it moves no money,
+changes no status and gates nothing. `money.payouts.triage` is the **only** permission a
+Support (tier 3) administrator holds on this surface, and the only `financial` permission that
+tier holds anywhere — admitted by a named exemption in the grant table, on the grounds that its
+one money-touching verdict (rejecting) merely releases a hold back to the owner it belongs to.
+
+⛔ **Endorsement is advisory. A payout nobody has endorsed is exactly as payable as one that
+has been.** Do not disable an approve control on a missing `triage`. The pre-screen exists to
+save the approving administrator work, not to gate them — an empty Support queue must never
+stall payments.
+
+**There is no "reject" verdict on `/triage`.** A reviewer who rejects calls `/reject`, the same
+terminal write anyone else makes. One outcome, one code path.
+
+**`/send` and `/mark-paid` are two ways to perform one action** — assert that money left — so
+they share `money.payouts.mark_paid` and therefore share the 2,000,000 XAF four-eyes threshold.
+Giving `/send` its own permission would have created a second threshold free to drift from the
+first.
+
+| | `/send` | `/mark-paid` |
+|---|---|---|
+| Who moves the money | the platform, through the payment gateway | a human, out of band |
+| Body | none | `{ reference? }` |
+| Usual result | **`processing`** — confirmed later by callback | `paid` immediately |
+| Works for | mobile-money destinations only | any destination, including bank and card |
+| Available when the gateway is down | no | **yes** |
+
+⚠ **A 200 from `/send` does not mean the money arrived.** Only `paid` is settled. `failed`
+means the transfer was refused **and the funds are still held** — retry or reject.
+
+⛔ **`processing` cannot be rejected** (`409`). Releasing a hold while a transfer may still be
+in flight is how an owner gets paid twice.
 | `GET` | `/money/payments` | `money.payments.read` | direct read | — |
 | `GET` | `/money/payments/:transactionId` | `money.payments.read` | direct read | — |
 | `GET` | `/money/refunds` | `money.payments.read` | direct read | — |
@@ -326,6 +366,7 @@ The queue.
       "currency": "XAF",
       "status": "pending",
       "origin": "auto_threshold",
+      "verification": { "verified": false, "verdict": "pending" },
       "destination": {
         "method": "mobile_money",
         "isPreferred": true,
@@ -350,6 +391,60 @@ The queue.
   "meta": { "total": 17, "page": 1, "limit": 20, "pages": 1 }
 }
 ```
+
+### ⚠️ `verification` — read it on every row before releasing funds
+
+```jsonc
+"verification": { "verified": false, "verdict": "pending" }
+```
+
+**Has a human vetted the business this money is going to?** Payout review is the platform's one
+human checkpoint on money leaving it, and **`owner` being `active` stopped answering this on
+2026-09-15**: accounts now activate themselves by verifying a phone number. Without this field an
+active vendor with a plausible destination is indistinguishable from a stranger who registered
+this morning.
+
+| Member | |
+|---|---|
+| `verified` | **The only field to branch on.** `true` only when an administrator approved the business |
+| `verdict` | `unverified` · `pending` · `verified` · `rejected` — **the role's own word**, for display |
+
+- **Show it on every row**, not behind a detail click.
+- ⛔ **Never read verified-ness as `verdict !== "rejected"`.** "Never reviewed" is not approval,
+  and on a young platform that is most accounts.
+- ⚠ **Do not flatten the vocabulary.** Vendor and agency default to `pending`; an **agent**
+  defaults to `unverified` and reaches `pending` only once documents are submitted, so on an
+  agent the two words separate "nothing submitted" from "submitted, waiting" — which is what
+  tells a reviewer whether there is anything to chase. Render the word; branch on the boolean.
+- ⚠ **It is information, not enforcement.** The platform does not refuse these payouts — working
+  with an unverified counterparty is a business judgement. **Do not disable the pay action on
+  it.**
+- **Read fresh on every request**, unlike `destination` beside it. The snapshot there exists so a
+  later profile edit cannot redirect money already in flight; a frozen verdict would do the
+  opposite kind of harm, sending a reviewer to chase documents approved an hour ago.
+- An owner that resolves in no directory reads as `{ verified: false, verdict: "unverified" }`.
+  A missing row never renders as a silent approval.
+
+> ⚠ **There is no filter or sort on it, deliberately — and this is the one thing here that is a
+> refusal rather than a design.** BR-026 § 1 asked for one "if the list query will take one", and
+> it does not. The verdict lives in `vendors` / `delivery_agencies` / `delivery_agents`; the queue
+> pages over `payout_requests`. Filtering across them means a three-way `$lookup` keyed on
+> `owner_type`, which would take the sort off its index and — more to the point — widen this
+> repository past the projection that is the queue's security control (see `destination` above).
+> The queue is scoped by `status` first and the pending page is small, so filter in the client.
+> If the pending queue ever stops being small, the right answer is a denormalised verdict on the
+> payout row, not a join here.
+
+> **The same field appears on `GET /accounts/:ownerType/:ownerId/payouts`**, hydrated from the
+> account being viewed.
+
+> ⚠ **wi-admin computes this; it does not forward jovi-mall's.** jovi-mall added a `verification`
+> field to its own admin payout DTO in the same release, and the two are deliberately identical in
+> name and shape — but nothing passes between them. This queue reads `payout_requests` directly
+> (ADR-009 D-1), so jovi-mall's DTO never crosses this wire. The consequence worth knowing: the
+> field works as soon as **wi-admin** ships and does not wait on jovi-mall. The consequence worth
+> watching: there is no shared package, so the two definitions of "what counts as verified" are
+> held together only by `test:money` § 11 and jovi-mall's `test:payout-verification`.
 
 ### ⚠️ How to read `destination` on this endpoint
 

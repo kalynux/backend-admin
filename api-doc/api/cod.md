@@ -17,11 +17,13 @@ Design records: [`../../docs/ADR-004-DOMAIN-OWNERSHIP.md`](../../docs/ADR-004-DO
 | `GET` | `/cod/holders` | `cod.holders.read` | direct read | — |
 | `GET` | `/cod/remittances` | `cod.remittances.read` | **delegated** | — |
 | `GET` | `/cod/remittances/:remittanceId` | `cod.remittances.read` | direct read | — |
+| `POST` | `/cod/remittances/:remittanceId/triage` | `cod.triage` | **delegated** | ✅ |
 | `POST` | `/cod/remittances/:remittanceId/confirm` | `cod.remittances.confirm` | **delegated** | ✅ |
 | `POST` | `/cod/remittances/:remittanceId/reject` | `cod.remittances.reject` | **delegated** | ✅ |
 | `GET` | `/cod/deposits` | `cod.deposits.read` | **delegated** | — |
 | `POST` | `/cod/deposits` | `cod.deposits.create` | **delegated** | ✅ |
 | `GET` | `/cod/deposits/:depositId` | `cod.deposits.read` | direct read | — |
+| `POST` | `/cod/deposits/:depositId/triage` | `cod.triage` | **delegated** | ✅ |
 | `POST` | `/cod/deposits/:depositId/confirm` | `cod.deposits.confirm` | **delegated** | ✅ |
 | `POST` | `/cod/deposits/:depositId/reject` | `cod.deposits.reject` | **delegated** | ✅ |
 | `GET` | `/cod/discrepancies` | `cod.discrepancies.read` | direct read | — |
@@ -30,9 +32,31 @@ Design records: [`../../docs/ADR-004-DOMAIN-OWNERSHIP.md`](../../docs/ADR-004-DO
 | `GET` | `/cod/agents/:agentId/trust-events` | `cod.holders.read` **+** `agents.read` | direct read | — |
 | `POST` | `/cod/agents/:agentId/trust-adjustment` | `cod.trust.adjust` | **delegated** | ✅ |
 
-**Nothing on this surface is Support's.** Every permission here is Admin and above, and seven
-are flagged `financial` — including `cod.deposits.create`, the one route that asserts money
+⚠ **This used to read "Nothing on this surface is Support's", and that is no longer true —
+but the line it was protecting still holds.** Support now reaches four things here: the three
+reads (`cod.overview.read`, `cod.remittances.read`, `cod.deposits.read`) and the two `/triage`
+routes. Every permission that MOVES CASH is still Admin and above, and seven of them are still
+flagged `financial` — including `cod.deposits.create`, the one route that asserts money
 arrived.
+
+The new line is narrower: **a reviewer may say a declared handover looks genuine; only an
+Admin may say the cash arrived.**
+
+`cod.triage` is deliberately **not** flagged `financial`, unlike its payout sibling, and the
+asymmetry is real rather than an oversight. A payout request holds the owner's balance from the
+moment it opens, so endorsing or rejecting one touches money. A COD deposit or remittance in
+`declared` holds **nothing** — only a CONFIRMED one moves cash. So this needed no exemption
+from the boot check that refuses Support every financial permission.
+
+⚠ **A smaller surface than the table suggests.** jovi-mall's `assertConfirmer` refuses an
+administrator on an **agency-recipient** deposit, which is the normal route — that handover is
+confirmed by the agency itself, a counter-signature between two organisations rather than two
+admin tiers, and the platform never saw the cash. So `/deposits/:id/triage` reaches
+**platform-recipient deposits only**. Remittances are all administrator-confirmed, so triage
+applies to every one of them.
+
+⛔ **Endorsement gates nothing.** An un-endorsed remittance is exactly as confirmable as an
+endorsed one. Do not disable a confirm control on a missing `triage`.
 
 ## The cash model in one paragraph
 

@@ -672,11 +672,31 @@ t.assert('the vendor status write is a compare-and-set', () => {
 t.assert('the dead updateStatus is gone — one way to move a vendor’s status', () =>
     !readCode(JOVI, 'modules', 'vendors', 'vendor.repository.ts').includes('async updateStatus'));
 
+/**
+ * ⚠ **Rewritten 2026-09-15, after this assertion went RED against code that had made it
+ * MORE true.** It used to require a `$cond` pipeline pinning the promotion to
+ * `pending_verification` — the narrowest fix available when `markEmailVerified` wrote
+ * `status: 'active'` unconditionally and a suspended vendor could clear their suspension by
+ * re-verifying their email.
+ *
+ * jovi-mall's activation split moved promotion out of that method entirely
+ * (`activateIfFundamentalsMet`, driven by a proved phone), so the pipeline this looked for
+ * is gone and the property it protected is now structural: the method writes one field.
+ *
+ * ⚠ The lesson is the shape, not the case. **An assertion naming a MECHANISM fails when the
+ * mechanism is replaced by a better one**, and reads at a glance as though the protection
+ * had been lost. This one now names the property — `markEmailVerified` must not touch
+ * `status`, by any means — which no future rewrite can satisfy accidentally or break
+ * quietly.
+ */
 t.assert('⭐ markEmailVerified can no longer reinstate a suspended vendor', () => {
     const code = readCode(JOVI, 'modules', 'vendors', 'vendor.repository.ts');
-    // It must be conditional on `pending_verification`, not an unconditional 'active'.
-    return code.includes("$eq: ['$status', 'pending_verification']")
-        && !/markEmailVerified[\s\S]{0,400}\$set:\s*\{\s*email_verified:\s*true,\s*status:\s*'active'/.test(code);
+    const from = code.indexOf('async markEmailVerified');
+    const rest = code.slice(from);
+    const method = rest.slice(0, rest.indexOf('async ', 1));
+    // Not "not `active`" — not the field AT ALL. Promotion is `activateIfFundamentalsMet`'s
+    // alone, and a second writer of `status` on this path is the whole defect returning.
+    return from > -1 && method.length > 0 && !/\bstatus\b/.test(method);
 });
 
 t.assert('⭐ setKycVerdict writes only the real field, never the stripped top-level one', () => {

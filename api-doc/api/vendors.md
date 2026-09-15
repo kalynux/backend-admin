@@ -42,6 +42,19 @@ A vendor screen shows three independent states. Confusing them is the commonest 
 | **Account status** | `account.status` | May the person sign in at all? `active` / `suspended` — see [users.md](users.md) |
 | **Shop open** | `store.isOpen` | The vendor's **own** vacation switch. Not an admin action |
 
+> ⚠ **`status: "active"` is NOT evidence that anybody vetted this vendor, and it stopped
+> being so on 2026-09-15.** It used to be: the account waited on an administrator, so
+> reaching `active` meant a human had approved it. The two questions were split —
+> **`status`** answers *may this account operate*, and the holder earns it themselves by
+> verifying a phone number; **`kycStatus`** answers *has a human vetted this business*, and
+> only an administrator writes it.
+>
+> Any trust badge, "verified business" marker or warning banner derived from
+> `status === "active"` is now wrong — re-point it at `kycStatus`. And do not read
+> verified-ness as `kycStatus !== "rejected"`: "never reviewed" is not approval, and on a
+> young platform that is most accounts. Only `verified` means verified.
+
+
 Suspending one does not touch the others.
 
 Status values are jovi-mall's own, verbatim — `inactive`, not a friendlier `suspended`. A wire

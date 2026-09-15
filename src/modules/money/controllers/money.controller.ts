@@ -13,6 +13,8 @@ import { ListAuditQuery } from '../../audit/validators/audit.validator';
 import { AgencyReadRepository } from '../../agencies/repositories/agency.read.repository';
 import { AgentReadRepository } from '../../agents/repositories/agent.read.repository';
 import { StoreReadRepository } from '../../vendors/repositories/store.read.repository';
+import { VendorReadRepository } from '../../vendors/repositories/vendor.read.repository';
+import { verificationOf } from '../domain/owner-verification';
 import * as disclosure from '../domain/payout-disclosure';
 import * as payoutWrites from '../domain/payout-dual-control';
 import * as gateway from '../gateways/money.gateway';
@@ -28,6 +30,7 @@ import {
 import { PayoutRequestReadModel, PayoutRequestReadRepository } from '../repositories/payout-request.read.repository';
 import {
     MoneyOwnerNames,
+    MoneyOwnerVerifications,
     ownerKey,
     toAllocationDetailDto,
     toAllocationDto,
@@ -48,6 +51,7 @@ import {
     ListRefundsQuery,
     MarkPaidBody,
     RejectPayoutBody,
+    TriagePayoutBody,
 } from '../validators/money.validator';
 
 /**
@@ -95,6 +99,7 @@ const auditEntries = new AuditRepository();
 // `payout_details`, so a second projection of it declared here would be a second thing to
 // get right. Same rule `hydrateNames` follows in the COD and billing controllers.
 const stores = new StoreReadRepository();
+const vendors = new VendorReadRepository();
 const agencies = new AgencyReadRepository();
 const agents = new AgentReadRepository();
 
@@ -154,6 +159,60 @@ async function hydrateOwnerNames(rows: OwnerRow[]): Promise<MoneyOwnerNames> {
     agentNames.forEach((name, agentId) => names.set(ownerKey('agent', agentId), name));
 
     return names;
+}
+
+/**
+ * Where each owner's KYC review stands, for a page of payout rows — one batched read per
+ * owner type present, never one per row, exactly as `hydrateOwnerNames` above.
+ *
+ * ── Why this is computed here and not forwarded ──────────────────────────────
+ * ⚠ **The payout queue is a DIRECT read, not a delegated one**, so jovi-mall's own
+ * `verification` field (added to its admin DTO on 2026-09-15) never passes through this
+ * service. There is nothing to carry through; the verdict is resolved against the same
+ * three collections, by the same fail-closed rule. See `domain/owner-verification.ts`,
+ * which carries the whole argument and the BR-026 § 1 reference.
+ *
+ * ⚠ **Read fresh on every request, deliberately** — unlike `destination`, which is a
+ * snapshot frozen at request time so a later profile edit cannot redirect money in flight.
+ * A frozen verdict would produce the opposite harm: an "unverified" badge against a
+ * business approved an hour ago sends the reviewer chasing documents already on file.
+ *
+ * ⚠ **Note `vendors`, not `stores`.** The display name comes off the vendor's Store; the
+ * verdict is on the vendor. Two collections, two reads, and reaching for the one already
+ * in `hydrateOwnerNames` would silently return nothing for every vendor row.
+ *
+ * A `platform` owner has no directory row and never gets one — it is the marketplace's own
+ * commission account — so it is not queried, falls through the map and renders as
+ * unverified. That is the honest answer for a row that is not a vetted business, and the
+ * queue does not show platform payouts anyway.
+ */
+async function hydrateOwnerVerifications(rows: OwnerRow[]): Promise<MoneyOwnerVerifications> {
+    const idsFor = (type: string): ObjectId[] =>
+        [
+            ...new Set(
+                rows
+                    .filter((row) => row.ownerType === type && row.ownerId)
+                    .map((row) => row.ownerId as string),
+            ),
+        ].map((id) => new ObjectId(id));
+
+    const [vendorVerdicts, agencyVerdicts, agentVerdicts] = await Promise.all([
+        vendors.findKycVerdictsByIds(idsFor('vendor')),
+        agencies.findKycVerdictsByIds(idsFor('agency')),
+        agents.findKycVerdictsByIds(idsFor('agent')),
+    ]);
+
+    const verifications: MoneyOwnerVerifications = new Map();
+    const absorb = (type: string, verdicts: Map<string, string | null>): void => {
+        verdicts.forEach((verdict, id) => {
+            verifications.set(ownerKey(type, id), verificationOf(verdict));
+        });
+    };
+    absorb('vendor', vendorVerdicts);
+    absorb('agency', agencyVerdicts);
+    absorb('agent', agentVerdicts);
+
+    return verifications;
 }
 
 /** A payout page's owner rows, in the shape `hydrateOwnerNames` reads. */
@@ -368,11 +427,17 @@ export class MoneyController {
             sort: query.sort,
         });
 
-        const names = await hydrateOwnerNames(payoutOwners(page.items));
+        // Both hydrations run over the same owner rows and neither depends on the other,
+        // so the queue costs one extra round trip in parallel rather than one per row.
+        const owners = payoutOwners(page.items);
+        const [names, verifications] = await Promise.all([
+            hydrateOwnerNames(owners),
+            hydrateOwnerVerifications(owners),
+        ]);
 
         sendPaginated(
             res,
-            page.items.map((row) => toPayoutListItemDto(row, names)),
+            page.items.map((row) => toPayoutListItemDto(row, names, verifications)),
             toPageMeta(page.total, page.page, page.limit),
         );
     });
@@ -380,9 +445,13 @@ export class MoneyController {
     /** GET /api/v1/money/payouts/:payoutId — the same shape, one row, same masking. */
     static getPayout = asyncHandler(async (req: Request, res: Response) => {
         const row = await payoutWrites.loadPayoutOr404(req.params.payoutId);
-        const names = await hydrateOwnerNames(payoutOwners([row]));
+        const owners = payoutOwners([row]);
+        const [names, verifications] = await Promise.all([
+            hydrateOwnerNames(owners),
+            hydrateOwnerVerifications(owners),
+        ]);
 
-        sendSuccess(res, toPayoutListItemDto(row, names));
+        sendSuccess(res, toPayoutListItemDto(row, names, verifications));
     });
 
     /**
@@ -478,6 +547,75 @@ export class MoneyController {
             status: 202,
             message: outcome.created
                 ? 'This payout is above the four-eyes threshold — submitted for a second administrator’s approval'
+                : 'An identical request is already awaiting approval',
+        });
+    });
+
+    /**
+     * POST /api/v1/money/payouts/:payoutId/triage — a reviewer vouches for this request.
+     *
+     * The only write on this surface a Support administrator can perform, and it is
+     * deliberately the weakest one in the module: it moves no money, changes no status and
+     * gates nothing. A payout nobody has endorsed is exactly as payable as one that has been.
+     *
+     * Never queued for a second administrator at any amount. There is nothing to have a
+     * quorum about — the act being recorded is an opinion, and the irreversible step it
+     * precedes has its own.
+     */
+    static triagePayout = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as TriagePayoutBody;
+        const before = await payoutWrites.loadPayoutOr404(req.params.payoutId);
+
+        const result = await gateway.triagePayout(
+            req.params.payoutId,
+            body.note ?? null,
+            payoutWrites.auditContextOfPayout(before),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, result, {
+            message: 'Payout request endorsed — final approval is still required before money moves',
+        });
+    });
+
+    /**
+     * POST /api/v1/money/payouts/:payoutId/send — the platform sends the money itself.
+     *
+     * Rides `money.payouts.mark_paid` and therefore the same four-eyes threshold: at or above
+     * 2,000,000 XAF this answers **202** with an approval id and sends nothing until a second
+     * administrator agrees. Below it, the transfer goes now.
+     *
+     * ⚠ **A 200 here does not mean the money arrived.** The usual answer is a payout in
+     * `processing` — accepted by the gateway, confirmed later by callback. Only `paid` is
+     * settled, and `failed` means the transfer was refused and the funds are still held.
+     */
+    static sendPayout = asyncHandler(async (req: Request, res: Response) => {
+        const identity = requireAdminIdentity(req);
+
+        const outcome = await payoutWrites.markPaid(
+            identity,
+            req.params.payoutId,
+            null,
+            actorContextOf(req),
+            'gateway',
+        );
+
+        if (outcome.kind === 'applied') {
+            sendSuccess(res, outcome.payout, {
+                message:
+                    outcome.payout.status === 'paid'
+                        ? 'Payout sent and confirmed'
+                        : outcome.payout.status === 'failed'
+                          ? 'The gateway refused the transfer — the funds remain held'
+                          : 'Payout submitted to the gateway — it is not settled until the gateway confirms it',
+            });
+            return;
+        }
+
+        sendSuccess(res, outcome.approval, {
+            status: 202,
+            message: outcome.created
+                ? 'This payout is above the four-eyes threshold — submitted for a second administrator\u2019s approval'
                 : 'An identical request is already awaiting approval',
         });
     });

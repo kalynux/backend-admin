@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { defineRoute, permission, records } from '../../../api/route-manifest';
+import { anyPermission, defineRoute, permission, records } from '../../../api/route-manifest';
 import { MoneyController } from '../controllers/money.controller';
 /**
  * Imported for SIDE EFFECT, and the import is load-bearing.
@@ -28,6 +28,8 @@ import {
     MarkPaidSchema,
     PayoutIdParamSchema,
     RejectPayoutSchema,
+    TriagePayoutSchema,
+    SendPayoutSchema,
     TransactionIdParamSchema,
 } from '../validators/money.validator';
 
@@ -213,17 +215,80 @@ defineRoute(router, {
 });
 
 /**
+ * A reviewer endorses the request as genuine.
+ *
+ * The one route in this module a Support administrator can reach, and the permission is the
+ * only `financial` one their tier holds — see `TIER_3_FINANCIAL_ALLOWLIST` in tier-grants
+ * for why that exception exists and what bounds it.
+ *
+ * Not dual-controlled at any amount: nothing moves, so there is nothing for a quorum to
+ * protect. A triage REJECTION is not here — it is `/reject` below, the same terminal write a
+ * tier-1/2 administrator performs, because one outcome deserves one code path.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/payouts/:payoutId/triage',
+    access: permission('money.payouts.triage'),
+    validate: { params: PayoutIdParamSchema, body: TriagePayoutSchema },
+    audit: records('money.payouts.triage'),
+    handler: MoneyController.triagePayout,
+});
+
+/**
+ * Send the money through the payment gateway — the automated half of marking a payout paid.
+ *
+ * ⚠ **`money.payouts.mark_paid`, not a permission of its own**, and the reuse is deliberate:
+ * `LARGE_PAYOUT` already hangs off that name, so a gateway send inherits the 2,000,000 XAF
+ * four-eyes rule with no second threshold to drift from the first. Giving this its own
+ * permission would have created one silently.
+ *
+ * Answers **202** above the threshold, exactly as `/mark-paid` does. Below it, **200** with
+ * the payout usually in `processing` rather than `paid` — the gateway confirms by callback.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/payouts/:payoutId/send',
+    access: permission('money.payouts.mark_paid'),
+    validate: { params: PayoutIdParamSchema, body: SendPayoutSchema },
+    audit: records('money.payouts.mark_paid'),
+    handler: MoneyController.sendPayout,
+});
+
+/**
  * Reject it — the funds return to the owner's available balance.
  *
  * Not dual-controlled at any amount. The asymmetry with mark-paid is the design: this
  * direction is reversible by the owner simply requesting again, and nothing leaves the
  * platform. A quorum belongs on the irreversible direction only.
  */
+/**
+ * ⚠ **`anyPermission`, and this is the route that makes `money.payouts.triage` financial.**
+ *
+ * A reviewer's rejection is TERMINAL — the same write an approver makes, closing the request and
+ * releasing the hold back to the owner's available balance. It is not a recommendation, and there
+ * is deliberately no second "reject" verdict on `/triage`: one outcome, one code path, one set of
+ * fields. Two routes writing the same terminal state is how a record ends up closed two different
+ * ways.
+ *
+ * So Support reaches this route with `money.payouts.triage` and an approver reaches it with
+ * `money.payouts.reject`, and both perform exactly the same thing. That release is a money
+ * movement, which is why `money.payouts.triage` carries `financial: true` honestly and why the
+ * grant table takes a named exemption for it (`TIER_3_FINANCIAL_ALLOWLIST`). Without this route
+ * accepting it, that flag and that exemption would be describing a capability the permission did
+ * not actually have.
+ *
+ * ⛔ Note what this does NOT open. Rejecting is the reversible direction — nothing leaves the
+ * platform and the owner can simply request again — which is the same asymmetry that keeps this
+ * route out of dual control at any amount. Sending remains `money.payouts.mark_paid`, which
+ * Support does not hold and cannot reach from here.
+ */
 defineRoute(router, {
     mountedAt,
     method: 'post',
     path: '/payouts/:payoutId/reject',
-    access: permission('money.payouts.reject'),
+    access: anyPermission('money.payouts.reject', 'money.payouts.triage'),
     validate: { params: PayoutIdParamSchema, body: RejectPayoutSchema },
     audit: records('money.payouts.reject'),
     handler: MoneyController.rejectPayout,

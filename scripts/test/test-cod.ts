@@ -402,7 +402,8 @@ t.assert('every delegated WRITE is wrapped in an audit intent', () => {
     const source = readCode(...COD_GATEWAY);
     const writes = (source.match(/method:\s*'(POST|PUT|PATCH|DELETE)'/g) ?? []).length;
     const audited = (source.match(/auditedDelegation\(/g) ?? []).length;
-    return writes === 7 && audited === writes;
+    // Nine since triage: seven cash writes plus the remittance and deposit endorsements.
+    return writes === 9 && audited === writes;
 });
 
 /**
@@ -445,11 +446,12 @@ t.assert('every delegated path exists in jovi-mall’s admin COD router', () => 
         .map((m) => m[1].replace('/cod', ''))
         .map((p) => p.replace(/\$\{\w+\}/g, ':id'));
 
-    // Ten `path:` sites, nine distinct: `/deposits` is named twice — once for the
+    // Twelve `path:` sites, eleven distinct: `/deposits` is named twice — once for the
     // delegated list, once for the create, which jovi-mall also serves at one path under
-    // two methods.
-    return paths.length === 10
-        && new Set(paths).size === 9
+    // two methods. The two triage paths are literals rather than one template precisely so
+    // that THIS assertion can still see them; see the note on `triageRemittance`.
+    return paths.length === 12
+        && new Set(paths).size === 11
         && paths.every((p) => router.includes(`'${p}'`));
 });
 
@@ -554,7 +556,38 @@ t.section('7. Routes, permissions and the audit catalog');
 
 const codRoutes = routeManifest().filter((r) => r.fullPath.startsWith('/api/v1/cod'));
 
-t.assert('sixteen COD routes are registered', () => codRoutes.length === 16);
+t.assert('eighteen COD routes are registered', () => codRoutes.length === 18);
+
+/**
+ * The two triage routes are the ONLY COD writes a Support administrator can reach, and these
+ * assertions are what keep that true.
+ *
+ * The permission is unflagged — no tier-3 exemption was needed — so nothing at boot would
+ * complain if somebody widened it. What would go wrong is quiet: `cod.triage` acquiring a
+ * confirm-like capability, or a confirm route being relabelled to use it.
+ */
+t.assert('both triage routes stand behind cod.triage alone, and are audited', () => {
+    const triage = codRoutes.filter((r) => r.fullPath.endsWith('/triage'));
+    return triage.length === 2
+        && triage.every(
+            (r) =>
+                r.method === 'post'
+                && r.access.kind === 'permission'
+                && r.access.permissions.length === 1
+                && r.access.permissions[0] === 'cod.triage',
+        );
+});
+
+/**
+ * ⛔ Endorsing is not confirming. The three writes that actually move cash stay above
+ * Support, and none of them may ever be reachable with `cod.triage`.
+ */
+t.assert('no cash-moving COD route accepts cod.triage', () => {
+    const moving = codRoutes.filter((r) => /\/(confirm|reject)$/.test(r.fullPath) || r.fullPath.endsWith('/cod/deposits'));
+    return moving.every(
+        (r) => r.access.kind !== 'permission' || !r.access.permissions.includes('cod.triage' as never),
+    );
+});
 
 t.assert('every one declares a permission', () =>
     codRoutes.every((r) => r.access.kind === 'permission'));
@@ -633,10 +666,28 @@ t.assert('every COD write permission is flagged financial', () =>
  * wants Support to answer "has this agency remitted", the grant is one line and this
  * assertion is where the decision gets recorded.
  */
-t.assert('Support holds no COD permission — the cash chain is not ticket work', () => {
-    const support = TIER_GRANTS[3] ?? [];
-    return !support.some((p) => String(p).startsWith('cod.'));
+/**
+ * ⚠ **This assertion used to read "Support holds no COD permission", and the header above it
+ * still describes why — read it as the state before triage, and this as the amendment.**
+ *
+ * Support now holds three READS and one endorsement, and nothing else. The line is no longer
+ * "the cash chain is not ticket work" but a narrower one: **Support may say a declared
+ * handover looks genuine; Support may never say cash arrived.** Confirming is what settles
+ * the chain, and all three confirm/reject/adjust writes stay Admin-and-above.
+ *
+ * Note what did NOT need to change to allow this: `cod.triage` carries no `financial` flag,
+ * because a `declared` deposit or remittance holds no money — only a confirmed one moves
+ * any. So unlike `money.payouts.triage`, this needed no exemption from the boot check, and
+ * the check below still refuses Support every write that matters.
+ */
+t.assert('Support holds exactly the COD reads and the endorsement, and no cash write', () => {
+    const support = (TIER_GRANTS[3] ?? []).map(String).filter((p) => p.startsWith('cod.'));
+    const expected = ['cod.overview.read', 'cod.remittances.read', 'cod.deposits.read', 'cod.triage'];
+    return support.length === expected.length && expected.every((p) => support.includes(p));
 });
+
+t.assert('cod.triage is NOT financial — which is why it needed no tier-3 exemption', () =>
+    permissionSpec('cod.triage').financial !== true);
 
 t.assert('...and the boot check would refuse it any of the writes anyway', () =>
     ['cod.deposits.create', 'cod.trust.adjust', 'cod.discrepancies.resolve']
@@ -649,9 +700,9 @@ t.assert('Admin holds every COD permission', () => {
     ].every((p) => admin.includes(p as never));
 });
 
-t.assert('seven cod.* audit actions exist, all delegated', () => {
+t.assert('eight cod.* audit actions exist, all delegated', () => {
     const rows = Object.entries(AUDIT_CATALOG).filter(([name]) => name.startsWith('cod.'));
-    return rows.length === 7 && rows.every(([, spec]) => spec.transport === 'delegated');
+    return rows.length === 8 && rows.every(([, spec]) => spec.transport === 'delegated');
 });
 
 /**

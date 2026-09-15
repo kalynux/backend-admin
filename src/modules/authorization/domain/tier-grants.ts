@@ -160,6 +160,43 @@ const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
     'money.payments.read',
 
     /**
+     * The payout queue, and the verdict on it. Added when payout review became a two-stage
+     * job (tier 3 pre-screens, tier 1/2 sends).
+     *
+     * ── Support could ALREADY see these requests, which is what made this worth doing ──
+     * Every payout opens a `PAYOUT_REQUEST` ticket assigned to the admin pool, and
+     * `resource-scope.ts` gives a Support administrator the unassigned queue. So the request
+     * was already on their screen while every permission naming it was withheld: they could
+     * read the conversation and do nothing about it. This closes that, in the narrow
+     * direction only.
+     *
+     * ⛔ `money.payouts.destination.read` is NOT here and must not be added. Triage works
+     * from the masked last-4, the amount, the owner and the KYC verdict. The full
+     * beneficiary number is, in ADR-011 D-5's words, "the material a fraudulent payout
+     * instruction is built from" — and a reviewer who never sends money has no use for it.
+     */
+    'money.payouts.read',
+    'money.payouts.triage',
+
+    /**
+     * The cash chain, read-only, plus the same pre-screen verdict.
+     *
+     * ⚠ Unlike the payout pair above, none of these needed an exemption — `cod.triage` is
+     * not `financial` because a `declared` deposit or remittance holds no money at all. Only
+     * confirming moves cash, and the three `confirm`/`reject` permissions that do stay
+     * Admin-and-above.
+     *
+     * ⚠ A genuinely smaller surface than it looks: `assertConfirmer` in jovi-mall refuses an
+     * administrator on an AGENCY-recipient deposit, which is the normal route. So this
+     * reaches platform-recipient deposits and agency remittances — the handovers where the
+     * platform is the receiving party and there is no counter-signature yet.
+     */
+    'cod.overview.read',
+    'cod.remittances.read',
+    'cod.deposits.read',
+    'cod.triage',
+
+    /**
      * The audit trail — and the one entry here that is not a plain lookup.
      *
      * What Support actually sees is decided PER ROW by `auditScopeFilter`, not by this
@@ -266,6 +303,10 @@ const ADMIN: readonly PermissionName[] = union(
         'cod.trust.adjust',
         'money.payouts.mark_paid',
         'money.payouts.reject',
+        // Named by hand like its siblings: `financial` keeps it out of
+        // `allInFamily('money')`. Held here as well as by Support because the nesting
+        // assertion requires it — an Admin can do anything Support can.
+        'money.payouts.triage',
 
         // Revealing a beneficiary's account number. Flagged `financial` — so it is here
         // by name rather than by family, and the assertion below refuses it to Support.
@@ -343,6 +384,28 @@ export const TIER_GRANTS: Readonly<Record<AdminTier, readonly PermissionName[]>>
  * Every check here encodes a rule stated in the catalog's flags, so the flags are load
  * bearing rather than documentation.
  */
+/**
+ * The financial permissions a tier-3 administrator may hold, by name.
+ *
+ * ── Why an allowlist rather than relaxing the rule ────────────────────────────
+ * The blanket ban below — no `financial` permission at tier 3 — guards seven COD permissions
+ * and five money ones, and it is the reason several of them can be granted to tier 2 by name
+ * without anybody re-checking who else picks them up. Dropping it to admit one permission
+ * would silently unguard the other eleven.
+ *
+ * So the rule stays and the exception is typed out here, which makes admitting a second one
+ * a deliberate two-file change — the same shape as `FINANCIAL_READ_ALLOWLIST` in
+ * `test-authz.ts`, and for the same reason.
+ *
+ * ── The line this draws ───────────────────────────────────────────────────────
+ * **Support may release a hold back to the owner it belongs to. Support may never send money
+ * out of the platform.** `money.payouts.triage` is financial because rejecting a payout
+ * returns the owner's own balance to them; it is admissible because that is the reversible
+ * direction, the money never leaves, and the owner can simply request again. Anything that
+ * fails that test does not belong on this list.
+ */
+const TIER_3_FINANCIAL_ALLOWLIST: readonly PermissionName[] = ['money.payouts.triage'];
+
 export function assertGrantTableValid(): void {
     const problems: string[] = [];
 
@@ -372,7 +435,7 @@ export function assertGrantTableValid(): void {
                 problems.push(`${label} grants the escalation permission "${name}" — tier 1 only`);
             }
             // Support never touches money, and never does anything unrecoverable.
-            if (tier === 3 && spec.financial) {
+            if (tier === 3 && spec.financial && !TIER_3_FINANCIAL_ALLOWLIST.includes(name)) {
                 problems.push(`${label} grants the financial permission "${name}"`);
             }
             if (tier === 3 && spec.destructive) {

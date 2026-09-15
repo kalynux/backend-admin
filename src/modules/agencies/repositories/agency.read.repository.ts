@@ -253,6 +253,32 @@ export class AgencyReadRepository extends PlatformReadRepository<AgencyReadModel
     }
 
     /**
+     * Where each of these agencies' KYC review stands — the raw verdict string, batched.
+     *
+     * ⚠ **Returns the STRING, not a boolean, and interpreting it is the caller's job.**
+     * `money/domain/owner-verification.ts` does that, fail-closed, for all three roles at
+     * once. A repository that returned `verified: boolean` would be a third place holding
+     * an opinion about which values count as approval, and the three would drift.
+     *
+     * ⚠ Reads `kyc_details.status`, the VERDICT — not `kyc_details.legit_verified`, which
+     * is its boolean projection and carries the same ambiguity the verdict was added to
+     * remove: `false` means both "never reviewed" and "reviewed and refused". The list
+     * filter at `buildFilter` reads the boolean deliberately, because a filter only ever
+     * asks the yes/no question; a badge on a payout row has to say which.
+     *
+     * `null` for a row with no `kyc_details` at all, which is a different fact from a
+     * verdict this service has not been taught.
+     */
+    async findKycVerdictsByIds(ids: ObjectId[]): Promise<Map<string, string | null>> {
+        if (ids.length === 0) return new Map();
+        const rows = await this.findBy({ _id: { $in: ids } } as Filter<AgencyReadModel>, {
+            projection: { _id: 1, 'kyc_details.status': 1 },
+            limit: ids.length,
+        });
+        return new Map(rows.map((row) => [row._id.toString(), row.kyc_details?.status ?? null]));
+    }
+
+    /**
      * The BUSINESS name only — the Magazin's, or `null`.
      *
      * ── How this differs from `findNamesByIds`, and why both exist ──────────────

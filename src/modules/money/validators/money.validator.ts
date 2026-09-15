@@ -188,6 +188,33 @@ export const MarkPaidSchema = z
  * service's error shape rather than as a wrapped `PLATFORM_OPERATION_REJECTED`, and the
  * reason reaches the audit payload whether or not the delegated call succeeds.
  */
+/**
+ * A reviewer's endorsement.
+ *
+ * `.strict()` like its siblings, and for the sharper of the two reasons: a body that could
+ * name a verdict could name "approve", and this route must never be a second way to release
+ * money. The only thing it accepts is a note.
+ */
+export const TriagePayoutSchema = z
+    .object({
+        note: z.string().trim().min(1).max(500).optional(),
+    })
+    .strict();
+
+export type TriagePayoutBody = z.infer<typeof TriagePayoutSchema>;
+
+/**
+ * Sending a payout takes no body at all.
+ *
+ * `.strict()` on an empty object, which is not pointless: it is the same guard
+ * `MarkPaidSchema` carries. A client that could name an `amount` could name 1,999,999 and
+ * slip under the four-eyes threshold, so an unexpected key is a 400 rather than a silently
+ * ignored field. The amount is read off the row, always.
+ */
+export const SendPayoutSchema = z.object({}).strict();
+
+export type SendPayoutBody = z.infer<typeof SendPayoutSchema>;
+
 export const RejectPayoutSchema = z
     .object({
         reason: reasonText('A reason is required to reject a payout request', { min: 1, max: 500 }),

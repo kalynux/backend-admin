@@ -59,7 +59,25 @@ export interface PayoutRequestReadModel extends Document {
     owner_id: ObjectId;
     amount: number;
     currency: string;
+    /**
+     * `pending` · `processing` · `paid` · `rejected` · `failed`.
+     *
+     * ⚠ `processing` and `failed` arrived with gateway transfers and BOTH still hold the
+     * owner's money — a failed transfer has not returned anything. Treating either as a
+     * finished state is how a balance gets offered twice.
+     */
     status: string;
+    /** The tier-3 endorsement, or absent. Advisory: it gates nothing. */
+    triage?: {
+        verdict: string;
+        note: string | null;
+        by_admin_id: string | null;
+        by_name: string | null;
+        at: Date | null;
+    } | null;
+    /** The gateway's own transfer id, for reconciliation. Never our merchant reference. */
+    transfer_gateway_ref?: string | null;
+    transfer_failure_reason?: string | null;
     /** `manual` (the owner asked) or `auto_threshold` (the platform opened it for them). */
     origin: string;
     /**
@@ -150,6 +168,27 @@ export const PAYOUT_LIST_PROJECTION = {
     'payout_method_snapshot.card.country': 1,
     ticket_id: 1,
     requested_by_user_id: 1,
+    /**
+     * The reviewer's endorsement. Named field by field like everything else here — a whole
+     * sub-document would be one projection entry that grows without anybody re-reading this
+     * list, which is the property the whitelist exists to have.
+     */
+    'triage.verdict': 1,
+    'triage.note': 1,
+    'triage.by_admin_id': 1,
+    'triage.by_name': 1,
+    'triage.at': 1,
+    /**
+     * The gateway transfer.
+     *
+     * ⛔ `transfer_reference` — the merchant reference we send — is deliberately absent, and
+     * for the same reason the routing values above are. It is the idempotency key for money
+     * leaving the platform: anything holding it could, in principle, be replayed against the
+     * gateway. What reconciles a payout against the NotchPay dashboard is the gateway's own
+     * id, which is what these two carry.
+     */
+    transfer_gateway_ref: 1,
+    transfer_failure_reason: 1,
     resolved_at: 1,
     resolved_by: 1,
     resolved_by_source: 1,

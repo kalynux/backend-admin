@@ -170,7 +170,9 @@ Three properties are load-bearing:
 `agencies.verify` is a new permission and one new jovi-mall endpoint performing **one
 compare-and-set**: `status: 'pending_verification' → 'active'`, both `legit_verified`
 mirrors, and a `kyc_details.verified_by` actor stamp — together or not at all. A racing
-second administrator gets `null` from the CAS and a `409 DELIVERY_AGENCY_STATUS_CONFLICT`.
+second administrator gets `null` from the CAS and a `409
+DELIVERY_AGENCY_VERIFICATION_CONFLICT` (renamed from `…_STATUS_CONFLICT` on 2026-09-15,
+when the predicate moved off `status` onto the KYC verdict — BR-026 § 3).
 
 A pure `legit_verified = true` would have been ADR-007 D-1's exact anti-pattern: a button
 that flips a column nobody reads. Moving `status` in the same write is what makes it mean

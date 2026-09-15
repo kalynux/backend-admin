@@ -41,9 +41,32 @@ const AUTHORIZATION_DETAIL_KEYS: ReadonlySet<string> = Object.freeze(
     new Set(['required', 'requiredany', 'mode', 'resource', 'action', 'hint']),
 );
 
-/** Keys a `rate_limit` refusal may carry. */
+/**
+ * Keys a `rate_limit` refusal may carry.
+ *
+ * ⚠ `platformcode` was ADDED on 2026-09-15 (BR-025 § 2), reversing the position `errors.md`
+ * recorded on 2026-09-08. It qualifies on the same one test the `external_service` branch
+ * below states, and on the identical key: **it carries a PUBLISHED error code, not internal
+ * narrative.** Nothing about a 429 makes that code more sensitive than it already is at 502.
+ *
+ * What the omission cost is the argument for it. jovi-mall raises two 429s on the phone flow —
+ * `PHONE_VERIFICATION_RESEND_TOO_SOON` (wait; the code already in their hand still works) and
+ * `PHONE_VERIFICATION_TOO_MANY_ATTEMPTS` (that code has been DESTROYED — request a new one) —
+ * and the second carries no `details` at all, so without the code the two were
+ * indistinguishable. **The remedies are opposite**, and guessing between them is not
+ * symmetric: telling somebody to wait when their code is already dead leaves them at a form
+ * that cannot succeed.
+ *
+ * ⚠ **This is not phone-specific.** It is every delegated 429 on the service; the phone flow is
+ * merely where two refusals first wanted contradictory advice.
+ *
+ * ⚠ **`authorization` was DELIBERATELY NOT given the same treatment.** A 403 is the one place
+ * where naming what refused tells a caller what to go after next, and no screen is broken for
+ * want of it. That asymmetry is the decision rather than an oversight — see `errors.md`
+ * § "What travels in `details`".
+ */
 const RATE_LIMIT_DETAIL_KEYS: ReadonlySet<string> = Object.freeze(
-    new Set(['retryafterseconds', 'limit', 'windowseconds']),
+    new Set(['retryafterseconds', 'limit', 'windowseconds', 'platformcode']),
 );
 
 /**

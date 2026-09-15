@@ -8,6 +8,7 @@ import {
 } from '../repositories/payment-transaction.read.repository';
 import { PayoutRequestReadModel } from '../repositories/payout-request.read.repository';
 import { PlatformEarningsAccount } from '../gateways/money.gateway';
+import { OwnerVerification, UNKNOWN_VERIFICATION } from '../domain/owner-verification';
 import { PayoutDestinationDto, toMaskedDestinationDto } from './payout-destination.dto';
 
 /**
@@ -243,6 +244,9 @@ export interface ActorStampDto {
     name: string | null;
 }
 
+/** Names one owner's verification, for keying `MoneyOwnerVerifications`. */
+export type MoneyOwnerVerifications = Map<string, OwnerVerification>;
+
 export interface PayoutListItemDto {
     id: string;
     owner: MoneyOwnerRef;
@@ -252,11 +256,62 @@ export interface PayoutListItemDto {
     /** `manual` (the owner asked) or `auto_threshold` (the platform opened it for them). */
     origin: string;
     /**
+     * Has a human vetted the owner this money is going to?
+     *
+     * ⚠ **Read this on every row before releasing funds.** Payout review is the platform's
+     * one human checkpoint on money leaving it, and since the activation split of
+     * 2026-09-15 `owner` being `active` is no longer evidence that anybody vetted the
+     * business — accounts activate themselves on a proved phone. Without this field an
+     * active vendor with a plausible destination is indistinguishable from a stranger who
+     * registered this morning.
+     *
+     * ⚠ **Top-level, matching jovi-mall's own admin DTO field for field** — not folded into
+     * `owner`, and not flattened to a boolean. `owner` is a REFERENCE (who is being paid);
+     * this is a fact about the review of that business, refreshed per request. And the
+     * `verdict` is the role's own word: vendor and agency default to `pending`, an agent to
+     * `unverified`, reaching `pending` only once documents are submitted. On an agent those
+     * two separate "nothing submitted" from "submitted, waiting", which is what tells a
+     * reviewer whether to chase somebody. Render the word; branch on the boolean.
+     *
+     * ⚠ **It is INFORMATION, not enforcement.** The platform does not refuse these payouts —
+     * working with an unverified counterparty is a business judgement, not a platform
+     * decision. Do not gate the pay action on it.
+     *
+     * ⚠ **Read fresh, never snapshotted**, unlike `destination` beside it. The snapshot
+     * there exists so a later profile edit cannot redirect money already in flight; a frozen
+     * verdict would do the opposite kind of harm, sending a reviewer to chase documents that
+     * were approved after the request was opened.
+     *
+     * An owner that resolves in no directory reads as `unverified` — see
+     * `UNKNOWN_VERIFICATION`. A missing row must never render as a silent approval.
+     */
+    verification: OwnerVerification;
+    /**
      * Masked, and masked by the PROJECTION rather than by this mapper — the routing values
      * were never read. See `payout-destination.dto.ts`. `null` on legacy rows predating the
      * snapshot, which is a different fact from a destination with no details.
      */
     destination: PayoutDestinationDto | null;
+    /**
+     * The tier-3 endorsement, or null when nobody has reviewed it.
+     *
+     * ⚠ **Advisory, never a precondition.** A payout with no endorsement is exactly as
+     * payable as one with it. A dashboard must not disable its approve control on a null
+     * here — the pre-screen exists to save the approver work, not to gate them.
+     *
+     * There is no rejected verdict: a triage rejection is terminal and appears as
+     * `status: "rejected"` with a `rejectionReason`, like any other.
+     */
+    triage: {
+        verdict: string;
+        note: string | null;
+        by: { id: string | null; name: string | null };
+        at: string | null;
+    } | null;
+    /** The gateway's own transfer id, when one was issued. Never our merchant reference. */
+    transferGatewayRef: string | null;
+    /** Why the last transfer attempt failed. The funds are still held when this is set. */
+    transferFailureReason: string | null;
     ticketId: string | null;
     requestedByUserId: string | null;
     resolvedAt: string | null;
@@ -271,6 +326,7 @@ export interface PayoutListItemDto {
 export function toPayoutListItemDto(
     row: PayoutRequestReadModel,
     names: MoneyOwnerNames,
+    verifications: MoneyOwnerVerifications = new Map(),
 ): PayoutListItemDto {
     return {
         id: row._id.toString(),
@@ -280,6 +336,23 @@ export function toPayoutListItemDto(
         status: row.status,
         origin: row.origin,
         destination: toMaskedDestinationDto(row.payout_method_snapshot),
+        // Defaulted to unverified rather than left undefined: a caller that forgets to
+        // hydrate gets the safe answer and a visible one, not a missing key that renders
+        // as an empty badge. The default on the parameter and the fallback here are the
+        // same decision written twice on purpose — either alone leaves a hole.
+        verification:
+            verifications.get(ownerKey(row.owner_type, row.owner_id.toString()))
+            ?? UNKNOWN_VERIFICATION,
+        triage: row.triage
+            ? {
+                  verdict: row.triage.verdict,
+                  note: row.triage.note ?? null,
+                  by: { id: row.triage.by_admin_id ?? null, name: row.triage.by_name ?? null },
+                  at: row.triage.at ? new Date(row.triage.at).toISOString() : null,
+              }
+            : null,
+        transferGatewayRef: row.transfer_gateway_ref ?? null,
+        transferFailureReason: row.transfer_failure_reason ?? null,
         ticketId: toId(row.ticket_id),
         requestedByUserId: toId(row.requested_by_user_id),
         resolvedAt: toIso(row.resolved_at),

@@ -75,7 +75,12 @@ import {
     toRevealedDestinationDto,
 } from '../../src/modules/money/read-models/payout-destination.dto';
 import {
+    UNKNOWN_VERIFICATION,
+    verificationOf,
+} from '../../src/modules/money/domain/owner-verification';
+import {
     MoneyOwnerNames,
+    ownerKey,
     toAllocationDetailDto,
     toAllocationDto,
     toLedgerEntryDto,
@@ -121,6 +126,7 @@ const MONEY_ROUTES = [...MONEY_DIR, 'routes', 'money.routes.ts'];
 const MONEY_VALIDATOR = [...MONEY_DIR, 'validators', 'money.validator.ts'];
 const DUAL_CONTROL = [...MONEY_DIR, 'domain', 'payout-dual-control.ts'];
 const DISCLOSURE = [...MONEY_DIR, 'domain', 'payout-disclosure.ts'];
+const MONEY_CONTROLLER = [...MONEY_DIR, 'controllers', 'money.controller.ts'];
 
 /**
  * Every `.ts` file under `src/modules/money/`, WALKED rather than listed.
@@ -1090,9 +1096,50 @@ t.assert('importing the routes registers the handler, so the service can boot', 
 
 t.assert('the handler re-checks status, amount and currency against current state', () => {
     const source = readCode(...DUAL_CONTROL);
-    return source.includes('assertPending(row)')
+    // `assertPending(row, mode)` — the mode widens WHICH statuses are acceptable (a gateway
+    // send may also start from `failed`), it does not remove the check.
+    return source.includes('assertPending(row, mode)')
         && source.includes('row.amount !== approval.payload.amount')
         && source.includes('row.currency !== approval.payload.currency');
+});
+
+/**
+ * The mode is read off the APPROVAL, never re-decided at commit time.
+ *
+ * It is hashed into `approvalRequestKey`, so a second administrator signed for one specific
+ * act — instructing the platform to send money, or recording that a human already did. If
+ * the handler chose the mode itself, that signature could be spent on the other one.
+ */
+t.assert('the handler takes its mode from the approval payload', () => {
+    const source = readCode(...DUAL_CONTROL);
+    return source.includes("approval.payload.mode === 'gateway'")
+        && source.includes('gateway.sendPayout(');
+});
+
+/**
+ * `mode` is in the dual-control payload, which is what makes the two acts distinct requests.
+ *
+ * Without it a queued manual mark-paid and a queued gateway send for the same payout hash to
+ * the same key and join each other's approval — so an administrator who agreed to record an
+ * out-of-band payment would have committed a live transfer instead.
+ */
+t.assert('the dual-control payload carries the mode, so the two acts cannot join', () => {
+    const source = readCode(...DUAL_CONTROL);
+    return /function markPaidPayload\([\s\S]*?mode,[\s\S]*?\}/.test(source);
+});
+
+/**
+ * ⛔ A payout mid-transfer is refused by BOTH modes.
+ *
+ * Sending again risks a second transfer; recording a manual payment claims a settlement the
+ * gateway is about to report itself. jovi-mall enforces this too — this is the pre-flight,
+ * and the point of asserting it here is that the pre-flight must not be more permissive than
+ * the thing it stands in front of.
+ */
+t.assert('processing is sendable by neither mode', () => {
+    const source = readCode(...DUAL_CONTROL);
+    return source.includes("const SENDABLE_FROM = ['pending', 'failed'] as const")
+        && !/SENDABLE_FROM = \[[^\]]*'processing'/.test(source);
 });
 
 /**
@@ -1176,7 +1223,71 @@ t.section('10. The route manifest');
 
 const moneyRoutes = routeManifest().filter((route) => route.fullPath.startsWith('/api/v1/money'));
 
-t.assert('fourteen routes are declared on /money', () => moneyRoutes.length === 14);
+t.assert('sixteen routes are declared on /money', () => moneyRoutes.length === 16);
+
+/**
+ * The triage route is the ONE write on this surface a Support administrator can reach, and
+ * these three facts together are what keep it narrow.
+ *
+ * Asserted rather than assumed because each is one edit away from being wrong in a way
+ * nothing else would catch: a widened `access`, a missing `audit`, or — the dangerous one —
+ * somebody "simplifying" the pair of routes by giving `/send` its own permission, which
+ * would silently drop it out of the 2,000,000 XAF four-eyes rule.
+ */
+t.assert('triage stands behind money.payouts.triage alone, and is audited', () => {
+    const triage = moneyRoutes.find((route) => route.fullPath.endsWith('/triage'));
+    return triage !== undefined
+        && triage.method === 'post'
+        && triage.access.kind === 'permission'
+        && triage.access.permissions.length === 1
+        && triage.access.permissions[0] === 'money.payouts.triage';
+});
+
+/**
+ * ⛔ **Rejecting is reachable by BOTH tiers, and this is what makes `money.payouts.triage`
+ * financial.**
+ *
+ * A reviewer's rejection is terminal — the same write an approver makes, closing the request and
+ * releasing the hold to the owner's available balance. If this route accepted
+ * `money.payouts.reject` alone, a tier-3 reviewer could endorse and nothing else, the permission
+ * would move no money, and its `financial` flag plus its named grant-table exemption would both
+ * be describing a capability it did not have.
+ *
+ * That is exactly how it was first built, and the gap was found by writing the dashboard brief
+ * rather than by any check here. Hence this assertion.
+ */
+t.assert('rejecting accepts EITHER the approver or the reviewer permission', () => {
+    const reject = moneyRoutes.find((route) => route.fullPath.endsWith('/payouts/:payoutId/reject'));
+    return reject !== undefined
+        && reject.access.kind === 'permission'
+        && reject.access.mode === 'any'
+        && reject.access.permissions.length === 2
+        && reject.access.permissions.includes('money.payouts.reject')
+        && reject.access.permissions.includes('money.payouts.triage');
+});
+
+/**
+ * ...and the reviewer permission reaches NOTHING else that moves money. Asserted by name because
+ * `anyPermission` is the one idiom here that could widen a route without looking like it.
+ */
+t.assert('money.payouts.triage reaches only triage and reject', () => {
+    const reachable = moneyRoutes.filter(
+        (route) =>
+            route.access.kind === 'permission'
+            && route.access.permissions.includes('money.payouts.triage' as never),
+    );
+    return reachable.length === 2
+        && reachable.every((r) => /\/(triage|reject)$/.test(r.fullPath));
+});
+
+t.assert('sending rides money.payouts.mark_paid, so it inherits the four-eyes threshold', () => {
+    const send = moneyRoutes.find((route) => route.fullPath.endsWith('/send'));
+    return send !== undefined
+        && send.method === 'post'
+        && send.access.kind === 'permission'
+        && send.access.permissions.length === 1
+        && send.access.permissions[0] === 'money.payouts.mark_paid';
+});
 
 t.assert('every one of them declares a permission — none is public or self-service', () =>
     moneyRoutes.every((route) => route.access.kind === 'permission'));
@@ -1210,15 +1321,23 @@ t.assert('the payout activity feed requires audit.read as well', () => {
         && route.access.permissions.includes('money.payouts.read');
 });
 
-t.assert('the two writes are POSTs behind their own permissions', () => {
+/**
+ * ⚠ This used to assert that BOTH writes sat behind exactly one permission each. Rejecting now
+ * takes anyPermission('money.payouts.reject', 'money.payouts.triage'), because a reviewer's
+ * rejection is the same terminal write an approver makes and deserves the same route rather than
+ * a second one producing the same state.
+ *
+ * What the assertion protects is unchanged and is asserted below instead: marking paid is still
+ * ONE permission, and the reject route admits exactly those two names and no third.
+ */
+t.assert('the two writes are POSTs, and mark-paid is one permission alone', () => {
     const markPaid = moneyRoutes.find((r) => r.fullPath.endsWith('/mark-paid'));
     const reject = moneyRoutes.find((r) => r.fullPath.endsWith('/reject'));
     return markPaid?.method === 'post'
         && reject?.method === 'post'
         && markPaid.access.kind === 'permission'
-        && markPaid.access.permissions.join() === 'money.payouts.mark_paid'
-        && reject?.access.kind === 'permission'
-        && reject.access.permissions.join() === 'money.payouts.reject';
+        && markPaid.access.mode === 'all'
+        && markPaid.access.permissions.join() === 'money.payouts.mark_paid';
 });
 
 /**
@@ -1240,5 +1359,148 @@ t.assert('no :param sits beside a literal at the same depth under /earnings', ()
 
 t.assert('the routes file imports the dual-control handler for side effect', () =>
     readCode(...MONEY_ROUTES).includes("import '../domain/payout-dual-control'"));
+
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('11. The payout verification badge — fail-closed, and computed not forwarded');
+
+/**
+ * BR-026 § 1. The reviewer's only on-screen signal that nobody has vetted the business this
+ * money is going to, and since the activation split of 2026-09-15 `status: "active"` no
+ * longer carries it.
+ *
+ * ⚠ **The point to hold on to is that this is NOT a passthrough.** admin-dash asked wi-admin
+ * to "forward jovi-mall's new `verification` field", and there is nothing on any wire to
+ * forward: the payout queue reads `payout_requests` out of the shared database directly, so
+ * jovi-mall's DTO never passes through this service. The verdict is resolved here, against
+ * the same three collections, by a rule that has to stay identical to jovi-mall's without a
+ * shared package to enforce it. These assertions are the only thing holding the two
+ * together.
+ */
+
+t.assert('an unrecognised verdict fails CLOSED — the one that must never invert', () =>
+    !verificationOf('approved').verified
+    && !verificationOf('APPROVED').verified
+    && !verificationOf('ok').verified
+    && !verificationOf('').verified
+    && !verificationOf(null).verified
+    && !verificationOf(undefined).verified);
+
+t.assert('`verified` is the only string that reads as verified', () =>
+    verificationOf('verified').verified
+    && !verificationOf('pending').verified
+    && !verificationOf('unverified').verified
+    && !verificationOf('rejected').verified);
+
+/**
+ * ⚠ The brief is explicit that "never reviewed" is not approval, and on a young platform
+ * that is most accounts. `verdict !== 'rejected'` is the tempting shorthand and it is the
+ * one shape that would pay out to everybody nobody has looked at.
+ */
+t.assert('a REJECTED verdict is not the only unverified one', () =>
+    !verificationOf('pending').verified && !verificationOf('unverified').verified);
+
+/**
+ * The role's own word, carried through rather than normalised. On an agent, `unverified`
+ * and `pending` separate "nothing submitted" from "submitted, waiting" — which is what tells
+ * a reviewer whether there is anything to chase.
+ */
+t.assert('the verdict word survives, so the three roles keep their vocabulary', () =>
+    ['unverified', 'pending', 'verified', 'rejected']
+        .every((word) => verificationOf(word).verdict === word));
+
+t.assert('...and an unknown word collapses to unverified, never to itself', () =>
+    verificationOf('approved').verdict === 'unverified');
+
+t.assert('an unresolvable owner is not a vetted one', () =>
+    UNKNOWN_VERIFICATION.verified === false && UNKNOWN_VERIFICATION.verdict === 'unverified');
+
+/**
+ * The DEFAULT on the mapper, which is the half that fails quietly. A caller that forgets to
+ * hydrate gets the safe answer rather than a missing key — and `undefinedPaths` in § 7 would
+ * not catch a wrong-but-defined one.
+ */
+t.assert('an unhydrated payout row renders unverified, never an empty badge', () => {
+    const dto = toPayoutListItemDto(MINIMAL_PAYOUT, NO_NAMES);
+    return dto.verification.verified === false && dto.verification.verdict === 'unverified';
+});
+
+t.assert('...and a hydrated one carries its owner’s actual verdict', () => {
+    const verifications = new Map([[ownerKey('vendor', OTHER_OID), verificationOf('verified')]]);
+    const dto = toPayoutListItemDto(MINIMAL_PAYOUT, NO_NAMES, verifications);
+    return dto.verification.verified === true && dto.verification.verdict === 'verified';
+});
+
+/**
+ * ⚠ Keyed on `ownerKey`, the same helper the names map uses. A mapper keying on the bare id
+ * would collide a vendor and an agency that share one — different collections, so they can —
+ * and hand one of them the other's verdict.
+ */
+t.assert('the verdict map is keyed by owner TYPE and id, not by id alone', () => {
+    const wrongType = new Map([[ownerKey('agency', OTHER_OID), verificationOf('verified')]]);
+    return toPayoutListItemDto(MINIMAL_PAYOUT, NO_NAMES, wrongType).verification.verified === false;
+});
+
+/**
+ * ⚠ **The verdict comes off `vendors`, not `stores`.** The display name comes off the Store,
+ * and reaching for the repository already loaded in `hydrateOwnerNames` would return nothing
+ * for every vendor row — which fails closed, so every vendor payout would silently read
+ * "unverified" and nobody would see a bug.
+ */
+t.assert('the controller reads vendor verdicts from the vendor repository', () => {
+    const code = readCode(...MONEY_CONTROLLER);
+    return code.includes('vendors.findKycVerdictsByIds')
+        && code.includes('agencies.findKycVerdictsByIds')
+        && code.includes('agents.findKycVerdictsByIds');
+});
+
+/**
+ * Read fresh per request, unlike `destination` beside it. The snapshot there stops a profile
+ * edit redirecting money in flight; a frozen verdict would do the opposite kind of harm —
+ * sending a reviewer to chase documents approved an hour ago.
+ */
+t.assert('both payout routes hydrate it — the queue AND the single row', () => {
+    const code = readCode(...MONEY_CONTROLLER);
+    // One definition, one call in listPayouts, one in getPayout.
+    return code.split('hydrateOwnerVerifications(').length - 1 >= 3;
+});
+
+/**
+ * ⚠ The account page's payout history renders the SAME DTO, and leaving it unhydrated was
+ * the tempting mistake: it fails closed, so every row of a verified vendor's history would
+ * have read "unverified" beside their name with nothing looking broken.
+ */
+t.assert('the account payout history hydrates it too, off the row it already loaded', () =>
+    readCode(SRC, 'modules', 'accounts', 'controllers', 'account.controller.ts')
+        .includes('verificationOf(ownerKycVerdict(owner))'));
+
+/**
+ * ⚠ The agent's verdict lives on `kyc`; the vendor's and the agency's on `kyc_details`. An
+ * `??` chain across the two reads `undefined` off whichever shape it meets second — and
+ * fails closed, so every agent payout would read unverified for ever.
+ */
+t.assert('each role is read at ITS OWN path — no ?? chain across the two names', () => {
+    const agent = readCode(SRC, 'modules', 'agents', 'repositories', 'agent.read.repository.ts');
+    const agency = readCode(SRC, 'modules', 'agencies', 'repositories', 'agency.read.repository.ts');
+    const vendor = readCode(SRC, 'modules', 'vendors', 'repositories', 'vendor.read.repository.ts');
+    return agent.includes("'kyc.status': 1")
+        && agency.includes("'kyc_details.status': 1")
+        && vendor.includes("'kyc_details.status': 1");
+});
+
+/**
+ * ⚠ The repositories must return the STRING. One returning `verified: boolean` would be a
+ * second place holding an opinion about which values count as approval, and the two would
+ * drift — with the optimistic one winning, because it is the one paying out.
+ */
+t.assert('the repositories return the raw verdict, leaving the judgement in one place', () => {
+    const files = [
+        ['agents', 'repositories', 'agent.read.repository.ts'],
+        ['agencies', 'repositories', 'agency.read.repository.ts'],
+        ['vendors', 'repositories', 'vendor.read.repository.ts'],
+    ];
+    return files.every((file) =>
+        readCode(SRC, 'modules', ...file)
+            .includes('findKycVerdictsByIds(ids: ObjectId[]): Promise<Map<string, string | null>>'));
+});
 
 process.exit(t.finish());

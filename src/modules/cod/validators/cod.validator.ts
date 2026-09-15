@@ -149,6 +149,20 @@ export const ListTrustEventsQuerySchema = listQuery(TRUST_EVENT_SORT, '-createdA
 // The delegated writes
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * A reviewer's endorsement of a declared remittance or deposit.
+ *
+ * `.strict()` like its siblings: a body that could name a verdict could name "confirm", and
+ * this route must never be a second way to settle cash. The only thing it accepts is a note.
+ */
+export const TriageCodSchema = z
+    .object({
+        note: z.string().trim().min(1).max(500).optional(),
+    })
+    .strict();
+
+export type TriageCodBody = z.infer<typeof TriageCodSchema>;
+
 export const RejectRemittanceSchema = z.object({
     reason: reasonText('A reason is required to reject a remittance'),
 });

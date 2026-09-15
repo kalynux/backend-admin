@@ -317,6 +317,29 @@ export const PERMISSION_CATALOG = Object.freeze({
         summary: 'Manually adjust an agent’s cash trust score, changing how much they may carry',
     },
 
+    /**
+     * The COD pre-screen — and unlike its payout sibling, this one is NOT `financial`.
+     *
+     * The asymmetry is real rather than an oversight, and it comes from what the two records
+     * are holding. A payout request holds the owner's balance in `requested_balance` from the
+     * moment it opens, so its triage reject releases a hold — a money movement, hence the
+     * flag and hence the named tier-3 exemption. A COD deposit or remittance in `declared`
+     * holds NOTHING: only a CONFIRMED one moves cash. Endorsing one moves nothing, and
+     * rejecting one moves nothing either.
+     *
+     * So this needs no exemption and takes none. Being unflagged also means
+     * `allInFamily('cod')` expands it, which is correct: an Admin should hold it without
+     * anybody having to type it into the tier-2 block by hand.
+     *
+     * ⚠ It does NOT grant confirming. `cod.deposits.confirm` and `cod.remittances.confirm`
+     * are the writes that assert cash arrived, they stay `financial`, and they stay out of
+     * Support's reach.
+     */
+    'cod.triage': {
+        family: 'cod', action: 'write', phase: 5,
+        summary: 'Endorse a declared COD deposit or remittance as genuine — never confirms cash',
+    },
+
     // ═══ MONEY ═══ platform earnings (2) + payout requests (4) ════════════════
     'money.earnings.read': {
         family: 'money', action: 'read', phase: 5,
@@ -347,6 +370,30 @@ export const PERMISSION_CATALOG = Object.freeze({
     'money.payouts.reject': {
         family: 'money', action: 'write', phase: 5, financial: true,
         summary: 'Reject a payout request',
+    },
+    /**
+     * The pre-screen, and the ONLY financial permission any tier-3 administrator holds.
+     *
+     * ── Why it is flagged `financial` when it moves nothing out ────────────────
+     * Because one of its two verdicts moves money between columns. A payout request holds
+     * the owner's whole balance in `requested_balance` from the moment it opens; endorsing
+     * touches nothing, but REJECTING releases that hold back to `available_balance`. That is
+     * a financial write by this catalog's own definition, and flagging it otherwise to make
+     * the grant table accept it would be exactly the misdescription D-8 warns against —
+     * the flags are load-bearing, not documentation.
+     *
+     * So it is flagged honestly and the grant table takes a NAMED exemption instead. See
+     * `TIER_3_FINANCIAL_ALLOWLIST` in tier-grants.ts, which is a two-file change on purpose.
+     *
+     * ── What it deliberately does NOT grant ────────────────────────────────────
+     * Sending. `money.payouts.mark_paid` is a separate permission this tier does not hold,
+     * and no combination of triage verdicts causes money to leave the platform. The reject
+     * direction is also the reversible one — the owner simply requests again — which is the
+     * same asymmetry that leaves `money.payouts.reject` out of dual control.
+     */
+    'money.payouts.triage': {
+        family: 'money', action: 'write', phase: 5, financial: true,
+        summary: 'Endorse a payout request as genuine, or reject it — never sends money',
     },
     /**
      * The gateway on the one field this service will not show by default.

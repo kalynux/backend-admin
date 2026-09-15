@@ -100,6 +100,25 @@ could express none of them.
 | `trackingAllowed` | boolean flag | |
 | `from` / `to` | ISO-8601 instant | Creation range. **Max span 366 days** |
 
+> ⚠ **`status: "active"` is NOT evidence that anybody vetted this agent, and it stopped
+> being so on 2026-09-15.** It used to be: the account waited on an administrator, so
+> reaching `active` meant a human had approved it. The two questions were split —
+> **`status`** answers *may this account operate*, and the holder earns it themselves by
+> verifying a phone number; **`kycStatus`** answers *has a human vetted this person*, and
+> only an administrator writes it.
+>
+> Any trust badge or warning banner derived from `status === "active"` is now wrong —
+> re-point it at `kycStatus`. And do not read verified-ness as `kycStatus !== "rejected"`:
+> "never reviewed" is not approval, and on a young platform that is most accounts. Only
+> `verified` means verified.
+>
+> ⚠ **The agent is the role where `unverified` and `pending` are different facts**, which
+> is why this filter has four values where the vendor and agency have three. `unverified`
+> is "no documents submitted"; `pending` is "submitted, awaiting review". Render the word
+> rather than flattening both to "pending" — it is what tells the agent whether they still
+> have something to do.
+
+
 `availability` and `workingState` are separate on purpose: collapsing them makes *"is this agent
 offline, or just full?"* unanswerable.
 

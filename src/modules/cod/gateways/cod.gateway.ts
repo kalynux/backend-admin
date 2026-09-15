@@ -253,6 +253,84 @@ export async function confirmRemittance(
     );
 }
 
+/**
+ * Endorse a declared remittance or deposit as genuine.
+ *
+ * ⚠ **Moves no cash and gates nothing.** A `declared` record holds nothing — only confirming
+ * settles the chain — so unlike a payout endorsement there is not even a hold involved. An
+ * un-endorsed remittance is exactly as confirmable as an endorsed one.
+ *
+ * One function for both record kinds because the stamp is identical on both; only the path
+ * and the audit target differ. The triage REJECTION is not here: it is the ordinary reject
+ * below, because rejection is terminal and terminal outcomes are statuses.
+ */
+/**
+ * ⚠ **Two near-identical functions rather than one taking a `kind`, and that is deliberate.**
+ *
+ * The obvious shape here is a single `triageCashRecord(kind, ...)` building
+ * \`/cod/${kind}/${id}/triage\`. It was written that way first and it defeats a guard worth
+ * more than the duplication: `test:cod` scans every `path:` literal in this file and asserts
+ * it against jovi-mall's actual COD router, so a gateway calling a path the other service
+ * does not serve fails at test time rather than at runtime. A path assembled from a variable
+ * cannot be checked that way — the scan sees `/:id/:id/triage` and can only shrug.
+ *
+ * So the paths stay literal. That is the same reasoning that keeps the other seven writes
+ * here separate, and the cost is four duplicated lines.
+ */
+export async function triageRemittance(
+    remittanceId: string,
+    note: string | null,
+    audit: { label: string | null; before: Record<string, unknown> | null },
+    context: ActorContext,
+): Promise<PlatformCodRecord> {
+    return auditedDelegation(
+        'cod.triage',
+        context,
+        { type: 'remittance', id: remittanceId, label: audit.label },
+        { note },
+        audit.before,
+        cashRecordState,
+        async () => {
+            const result = await platformRequest<PlatformCodRecord>({
+                method: 'POST',
+                path: `/cod/remittances/${remittanceId}/triage`,
+                // Omitted rather than null: jovi-mall declares it `.optional()`, not nullable.
+                body: note === null ? {} : { note },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return { result: result.data };
+        },
+    );
+}
+
+/** The deposit half. See the note on `triageRemittance` for why this is not one function. */
+export async function triageDeposit(
+    depositId: string,
+    note: string | null,
+    audit: { label: string | null; before: Record<string, unknown> | null },
+    context: ActorContext,
+): Promise<PlatformCodRecord> {
+    return auditedDelegation(
+        'cod.triage',
+        context,
+        { type: 'deposit', id: depositId, label: audit.label },
+        { note },
+        audit.before,
+        cashRecordState,
+        async () => {
+            const result = await platformRequest<PlatformCodRecord>({
+                method: 'POST',
+                path: `/cod/deposits/${depositId}/triage`,
+                body: note === null ? {} : { note },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return { result: result.data };
+        },
+    );
+}
+
 export async function rejectRemittance(
     remittanceId: string,
     reason: string,

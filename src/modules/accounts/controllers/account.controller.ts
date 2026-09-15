@@ -23,7 +23,8 @@ import {
     EarningsReserveHoldReadRepository,
 } from '../../money/repositories/earnings.read.repository';
 import { PayoutRequestReadRepository } from '../../money/repositories/payout-request.read.repository';
-import { toPayoutListItemDto, ownerKey, MoneyOwnerNames } from '../../money/read-models/money.dto';
+import { verificationOf } from '../../money/domain/owner-verification';
+import { toPayoutListItemDto, ownerKey, MoneyOwnerNames, MoneyOwnerVerifications } from '../../money/read-models/money.dto';
 import { StoreReadRepository } from '../../vendors/repositories/store.read.repository';
 import { VendorReadRepository } from '../../vendors/repositories/vendor.read.repository';
 import * as gateway from '../gateways/account.gateway';
@@ -251,7 +252,10 @@ export class AccountController {
         const { ownerType, ownerId } = ownerParams(req);
         const query = req.query as unknown as ListAccountPayoutsQuery;
 
-        await loadOwnerOr404(ownerType, ownerId);
+        // The 404 guard's row is KEPT here, where `getActivity` above discards it: it
+        // already carries this owner's KYC verdict under the projection both branches use,
+        // so the badge below costs no extra read.
+        const owner = await loadOwnerOr404(ownerType, ownerId);
 
         const [page, name] = await Promise.all([
             payouts.search({
@@ -268,9 +272,21 @@ export class AccountController {
         // One owner, one name — resolved once rather than per row.
         const names: MoneyOwnerNames = new Map([[ownerKey(ownerType, ownerId), name]]);
 
+        /**
+         * ⚠ **Hydrated here even though the owner is already named on the page**, and
+         * leaving it out was the tempting mistake. `toPayoutListItemDto` defaults an
+         * unhydrated row to `unverified` — fail-closed, which is right for a missing
+         * lookup and WRONG as a permanent answer on a screen that has the owner in hand.
+         * Every row of a verified vendor's history would have rendered "unverified" beside
+         * their name. See the field's docstring on `PayoutListItemDto`.
+         */
+        const verifications: MoneyOwnerVerifications = new Map([
+            [ownerKey(ownerType, ownerId), verificationOf(ownerKycVerdict(owner))],
+        ]);
+
         sendPaginated(
             res,
-            page.items.map((row) => toPayoutListItemDto(row, names)),
+            page.items.map((row) => toPayoutListItemDto(row, names, verifications)),
             toPageMeta(page.total, page.page, page.limit),
         );
     });
@@ -395,6 +411,23 @@ async function loadOwnerOr404(
         );
     }
     return owner;
+}
+
+/**
+ * This owner's KYC verdict, off the row `loadOwnerOr404` already fetched.
+ *
+ * ⚠ **The agent's verdict lives on `kyc`, the vendor's and the agency's on
+ * `kyc_details`.** One name would have been nicer; renaming either is a data migration, so
+ * the difference is handled rather than papered over with an `??` chain that would read
+ * `undefined` off whichever shape it met second.
+ *
+ * Returns the raw string. `verificationOf` decides what counts as approval, in one place,
+ * fail-closed — including for the case this function returns `null` on, which is an agent
+ * document whose `kyc` block has never been written.
+ */
+function ownerKycVerdict(owner: AccountOwnerRow): string | null {
+    if ('kyc' in owner) return owner.kyc?.status ?? null;
+    return owner.kyc_details?.status ?? null;
 }
 
 /**

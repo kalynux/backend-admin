@@ -450,7 +450,11 @@ export class AgencyController {
             actorContextOf(req),
         );
 
-        sendSuccess(res, updated, { message: 'Agency verified — it may now operate' });
+        // ⚠ "— it may now operate" was removed on 2026-09-15: this route activates nothing,
+        // and an operator told otherwise will treat an agency stuck at `pending_verification`
+        // as theirs to unblock when the missing step is the agency's own phone verification.
+        // The replacement claims nothing about `status` in either direction (BR-026 § 3).
+        sendSuccess(res, updated, { message: 'Agency verified' });
     });
 
     /**
