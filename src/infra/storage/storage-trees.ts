@@ -59,6 +59,17 @@ export const STORAGE_TREE_VISIBILITY: Readonly<Record<string, TreeVisibility>> =
     'vendor-policy-documents': 'public',
     'agency-policy-documents': 'public',
     system: 'public',
+    /**
+     * The Android app's release artefacts, copied from jovi-mall on 2026-09-21 — the suite
+     * that compares the two lists went red the day it appeared upstream, which is that
+     * assertion doing its job rather than a fault here.
+     *
+     * ⚠ Written ONLY by jovi-mall's `publish-app-release.ts`, never by an upload. A release
+     * artefact has no owner, no quota, no virus scan and no `file_references` row, so nothing
+     * in wi-admin's media library will ever show one — this entry exists so the URL builder
+     * resolves the tree, and so an unknown tree keeps failing closed to PRIVATE.
+     */
+    'app-releases': 'public',
 
     // PRIVATE. Served only by an authorized route.
     digital: 'private',
