@@ -803,16 +803,31 @@ message** — write your own copy keyed on the code.
 ✅ **The two faults that made `PHONE_VERIFICATION_DELIVERY_FAILED` the ordinary outcome are
 fixed.** Build the straightforward flow: request → the code arrives on WhatsApp → confirm.
 
-⛔ **A THIRD, UNRELATED FAULT IS STILL OPEN, SO NO CODE ACTUALLY ARRIVES YET.** A live send on
-2026-09-15 returned `(#131037) WhatsApp provided number needs display name approval before
-message can be sent.` — the platform's WhatsApp number has **never had a display name submitted**
-(`name_status: "NON_EXISTS"`). ⚠ **It blocks free-form messages too**, so the workaround below
-does not rescue it either. This is an account action on Meta's side, not a backend change.
+✅ **THE THIRD FAULT CLOSED ON 2026-09-16 — the platform changed its WhatsApp number.** The
+sending line is now **+237 652 705 926**, display name **Wi-Mall**, `name_status: "APPROVED"`.
+The old number could not be rescued: a display name had never been submitted for it and Meta's
+ten-per-month change quota was already spent, so it was replaced rather than repaired.
+
+✅ **AND THE ACCOUNT-SIDE WORK IS FINISHED**: the number was also registered on the Cloud API on
+2026-09-16 and now reads `status: "CONNECTED"`, `quality_rating: "GREEN"`. Every known
+precondition for WhatsApp delivery is met.
+
+⚠ **That is still not the same sentence as "phone verification works", and the difference is the
+one this page keeps having to relearn.** Four separate faults have each been fixed as *the* cause
+of `PHONE_VERIFICATION_DELIVERY_FAILED`, and each time the next one was underneath. Build the
+failure path as if it will fire, because the only thing that proves delivery is a code arriving
+on a handset — not a green precondition, and not a successful-looking log.
 
 **Build the flow anyway, and keep the failure path honest**: render
 `PHONE_VERIFICATION_DELIVERY_FAILED` as *"we couldn't send the code — try again"* with a retry,
-not as *"your phone is wrong"*. When the display name clears, the flow starts working with no
-frontend change.
+not as *"your phone is wrong"*. It starts working with no frontend change.
+
+⚠ **A number change is invisible to you, and that is worth knowing rather than assuming.** The
+OTP arrives from a different sender than it would have a week ago. Nothing in this API exposes
+the sending number, no response field carries it, and no error distinguishes "the number moved"
+from "delivery failed" — so **do not cache, display, or assert on a sender number anywhere in
+the admin UI**. If a user needs to be told who the message comes from, read it from the
+platform's own configuration at the time, never from a constant in your source.
 
 ⚠ **This section said the opposite until 2026-09-15, and if you are working from a copy of this
 page taken before then, that copy told you to ship a workaround as the primary path.** Two
