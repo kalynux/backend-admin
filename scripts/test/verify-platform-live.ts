@@ -312,9 +312,38 @@ async function main(): Promise<number> {
             typeof remittances.body?.meta?.total === 'number'
             && typeof remittances.body?.meta?.pages === 'number');
 
+        /**
+         * ⚠ **This asserted a 403 until ADR-024 moved the policy under it.** Remittance and
+         * payout review became a two-stage job — tier 3 pre-screens, tier 1/2 settles — so a
+         * Support administrator now holds `cod.remittances.read` and legitimately reaches this
+         * delegated list.
+         *
+         * It went unnoticed because this repository's live job is gated on its offline job,
+         * and that had been red since 2026-09-16 for an entirely unrelated reason. The grant
+         * landed with its offline suites updated and its live ones not, and nothing ran to say so.
+         */
         const supportDelegated = await get(support, '/api/v1/cod/remittances');
-        t.assert('a Support administrator is refused before anything is delegated', () =>
-            supportDelegated.status === 403);
+        t.assert('a Support administrator may READ the delegated list — ADR-024 pre-screening', () =>
+            supportDelegated.status === 200);
+
+        /**
+         * ⛔ **The property the old assertion existed for, moved to a call Support still cannot
+         * make.** ADR-003's single-sided rule is that authorization resolves HERE, and a refusal
+         * must therefore land before anything is delegated. Now that the delegated READS are
+         * granted at tier 3, only a delegated WRITE can still show it.
+         *
+         * `cod.remittances.confirm` is tier 1/2. The id is deliberately one that does not exist:
+         * `route-manifest.ts` puts the permission gate ahead of both CSRF and validation, so a
+         * 403 here cannot be coming from a malformed id, and a 404 would mean the gate had moved.
+         */
+        const supportDelegatedWrite = await write(
+            support,
+            'POST',
+            `/api/v1/cod/remittances/${new ObjectId().toString()}/confirm`,
+            {},
+        );
+        t.assert('...but a delegated WRITE is still refused before anything is delegated', () =>
+            supportDelegatedWrite.status === 403);
 
         // ── 3. Exit gate A — FIFO settlement ──────────────────────────────────
         t.section('3. Exit gate A — remittance confirm settles FIFO inside jovi-mall');

@@ -451,7 +451,26 @@ async function main(): Promise<number> {
         port = typeof address === 'object' && address ? address.port : 0;
 
         const money = routeManifest().filter((r) => r.fullPath.startsWith('/api/v1/money'));
-        t.assert('fourteen /money routes reached Express', () => money.length === 14);
+
+        /**
+         * ⚠ **A count in an assertion is a date-stamped observation, and this one expired.**
+         * ADR-024 added `POST /payouts/:payoutId/triage` and `POST /payouts/:payoutId/send`,
+         * taking this from fourteen to sixteen.
+         *
+         * It stays a hand-maintained count ON PURPOSE: every other assertion in this section
+         * reads a route out of the manifest and would pass just as happily on an EMPTY one, so
+         * a count is the only thing here that catches a mount which quietly stopped happening.
+         * Update it deliberately when routes change; never derive it from the manifest it guards.
+         */
+        t.assert('sixteen /money routes reached Express', () => money.length === 16);
+
+        /**
+         * And the two ADR-024 added, by path — because a count alone cannot tell "two routes
+         * were added" from "two were swapped for two others".
+         */
+        t.assert('...including both routes ADR-024 added, named rather than counted', () =>
+            ['/api/v1/money/payouts/:payoutId/triage', '/api/v1/money/payouts/:payoutId/send']
+                .every((p) => money.some((r) => r.fullPath === p)));
 
         const admin = await signIn(EMAIL_ADMIN);
         const second = await signIn(EMAIL_SECOND);
@@ -905,14 +924,17 @@ async function main(): Promise<number> {
 
         /**
          * `money.payments.read` is deliberately unflagged: "did this payment go through" is
-         * exactly the question Support is asked. The payout queue and the earnings ledger
-         * are not theirs.
+         * exactly the question Support is asked.
+         *
+         * ⚠ **The payout queue used to be withheld here and no longer is (ADR-024).** Payout
+         * review became two-stage — tier 3 pre-screens, tier 1/2 sends — and a reviewer who
+         * cannot open the queue cannot pre-screen it. The earnings ledger did not move.
          */
         t.assert('Support can read a payment settlement — that is what the permission is for', () =>
             supportPayments.status === 200);
 
-        t.assert('...but not the payout queue, and not the platform ledger', () =>
-            supportPayouts.status === 403 && supportLedger.status === 403);
+        t.assert('...and the payout queue too, since ADR-024 — but never the platform ledger', () =>
+            supportPayouts.status === 200 && supportLedger.status === 403);
 
         /**
          * The other half of the step-6 exit gate. `money.payouts.destination.read` is

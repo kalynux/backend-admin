@@ -763,8 +763,14 @@ async function main(): Promise<number> {
         t.assert('Support cannot open an account view — it composes three permissions', () =>
             supportAccount.status === 403);
 
-        t.assert('...nor the payout sub-list, which needs money.payouts.read', () =>
-            supportPayouts.status === 403);
+        /**
+         * ⚠ **The payout sub-list IS theirs now.** `money.payouts.read` moved to tier 3 with
+         * ADR-024's two-stage review, so this one composed permission resolves where the
+         * account view above still does not — which is the composition doing its job: the page
+         * needs three permissions and Support holds one of them.
+         */
+        t.assert('...but the payout sub-list is, since money.payouts.read moved to tier 3', () =>
+            supportPayouts.status === 200);
 
         /**
          * Polled rather than read once, and the reason is a real property of the writer:

@@ -452,12 +452,20 @@ async function main(): Promise<number> {
             supportHolders.status === 403);
 
         /**
-         * The overview is the DELEGATED read, and it is refused here without jovi-mall
-         * being consulted at all: authorization resolves in this service, before
-         * delegation. That is ADR-003's single-sided rule, observable.
+         * ⚠ **The overview half of this moved with ADR-024 and the assertion did not follow.**
+         * Support holds `cod.overview.read` now: pre-screening a remittance without the cash
+         * position standing behind it is guessing. So this DELEGATED read succeeds for them.
+         *
+         * The discrepancy queue did NOT move. `cod.discrepancies.read` is not a tier-3
+         * permission and resolving one is a tier-1/2 write, so this half is unchanged — which
+         * is why both are asserted here rather than the pair being deleted together.
+         *
+         * ADR-003's single-sided rule — a refusal resolving in this service before anything is
+         * delegated — is proved in `verify-platform-live.ts` § 2, on the delegated WRITE that is
+         * still beyond this tier.
          */
-        t.assert('...and the overview, and the discrepancy queue', () =>
-            supportOverview.status === 403 && supportFlags.status === 403);
+        t.assert('...the overview is theirs to pre-screen with now; the discrepancy queue is not', () =>
+            supportOverview.status === 200 && supportFlags.status === 403);
 
         const denials = await AuditLogModel().find({ status: 'denied' }).sort({ occurred_at: -1 }).limit(5).lean();
         t.assert('...and every refusal is on the record', () =>

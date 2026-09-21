@@ -217,9 +217,13 @@ defineRoute(router, {
 /**
  * A reviewer endorses the request as genuine.
  *
- * The one route in this module a Support administrator can reach, and the permission is the
- * only `financial` one their tier holds — see `TIER_3_FINANCIAL_ALLOWLIST` in tier-grants
- * for why that exception exists and what bounds it.
+ * ⚠ **This said "the one route in this module a Support administrator can reach" and that was
+ * already false when it was written**: the same change granted tier 3 `money.payouts.read`,
+ * which reaches `GET /payouts` and `GET /payouts/:payoutId` as well. What is true, and is what
+ * the sentence was reaching for, is that this is the only route here a Support administrator
+ * can WRITE — and `money.payouts.triage` is the only `financial` permission their tier holds;
+ * see `TIER_3_FINANCIAL_ALLOWLIST` in tier-grants for why that exception exists and what
+ * bounds it.
  *
  * Not dual-controlled at any amount: nothing moves, so there is nothing for a quorum to
  * protect. A triage REJECTION is not here — it is `/reject` below, the same terminal write a
