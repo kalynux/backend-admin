@@ -163,6 +163,29 @@ async function auditRows(action: string) {
     return AuditLogModel().find({ action }).sort({ occurred_at: -1 }).limit(5).lean();
 }
 
+/**
+ * Re-read until a condition holds, or give up and let the assertion report what it found.
+ *
+ * For the handful of facts this service commits AFTER answering — the best-effort audit
+ * writes. Bounded and short: it exists to remove a race, not to wait for something slow.
+ *
+ * ⚠ Copied from `verify-accounts-live.ts`, which needed it first. These suites are standalone
+ * scripts with no shared helper module, so this is a duplicate on purpose rather than an
+ * import that does not exist.
+ */
+async function eventually<T>(
+    read: () => Promise<T>,
+    holds: (value: T) => boolean,
+    attempts = 20,
+): Promise<T> {
+    let latest = await read();
+    for (let i = 0; i < attempts && !holds(latest); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        latest = await read();
+    }
+    return latest;
+}
+
 async function main(): Promise<number> {
     let server: Server | null = null;
 
@@ -427,7 +450,22 @@ async function main(): Promise<number> {
         t.assert('Support is refused the catalog — they hold no billing permission', () =>
             supportRead.status === 403);
 
-        const denials = await AuditLogModel().find({ status: 'denied' }).sort({ occurred_at: -1 }).limit(3).lean();
+        /**
+         * ⛔ **This read the log ONCE and it raced.** `recordDenial` is best-effort and
+         * fire-and-forget, so the 403 is already on the wire before its row is committed —
+         * the assertion therefore passed on a slow machine and failed on a fast one, which is
+         * worse than not having it. It did exactly that on 2026-09-21: green on `main` and red
+         * on `production`, same commit, minutes apart.
+         *
+         * ⚠ **`limit(3)` was the second half of the bug.** Every refusal in this suite writes a
+         * denial row, so three is close enough to the number in flight that an unrelated one
+         * could push this one out of the window even once it HAD committed. 20, like the
+         * sibling suite.
+         */
+        const denials = await eventually(
+            () => AuditLogModel().find({ status: 'denied' }).sort({ occurred_at: -1 }).limit(20).lean(),
+            (rows) => rows.some((d: any) => (d.required_permissions ?? []).includes('billing.plans.read')),
+        );
         t.assert('...and the refusal is on the record', () =>
             denials.some((d: any) => (d.required_permissions ?? []).includes('billing.plans.read')));
 
