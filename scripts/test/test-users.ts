@@ -16,10 +16,19 @@
  *   §5  suspension is enforced in jovi-mall on all three auth paths. Without it this
  *       whole phase ships an endpoint that flips a column nobody reads.
  *
+ * §8 is the one section that is DRIVEN rather than scanned. The bot-memory reset goes through
+ * the real gateway, the real `platformRequest` and the real audit writer, against an
+ * in-process stand-in for jovi-mall on 127.0.0.1 and a stand-in audit store. That is how it
+ * proves the fail-closed order: no audit row, no call. It still needs no Mongo, no Redis and
+ * no running jovi-mall.
+ *
  *   npm run test:users
  */
 import { readFileSync } from 'fs';
+import { createServer, IncomingHttpHeaders } from 'http';
+import { AddressInfo } from 'net';
 import { join } from 'path';
+import { Types } from 'mongoose';
 import { suite } from './_assert';
 
 // Env must be set before importing anything that reads config at module load.
@@ -33,12 +42,20 @@ process.env.ADMIN_DASHBOARD_ORIGINS = 'http://localhost:5173';
 
 import {
     ListUserActivityQuerySchema,
+    ResetBotMemorySchema,
     SearchUsersQuerySchema,
     SuspendUserSchema,
     UpdateUserSchema,
     USER_AUDIT_ACTIONS,
     USER_SORT,
 } from '../../src/modules/users/validators/user.validator';
+import { BotMemoryResetResult, resetBotMemory } from '../../src/modules/users/gateways/user.gateway';
+import { ActorContext } from '../../src/modules/audit/domain/audit-context';
+import { AdminIdentity } from '../../src/modules/admin-identity/domain/admin-identity.types';
+import { AppError } from '../../src/core/errors/app-error';
+import { ERROR_CODES } from '../../src/core/errors/error-codes';
+import { resetEnvCache } from '../../src/config/env';
+import { resetPlatformClient } from '../../src/infra/platform/platform.client';
 import { buildFilter } from '../../src/modules/users/repositories/user.read.repository';
 import { AUDIT_CATALOG, auditSpec, isAuditAction } from '../../src/modules/audit/domain/audit.catalog';
 import { subjectClassOf } from '../../src/modules/audit/domain/audit-subject';
@@ -46,8 +63,8 @@ import { PERMISSION_CATALOG, permissionSpec } from '../../src/modules/authorizat
 import { TIER_GRANTS } from '../../src/modules/authorization/domain/tier-grants';
 import { isSensitive } from '../../src/modules/authorization/domain/permission.types';
 import { routeManifest } from '../../src/api/route-manifest';
-// Importing the router registers its six routes into the manifest — the same source the
-// boot assertion reads, so §6 checks what Express will actually serve.
+// Importing the router registers its routes into the manifest (nine since the bot-memory
+// reset), the same source the boot assertion reads, so §6 and §7 check what Express will serve.
 import '../../src/modules/users/routes/user.routes';
 
 const t = suite('user management');
@@ -348,8 +365,10 @@ t.section('6. Routes, permissions and the audit catalog');
 
 const USER_ROUTES = routeManifest().filter((route) => route.fullPath.startsWith('/api/v1/users'));
 
-// Six at the user-management phase; eight since credential recovery landed.
-t.assert('eight routes are declared', () => USER_ROUTES.length === 8);
+// Six at the user-management phase, eight once credential recovery landed, and nine since the
+// bot-memory reset (2026-09-22). §7 pins the ninth by name, so this count cannot pass on a
+// swap of one route for another.
+t.assert('nine routes are declared', () => USER_ROUTES.length === 9);
 
 t.assert('every one declares a permission — none is public or self-service', () =>
     USER_ROUTES.every((route) => route.access.kind === 'permission'));
@@ -422,7 +441,13 @@ t.assert('no route uses `users.roles.manage` — role editing is deliberately un
     USER_ROUTES.every((route) => route.access.kind !== 'permission'
         || !route.access.permissions.includes('users.roles.manage')));
 
-t.assert('Support reads users but writes none of them', () => {
+/**
+ * This read "Support reads users but writes none of them" until 2026-09-22, when the owner
+ * granted `users.bot_memory.reset` to every tier. The checks did not change. The name did,
+ * because it had become false. §7 pins the new boundary exactly: the reset is the ONLY
+ * `users.*` write Support holds.
+ */
+t.assert('Support reads users and can neither edit nor suspend one', () => {
     const support = new Set(TIER_GRANTS[3]);
     return support.has('users.read')
         && !support.has('users.update')
@@ -443,9 +468,10 @@ t.assert('`users.update` is not flagged sensitive — it is routine support work
 t.assert('...unlike role management, which is', () =>
     isSensitive(permissionSpec('users.roles.manage')));
 
-// Three at the user-management phase; five since the two credential sends were catalogued.
-t.assert('five user actions are catalogued, and no read among them', () =>
-    USER_AUDIT_ACTIONS.length === 5
+// Three at the user-management phase, five once the two credential sends were catalogued,
+// and six since `users.bot_memory.reset` (2026-09-22).
+t.assert('six user actions are catalogued, and no read among them', () =>
+    USER_AUDIT_ACTIONS.length === 6
     && USER_AUDIT_ACTIONS.every((action) => isAuditAction(action)));
 
 /**
@@ -496,4 +522,406 @@ t.assert('the activity feed refuses an action from another family', () =>
 t.assert('...and accepts every user action', () =>
     USER_AUDIT_ACTIONS.every((action) => ListUserActivityQuerySchema.safeParse({ action }).success));
 
-process.exit(t.finish());
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('7. The bot-memory reset — the one users.* write every tier holds');
+
+const RESET_PATH = '/api/v1/users/:userId/bot-memory/reset';
+const RESET_ROUTE = USER_ROUTES.find((route) => route.fullPath === RESET_PATH);
+
+t.assert('it is a POST sub-resource at /users/:userId/bot-memory/reset', () =>
+    RESET_ROUTE?.method === 'post');
+
+t.assert('...guarded by `users.bot_memory.reset` alone, in `all` mode', () =>
+    RESET_ROUTE?.access.kind === 'permission'
+    && RESET_ROUTE.access.mode === 'all'
+    && RESET_ROUTE.access.permissions.length === 1
+    && RESET_ROUTE.access.permissions[0] === 'users.bot_memory.reset');
+
+t.assert('...and declares that it records `users.bot_memory.reset`', () =>
+    RESET_ROUTE?.audit?.kind === 'records'
+    && RESET_ROUTE.audit.actions.length === 1
+    && RESET_ROUTE.audit.actions[0] === 'users.bot_memory.reset');
+
+/**
+ * One assertion per tier, not one `every()` over the three. When a grant goes missing, the
+ * failing line should name the tier that lost it.
+ */
+t.assert('Developer (tier 1) holds `users.bot_memory.reset`', () =>
+    new Set(TIER_GRANTS[1]).has('users.bot_memory.reset'));
+
+t.assert('Admin (tier 2) holds it', () => new Set(TIER_GRANTS[2]).has('users.bot_memory.reset'));
+
+t.assert('Support (tier 3) holds it — every tier may reset, by the owner’s decision', () =>
+    new Set(TIER_GRANTS[3]).has('users.bot_memory.reset'));
+
+/**
+ * The other half of granting it to Support: it widened nothing else. The only `users.*`
+ * write at tier 3 is the reset. So Support still cannot edit identifiers, suspend, or send a
+ * credential, whatever gets added to the family later.
+ */
+t.assert('...and it is the ONLY users.* write Support holds', () => {
+    const writes = TIER_GRANTS[3].filter((name) => {
+        const spec = permissionSpec(name);
+        return spec.family === 'users' && spec.action === 'write';
+    });
+    return writes.length === 1 && writes[0] === 'users.bot_memory.reset';
+});
+
+t.assert('it carries no sensitive flag — one would refuse it to Support at boot', () =>
+    !isSensitive(permissionSpec('users.bot_memory.reset')));
+
+t.assert('its audit action reuses the permission name, targets a user and is delegated', () => {
+    const spec = auditSpec('users.bot_memory.reset');
+    return spec.permission === 'users.bot_memory.reset'
+        && spec.target === 'user'
+        && spec.transport === 'delegated';
+});
+
+t.assert('the body may be empty — the dashboard button needs no form', () =>
+    ResetBotMemorySchema.safeParse({}).success);
+
+t.assert('an optional reason is accepted and trimmed', () =>
+    ResetBotMemorySchema.parse({ reason: '  bot kept quoting a cancelled order  ' }).reason
+        === 'bot kept quoting a cancelled order');
+
+t.assert('...bounded at 500 characters', () =>
+    ResetBotMemorySchema.safeParse({ reason: 'x'.repeat(500) }).success
+    && !ResetBotMemorySchema.safeParse({ reason: 'x'.repeat(501) }).success);
+
+t.assert('...and an empty string is refused — omit the key instead', () =>
+    !ResetBotMemorySchema.safeParse({ reason: '' }).success);
+
+t.assert('the body is strict — a stray key is a 400, never silently dropped', () =>
+    !ResetBotMemorySchema.safeParse({ channel: 'whatsapp' }).success);
+
+/**
+ * The span is the `static resetBotMemory` handler: from its declaration to the next
+ * `static ` in the class. It is not the file. Every other write in this controller also
+ * calls `loadOr404` before its gateway, so a file-wide scan would pass even if this handler
+ * dropped the call.
+ */
+t.assert('the handler answers 404 BEFORE it delegates (scanned within its own span)', () => {
+    const controller = readCode(SRC, 'modules', 'users', 'controllers', 'user.controller.ts');
+    const start = controller.indexOf('static resetBotMemory');
+    if (start === -1) return false;
+    const next = controller.indexOf('static ', start + 1);
+    const span = controller.slice(start, next === -1 ? undefined : next);
+    const load = span.indexOf('loadOr404(');
+    const call = span.indexOf('gateway.resetBotMemory(');
+    return load !== -1 && call !== -1 && load < call;
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §8 — the gateway DRIVEN, against a stand-in for jovi-mall and a stand-in audit store.
+//
+// Scanning cannot prove this part. The path, the method, the headers, the order of audit
+// and call, and the error mapping are all runtime facts. So the real gateway runs through
+// the real `platformRequest` and the real `auditedAttempt`. Two things are replaced:
+//
+//   - jovi-mall: an HTTP server on 127.0.0.1, on an ephemeral port, inside this process.
+//     It records every request and answers whatever the scenario sets. No real jovi-mall
+//     is involved.
+//   - the audit store: `AuditLogModel` is swapped for a double on the module's exports. The
+//     writer reads that export at CALL time (CommonJS), so the swap reaches it. If the swap
+//     ever stopped working, the real model would throw "connection has not been opened" and
+//     the success scenario below would fail. It cannot pass vacuously.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const USER_ID = '65f0000000000000000000b7';
+const STUB_SERVICE_TOKEN = 'stub-service-token-for-test-users';
+
+const SUPPORT_ACTOR: AdminIdentity = {
+    adminId: '65f0000000000000000000c3',
+    sessionId: 'session-support-1',
+    email: 'support.tester@example.test',
+    displayName: 'Support Tester',
+    tier: 3,
+    status: 'active',
+    mfaEnrolled: false,
+    pendingMfaEnrolment: false,
+    pendingActivation: false,
+    authenticatedAt: new Date(),
+    sessionExpiresAt: new Date(Date.now() + 3_600_000),
+    authMethod: 'bearer',
+    ip: '127.0.0.1',
+};
+
+function actorContext(requestId: string): ActorContext {
+    return {
+        method: 'POST',
+        path: `/api/v1/users/${USER_ID}/bot-memory/reset`,
+        requestId,
+        ip: '127.0.0.1',
+        userAgent: 'test-users',
+        actor: SUPPORT_ACTOR,
+    };
+}
+
+/** What the controller passes: the direct-read snapshot, used here for the row's label. */
+const BEFORE = { email: 'amina@example.test', phone: null, status: 'active', suspendedReason: null };
+
+interface CapturedRequest {
+    method: string;
+    url: string;
+    headers: IncomingHttpHeaders;
+    body: string;
+}
+
+type StubReply = { status: number; body: unknown } | 'drop';
+
+const joviRequests: CapturedRequest[] = [];
+const events: string[] = [];
+let joviReply: StubReply = { status: 200, body: {} };
+
+const stubJovi = createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => {
+        joviRequests.push({
+            method: req.method ?? '',
+            url: req.url ?? '',
+            headers: req.headers,
+            body: Buffer.concat(chunks).toString('utf8'),
+        });
+        events.push('jovi-mall:request');
+
+        if (joviReply === 'drop') {
+            // A connection that dies with no answer. Same shape as a crash or a
+            // mid-flight network cut.
+            req.socket.destroy();
+            return;
+        }
+        res.writeHead(joviReply.status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(joviReply.body));
+    });
+});
+
+interface AuditWrite {
+    op: 'create' | 'updateOne';
+    doc: Record<string, unknown>;
+}
+
+const auditWrites: AuditWrite[] = [];
+let auditStoreDown = false;
+
+const auditDouble = {
+    async create(docs: Record<string, unknown>[]) {
+        if (auditStoreDown) throw new Error('audit store unreachable (test double)');
+        events.push('audit:intent');
+        const rows = docs.map((doc) => ({ ...doc, _id: new Types.ObjectId() }));
+        for (const row of rows) auditWrites.push({ op: 'create', doc: row });
+        return rows;
+    },
+    async updateOne(filter: Record<string, unknown>, update: { $set: Record<string, unknown> }) {
+        events.push('audit:outcome');
+        auditWrites.push({ op: 'updateOne', doc: { filter, ...update.$set } });
+        return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+    },
+};
+
+const auditModelModule = require('../../src/modules/audit/models/audit-log.model') as {
+    AuditLogModel: () => unknown;
+};
+auditModelModule.AuditLogModel = () => auditDouble;
+
+interface Attempt {
+    result: BotMemoryResetResult | null;
+    error: AppError | null;
+    thrown: unknown;
+}
+
+async function attemptReset(requestId: string, reason: string | null): Promise<Attempt> {
+    joviRequests.length = 0;
+    auditWrites.length = 0;
+    events.length = 0;
+    try {
+        const result = await resetBotMemory(USER_ID, reason, BEFORE, actorContext(requestId));
+        return { result, error: null, thrown: null };
+    } catch (thrown) {
+        return { result: null, error: thrown instanceof AppError ? thrown : null, thrown };
+    }
+}
+
+const intentOf = (): Record<string, unknown> | undefined =>
+    auditWrites.find((write) => write.op === 'create')?.doc;
+const outcomeOf = (): Record<string, unknown> | undefined =>
+    auditWrites.find((write) => write.op === 'updateOne')?.doc;
+
+const platformEnvelope = (code: string, statusCode: number, category: string) => ({
+    success: false,
+    requestId: 'stub-request',
+    error: { code, message: `stub ${code}`, statusCode, category },
+});
+
+async function runDrivenChecks(): Promise<void> {
+    await new Promise<void>((resolve) => stubJovi.listen(0, '127.0.0.1', resolve));
+    const { port } = stubJovi.address() as AddressInfo;
+
+    process.env.JOVI_MALL_BASE_URL = `http://127.0.0.1:${port}`;
+    process.env.JOVI_MALL_SERVICE_TOKEN = STUB_SERVICE_TOKEN;
+    resetEnvCache();
+    resetPlatformClient();
+
+    t.section('8. The bot-memory reset, driven through the real gateway');
+
+    // ── Success ──────────────────────────────────────────────────────────────
+    joviReply = {
+        status: 200,
+        body: {
+            success: true,
+            data: {
+                userId: USER_ID,
+                memoryEpoch: 4,
+                resetAt: '2026-09-22T10:00:00.000Z',
+                // Not in the contract. It must not travel past the gateway.
+                internalNote: 'must not reach the dashboard',
+            },
+        },
+    };
+    const ok = await attemptReset('req-bot-ok', 'bot kept quoting a cancelled order');
+    const call = joviRequests[0];
+
+    t.assert('it succeeds against a jovi-mall that answers 200', () => ok.result !== null && ok.thrown === null);
+
+    t.assert('jovi-mall is called exactly once', () => joviRequests.length === 1);
+
+    t.assert('...with POST /api/internal/admin/users/:userId/bot-memory/reset', () =>
+        call?.method === 'POST'
+        && call.url === `/api/internal/admin/users/${USER_ID}/bot-memory/reset`);
+
+    t.assert('...an empty JSON body — the reason stays in wi-admin’s audit', () => {
+        if (!call) return false;
+        const body = JSON.parse(call.body) as Record<string, unknown>;
+        return Object.keys(body).length === 0;
+    });
+
+    t.assert('...the service token, the acting administrator and the correlation id', () =>
+        call?.headers['x-service-token'] === STUB_SERVICE_TOKEN
+        && call.headers['x-actor-id'] === SUPPORT_ACTOR.adminId
+        && call.headers['x-actor-tier'] === '3'
+        && call.headers['x-request-id'] === 'req-bot-ok');
+
+    t.assert('the answer is exactly { userId, memoryEpoch, resetAt } — nothing else travels', () =>
+        ok.result !== null
+        && Object.keys(ok.result).sort().join(',') === 'memoryEpoch,resetAt,userId'
+        && ok.result.userId === USER_ID
+        && ok.result.memoryEpoch === 4
+        && ok.result.resetAt === '2026-09-22T10:00:00.000Z');
+
+    t.assert('the audit intent commits BEFORE jovi-mall is called, the outcome after', () =>
+        events.join(' → ') === 'audit:intent → jovi-mall:request → audit:outcome');
+
+    t.assert('the intent row names the action, the user, the actor and the reason', () => {
+        const row = intentOf();
+        return row !== undefined
+            && row.action === 'users.bot_memory.reset'
+            && row.status === 'attempted'
+            && row.target_type === 'user'
+            && row.target_id === USER_ID
+            && row.target_label === 'amina@example.test'
+            && String(row.actor_id) === SUPPORT_ACTOR.adminId
+            && row.actor_tier === 3
+            && row.correlation_id === 'req-bot-ok'
+            && row.delegated === true
+            && (row.payload as Record<string, unknown> | null)?.reason === 'bot kept quoting a cancelled order';
+    });
+
+    t.assert('...is not sensitive, and is a platform-actor row every tier can read', () => {
+        const row = intentOf();
+        return row?.sensitive === false && row.subject_class === 'platform_actor';
+    });
+
+    t.assert('the outcome is stamped succeeded, with the epoch and the instant as `after`', () => {
+        const row = outcomeOf();
+        const after = row?.after as Record<string, unknown> | null | undefined;
+        return row !== undefined
+            && row.status === 'succeeded'
+            && (row.filter as Record<string, unknown>).status === 'attempted'
+            && after?.memoryEpoch === 4
+            && after.resetAt === '2026-09-22T10:00:00.000Z'
+            && Object.keys(after).length === 2;
+    });
+
+    t.assert('...and `before` is null — the account itself did not change', () => outcomeOf()?.before === null);
+
+    // ── No reason ────────────────────────────────────────────────────────────
+    const quiet = await attemptReset('req-bot-quiet', null);
+
+    t.assert('without a reason it still resets, and the row records `reason: null`', () =>
+        quiet.result !== null
+        && (intentOf()?.payload as Record<string, unknown> | null)?.reason === null);
+
+    // ── jovi-mall refuses: an unknown user ───────────────────────────────────
+    joviReply = { status: 404, body: platformEnvelope('USER_NOT_FOUND', 404, 'not_found') };
+    const missing = await attemptReset('req-bot-404', null);
+
+    t.assert('a jovi-mall 404 reaches the dashboard as a 404 PLATFORM_OPERATION_REJECTED', () =>
+        missing.error?.statusCode === 404
+        && missing.error.code === ERROR_CODES.PLATFORM_OPERATION_REJECTED);
+
+    t.assert('...carrying jovi-mall’s own code in details.platformCode', () =>
+        (missing.error?.details as Record<string, unknown> | undefined)?.platformCode === 'USER_NOT_FOUND');
+
+    t.assert('...and the audit row is stamped failed, with that code', () => {
+        const row = outcomeOf();
+        return row?.status === 'failed' && row.platform_code === 'USER_NOT_FOUND' && row.outcome_status === 404;
+    });
+
+    // ── jovi-mall fails ──────────────────────────────────────────────────────
+    joviReply = { status: 500, body: platformEnvelope('INTERNAL_ERROR', 500, 'internal') };
+    const broken = await attemptReset('req-bot-500', null);
+
+    t.assert('a jovi-mall 5xx is a 502 SERVICE_DEPENDENCY_UNAVAILABLE, not the caller’s fault', () =>
+        broken.error?.statusCode === 502
+        && broken.error.code === ERROR_CODES.SERVICE_DEPENDENCY_UNAVAILABLE
+        && outcomeOf()?.status === 'failed');
+
+    // ── jovi-mall unreachable ────────────────────────────────────────────────
+    joviReply = 'drop';
+    const dropped = await attemptReset('req-bot-drop', null);
+
+    t.assert('a connection that dies unanswered is a 503 SERVICE_DEPENDENCY_UNAVAILABLE', () =>
+        dropped.error?.statusCode === 503
+        && dropped.error.code === ERROR_CODES.SERVICE_DEPENDENCY_UNAVAILABLE);
+
+    t.assert('...and a POST is never retried — one request reached jovi-mall, not two', () =>
+        joviRequests.length === 1 && outcomeOf()?.status === 'failed');
+
+    // ── Fail-closed: the audit store is down ─────────────────────────────────
+    joviReply = {
+        status: 200,
+        body: { success: true, data: { userId: USER_ID, memoryEpoch: 5, resetAt: '2026-09-22T10:05:00.000Z' } },
+    };
+    auditStoreDown = true;
+    const unaudited = await attemptReset('req-bot-noaudit', null);
+    auditStoreDown = false;
+
+    t.assert('FAIL-CLOSED: when the audit intent cannot be written, the call fails', () =>
+        unaudited.result === null && unaudited.thrown !== null);
+
+    t.assert('...and jovi-mall is NEVER called — an unrecordable reset does not happen', () =>
+        joviRequests.length === 0 && !events.includes('jovi-mall:request'));
+
+    // ── Unconfigured ─────────────────────────────────────────────────────────
+    delete process.env.JOVI_MALL_BASE_URL;
+    delete process.env.JOVI_MALL_SERVICE_TOKEN;
+    resetEnvCache();
+    resetPlatformClient();
+    const unconfigured = await attemptReset('req-bot-unconfigured', null);
+
+    t.assert('with JOVI_MALL_BASE_URL unset it answers 503 and names the variable', () =>
+        unconfigured.error?.statusCode === 503
+        && unconfigured.error.code === ERROR_CODES.SERVICE_DEPENDENCY_UNAVAILABLE
+        && unconfigured.error.message.includes('JOVI_MALL_BASE_URL'));
+}
+
+runDrivenChecks()
+    .then(() => {
+        stubJovi.close();
+        process.exit(t.finish());
+    })
+    .catch((error) => {
+        console.error('\n❌ test:users failed to run\n', error);
+        stubJovi.close();
+        process.exit(1);
+    });

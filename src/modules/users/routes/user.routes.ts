@@ -3,6 +3,7 @@ import { defineRoute, permission, records } from '../../../api/route-manifest';
 import { UserController } from '../controllers/user.controller';
 import {
     ListUserActivityQuerySchema,
+    ResetBotMemorySchema,
     SearchUsersQuerySchema,
     SendCredentialSchema,
     SuspendUserSchema,
@@ -153,6 +154,30 @@ defineRoute(router, {
     validate: { params: UserIdParamSchema, body: SendCredentialSchema },
     audit: records('users.login_link.send'),
     handler: UserController.sendLoginLink,
+});
+
+/**
+ * Resetting the customer bot's conversation memory for one person, so their next chat
+ * starts fresh.
+ *
+ * ── The one `users.*` write every tier holds ─────────────────────────────────
+ * `users.bot_memory.reset` is granted to Support as well as Admin and Developer, by the
+ * owner's decision. The header's read/write split does not bend for it: it is still its own
+ * permission, separate from `users.read`, and it cannot edit, suspend or send anything. What
+ * it resets is only the bot's memory of the chat, which jovi-mall owns.
+ *
+ * A POST sub-resource for ADR-005 D-4's reason, and the path is jovi-mall's own
+ * (`/users/:userId/bot-memory/reset`), as it is for suspend and restore. `reason` is optional
+ * (see `ResetBotMemorySchema`).
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/:userId/bot-memory/reset',
+    access: permission('users.bot_memory.reset'),
+    validate: { params: UserIdParamSchema, body: ResetBotMemorySchema },
+    audit: records('users.bot_memory.reset'),
+    handler: UserController.resetBotMemory,
 });
 
 export const userRoutes = router;

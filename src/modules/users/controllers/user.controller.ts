@@ -18,6 +18,7 @@ import {
 import { UserReadModel, UserReadRepository } from '../repositories/user.read.repository';
 import {
     ListUserActivityQuery,
+    ResetBotMemoryBody,
     SearchUsersQuery,
     SendCredentialBody,
     SuspendUserBody,
@@ -294,6 +295,32 @@ export class UserController {
         );
 
         sendSuccess(res, result, { message: `Sign-in link sent by ${body.channel}` });
+    });
+
+    /**
+     * POST /api/v1/users/:userId/bot-memory/reset — body `{ reason? }`.
+     *
+     * Makes the customer bot (WhatsApp and Telegram) start this person's next conversation
+     * fresh. It is the remedy when the bot is confused by something it remembers. It deletes
+     * no order, message record or account data, and the answer carries only
+     * `{ userId, memoryEpoch, resetAt }`.
+     *
+     * Held by every tier, Support included (see `users.bot_memory.reset` in the catalog). The
+     * 404 is checked here first, the same as the other writes, so an unknown id reads as "no
+     * such user" and never as a platform refusal.
+     */
+    static resetBotMemory = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as ResetBotMemoryBody;
+        const before = await loadOr404(req.params.userId);
+
+        const result = await gateway.resetBotMemory(
+            req.params.userId,
+            body.reason ?? null,
+            toAuditState(before),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, result, { message: 'Bot memory reset — the next conversation starts fresh' });
     });
 
     /**

@@ -1031,6 +1031,23 @@ export const AUDIT_CATALOG = Object.freeze({
         transport: 'delegated',
         summary: 'Sent a customer a passwordless sign-in link',
     },
+    /**
+     * Resetting what the customer bot remembers of one person's chat.
+     *
+     * The row keeps the operator's optional reason as `payload`, and jovi-mall's answer
+     * (`memoryEpoch`, `resetAt`) as `after`. `before` is null on purpose. Nothing about the
+     * account changed, so recording its identifiers there would produce a diff that reads as
+     * "the email was removed". The previous memory is also nothing this service can see.
+     *
+     * Not sensitive: its permission has no flag. A `user` target is `platform_actor`, so every
+     * tier can read the row. That matters here, because every tier can perform the action.
+     */
+    'users.bot_memory.reset': {
+        permission: 'users.bot_memory.reset',
+        target: 'user',
+        transport: 'delegated',
+        summary: 'Reset the customer bot’s conversation memory for a user',
+    },
 
     // ═══ VENDORS — delegated to jovi-mall ═════════════════════════════════════
     // Seven mutations. The reads — list, detail, products, activity — are not here: a

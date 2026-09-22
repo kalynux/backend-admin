@@ -46,6 +46,10 @@ export type UserSnapshot = Record<string, unknown> | null;
  * fails, the HTTP call is never made — and the outcome is stamped when jovi-mall answers.
  * A crash in between leaves a row at `attempted`, resolved by grepping jovi-mall for the
  * same `correlation_id`, which already travels as `X-Request-Id` on every call.
+ *
+ * `toAfter` defaults to `asState`, the user-row diff that every account write records. A
+ * write whose result is not a user row passes its own mapper. The bot-memory reset is the
+ * one that does, and it records the new memory epoch.
  */
 function auditedDelegation<T>(
     action: AuditAction,
@@ -54,6 +58,7 @@ function auditedDelegation<T>(
     payload: Record<string, unknown> | null,
     before: UserSnapshot,
     perform: () => Promise<T>,
+    toAfter: (result: T) => Record<string, unknown> | null = asState,
 ): Promise<T> {
     return auditedAttempt(
         {
@@ -78,7 +83,7 @@ function auditedDelegation<T>(
         },
         async () => {
             const result = await perform();
-            return { result, before, after: asState(result) };
+            return { result, before, after: toAfter(result) };
         },
     );
 }
@@ -330,5 +335,82 @@ export async function sendLoginLink(
             });
             return result.data;
         },
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The customer bot's conversation memory
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What a bot-memory reset answers: jovi-mall's result, reduced to its three named fields.
+ *
+ * `memoryEpoch` is jovi-mall's counter for this person's bot memory, and a reset moves it
+ * forward. wi-admin does not interpret it. It is passed on so the dashboard, and the audit
+ * row, can show that a reset happened.
+ */
+export interface BotMemoryResetResult {
+    userId: string;
+    memoryEpoch: number;
+    /** ISO-8601. */
+    resetAt: string;
+}
+
+/**
+ * Named fields, not a pass-through. The same rule as `toUserDto`: a field jovi-mall adds to
+ * its answer later does not reach the dashboard or the audit row until someone names it here.
+ */
+function toBotMemoryReset(result: BotMemoryResetResult): BotMemoryResetResult {
+    return {
+        userId: result.userId,
+        memoryEpoch: result.memoryEpoch,
+        resetAt: result.resetAt,
+    };
+}
+
+/** The audit row's `after`. The epoch and the instant; the user id is already the target. */
+function asBotMemoryState(result: BotMemoryResetResult): Record<string, unknown> {
+    return { memoryEpoch: result.memoryEpoch, resetAt: result.resetAt };
+}
+
+/**
+ * Make the customer bot start this person's next conversation fresh.
+ *
+ * Delegated because the bot's memory lives on jovi-mall's side of the boundary. It is
+ * reached at `POST /api/internal/admin/users/:userId/bot-memory/reset` with an empty body.
+ * It deletes no order, message record or account data.
+ *
+ * `before` is used for the row's LABEL only. The row's own `before` is recorded as null,
+ * because the account is not what changed (see the `users.bot_memory.reset` entry in
+ * `audit.catalog.ts`). The reason goes in the payload as `null` when none was given, so
+ * "no reason was offered" can be told apart from "the field was lost".
+ *
+ * A POST, so `platformRequest` never retries it. Its failures map the same way every other
+ * delegation's do: an unknown user from jovi-mall arrives as `PLATFORM_OPERATION_REJECTED`
+ * at 404, an unreachable jovi-mall as `SERVICE_DEPENDENCY_UNAVAILABLE`.
+ */
+export async function resetBotMemory(
+    userId: string,
+    reason: string | null,
+    before: UserSnapshot,
+    context: ActorContext,
+): Promise<BotMemoryResetResult> {
+    return auditedDelegation(
+        'users.bot_memory.reset',
+        context,
+        { id: userId, label: labelOf(before) },
+        { reason },
+        null,
+        async () => {
+            const result = await platformRequest<BotMemoryResetResult>({
+                method: 'POST',
+                path: `/users/${userId}/bot-memory/reset`,
+                body: {},
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return toBotMemoryReset(result.data);
+        },
+        asBotMemoryState,
     );
 }

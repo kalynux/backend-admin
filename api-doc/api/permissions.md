@@ -1,5 +1,7 @@
 # Permissions and administrator levels
 
+⚠ **Amended 2026-09-22: `users.bot_memory.reset` added, granted to all three levels** (the customer bot's memory reset, [users.md](users.md#the-customer-bots-memory)). Each level total and the matrix below moved by one. ⚠ **The matrix is still behind the code, and not because of this change.** ADR-024's `cod.triage` and `money.payouts.triage` have no rows here yet, and neither do four tier-3 grants (`cod.overview.read`, `cod.remittances.read`, `cod.deposits.read`, `money.payouts.read`). `npm run authz:matrix` gives **124 / 104 / 38** with this change included. The totals in the level table below count **this document's matrix**, so the two stay consistent with each other. Re-derive rather than quoting.
+
 ⚠ **Re-measured 2026-09-14 (ADR-023): 121 permissions across 21 families, tier totals 121 / 101 / 31.** The new family is `employees` (2 permissions) and the new name in `administrators` is `administrators.activate`; all three are **tier 1 only**, so tiers 2 and 3 are unchanged. Re-derive rather than quoting — `npm run authz:matrix`.
 
 **Verified against source on 2026-09-08** — the 118 permissions then existing, the 20 families, all three tier totals (118 / 101 / 31), the four unrouted `†` names and both composite-guard counts (17 `all`-mode, 3 `any`-mode), each re-derived by *executing* `admin/src/modules/authorization/domain/permission.catalog.ts`, `tier-grants.ts` and the live route manifest at HEAD rather than by reading them.
@@ -19,9 +21,9 @@ Design records: [`../../docs/ADR-003-GRANULAR-PERMISSIONS.md`](../../docs/ADR-00
 
 | Level (`tier`) | Label | Holds | Shape of the job |
 |---|---|---|---|
-| **1** | Developer | 121 of 121 | Everything, including the developer tools and every escalation-flagged action |
-| **2** | Admin | 101 of 121 | The operational tier — runs the platform day to day, including the money |
-| **3** | Support | 31 of 121 | Ticket work, the lookups needed to answer a ticket, and editorial write on articles and bylines. Nothing financial, nothing destructive, and publishing stays a level above |
+| **1** | Developer | 122 of 122 | Everything, including the developer tools and every escalation-flagged action |
+| **2** | Admin | 102 of 122 | The operational tier — runs the platform day to day, including the money |
+| **3** | Support | 32 of 122 | Ticket work, the lookups needed to answer a ticket, editorial write on articles and bylines, and resetting the customer bot's memory of a chat. Nothing financial, nothing destructive, and publishing stays a level above |
 
 A level is an administrator's **entire** authorization state. `tier` appears on the profile
 returned by `GET /auth/me`.
@@ -156,7 +158,7 @@ record were one decision, not two. See [ADR-020](../../docs/ADR-020-ADMIN-DATA-D
 ## The matrix
 
 ● granted  ·  not granted  ·  **†** = catalogued policy with **no endpoint built yet**
-(**4** of 121 permissions — down from 27, and the four that remain each have a written reason
+(**4** of 122 permissions — down from 27, and the four that remain each have a written reason
 below. The policy is decided ahead of the surface, deliberately.)
 
 ### `agents`
@@ -351,7 +353,13 @@ size cap still apply to it.
 | `users.sessions.revoke` † | write | ● | ● | · | — | Force a user to sign out of every device |
 | `users.password.reset` | write | ● | ● | · | — | Send a user a password-reset link over email, WhatsApp or Telegram |
 | `users.login_link.send` | write | ● | ● | · | — | Send a customer a passwordless sign-in link over email, WhatsApp or Telegram |
+| `users.bot_memory.reset` | write | ● | ● | ● | — | Reset the customer bot’s conversation memory for one user, so their next chat starts fresh |
 | `users.roles.manage` † | write | ● | · | · | destructive | Add or remove a user’s platform roles |
+
+`users.bot_memory.reset` is the one `users` write Support holds, by the owner's decision
+(2026-09-22). It deletes no order, message record or account data, only what the bot remembers
+of the chat. So the ticket that reports a confused bot can be closed at the level that received
+it. It carries no flag: `destructive` would make the boot check refuse it to Support.
 
 ### `vendors`
 
@@ -582,7 +590,9 @@ since. Every composite guard is a `permission(a, b)` or `anyPermission(a, b, c)`
 - Anything `financial` — enforced at boot, not by review.
 - `audit.export`, because an export is the precondition for a retention purge and so carries
   `destructive`.
-- Every write on users, vendors, agencies, agents, orders, shipments, COD, billing and money.
+- Every write on users, vendors, agencies, agents, orders, shipments, COD, billing and money,
+  with one exception on users: `users.bot_memory.reset`, which touches no platform record and
+  is held by every level.
 
 What Support **does** hold that surprises people: `money.payments.read` (gateway settlements).
 "Did my payment go through, and was I refunded" is one of the commonest ticket questions, and

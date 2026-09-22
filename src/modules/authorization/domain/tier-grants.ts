@@ -78,6 +78,18 @@ const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
     'agencies.read',
 
     /**
+     * Resetting the customer bot's memory of one person's chat. It is the only `users.*` write
+     * at this tier, and it is here by the owner's decision (2026-09-22): "the bot is confused
+     * by what it remembers" arrives as a ticket, and this is the remedy.
+     *
+     * It touches no order, message record, account field or credential. That is the
+     * difference from `users.password.reset` and `users.login_link.send`, which this tier
+     * must never hold. See the catalog entry for the full reasoning. Admin receives it
+     * through `allInFamily('users')` as well, since it carries no flag.
+     */
+    'users.bot_memory.reset',
+
+    /**
      * Live tracking data from geo-tracker — the sharpest read on this surface, and it is
      * here on purpose (Phase 6.I).
      *

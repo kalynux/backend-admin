@@ -138,6 +138,28 @@ export const SendCredentialSchema = z
     .strict();
 
 /**
+ * Resetting the customer bot's memory of one person's chat.
+ *
+ * ── `reason` is OPTIONAL here, unlike suspend and the credential sends ─────────
+ * Those two act against the person, or on their ability to sign in, without their asking.
+ * This one answers the person's own complaint ("the bot keeps getting confused") and takes
+ * nothing from them. It follows `ReactivateAgencySchema`'s rule: imposing a restriction
+ * needs a reason, and a reset imposes none. When a reason is sent it is still trimmed,
+ * bounded and recorded on the audit row.
+ *
+ * Send no `reason` key rather than `""`. The empty string is refused, the same way it is on
+ * every other optional reason here.
+ *
+ * `.strict()`, so a key that belongs to another action (`channel`, a destination) is a 400
+ * and is never silently ignored. An empty POST arrives as `{}` and passes.
+ */
+export const ResetBotMemorySchema = z
+    .object({
+        reason: reasonText('Give a reason or omit it').optional(),
+    })
+    .strict();
+
+/**
  * The activity feed's query — the audit list, narrowed to one user.
  *
  * A deliberate subset of `ListAuditQuerySchema`: no `targetType`/`targetId` (the path
@@ -171,4 +193,5 @@ export type SearchUsersQuery = z.infer<typeof SearchUsersQuerySchema>;
 export type UpdateUserBody = z.infer<typeof UpdateUserSchema>;
 export type SuspendUserBody = z.infer<typeof SuspendUserSchema>;
 export type SendCredentialBody = z.infer<typeof SendCredentialSchema>;
+export type ResetBotMemoryBody = z.infer<typeof ResetBotMemorySchema>;
 export type ListUserActivityQuery = z.infer<typeof ListUserActivityQuerySchema>;

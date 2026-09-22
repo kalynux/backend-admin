@@ -1,5 +1,7 @@
 # `/users` — platform user management
 
+**Amended 2026-09-22.** A ninth route, `POST /users/:userId/bot-memory/reset`, was added under the new permission `users.bot_memory.reset`. It is the one write on this surface that **all three levels** hold. See [the section at the end](#the-customer-bots-memory). Checked against the route manifest and `tier-grants.ts`, and pinned by `npm run test:users` § 7–8.
+
 **Verified against source on 2026-09-08** — all eight routes and their guards against the live route manifest; every query parameter, bound and sort allowlist against `users/validators/user.validator.ts` and `core/validation/common.schemas.ts`; the read DTO and the `profiles`/`missing` shape against `users/controllers/user.controller.ts:54-116` and `users/repositories/role-profile.read.repository.ts`; the write responses against `users/gateways/user.gateway.ts`; and the `details` exposure on the 429 against `core/errors/detail-policy.ts:156`.
 
 Base path: `/api/v1/users`
@@ -19,12 +21,14 @@ Design record: [`../../docs/ADR-007-USER-MANAGEMENT.md`](../../docs/ADR-007-USER
 | `POST` | `/users/:userId/restore` | `users.suspend` | **delegated** | ✅ |
 | `POST` | `/users/:userId/password-reset-link` | `users.password.reset` | **delegated** | ✅ |
 | `POST` | `/users/:userId/login-link` | `users.login_link.send` | **delegated** | ✅ |
+| `POST` | `/users/:userId/bot-memory/reset` | `users.bot_memory.reset` | **delegated** | ✅ |
 
 Reads go straight to the platform database; every write is executed by jovi-mall. A suspension
 is only meaningful because jovi-mall's auth path refuses a non-active account, and a login
 identifier is only safe because that service owns its uniqueness index and its format rule.
 
-`users.read` is a Support-level lookup. The two writes are **Admin and above**.
+`users.read` is a Support-level lookup. **One write is Support-level too:** the bot-memory
+reset, which every level holds. Every other write here is **Admin and above**.
 
 ## What this surface deliberately does not offer
 
@@ -551,3 +555,92 @@ user may hold several roles, and `login_email` is the login identifier itself �
 `POST /auth/forgot-password` already mails a live reset token to, anonymously, with no check.
 Gating the administrator path more tightly than the path an attacker can drive would protect
 nothing.
+
+---
+
+# The customer bot's memory
+
+## `POST /users/:userId/bot-memory/reset`
+
+Make the customer bot start this person's next conversation fresh.
+
+**What a reset does, and what it does not.** The customer bot on WhatsApp and Telegram keeps a
+short memory of each customer's chat. A reset makes it forget that memory, so the customer's next
+conversation starts from nothing. Use it when the bot is confused by something it remembers and
+the customer complains. **It deletes no order, no message record and no account data.** Only
+what the bot remembers of the chat is reset.
+
+| | |
+|---|---|
+| **Permission** | `users.bot_memory.reset`, held by **all three levels: Developer, Admin and Support** |
+| **Transport** | **Delegated.** jovi-mall owns the bot's memory and performs the reset |
+| **Body** | Optional and **strict**. Unknown fields are a `400` |
+| **Audited** | ✅ `users.bot_memory.reset`, visible to every level in `GET /users/:userId/activity` |
+
+> **Why Support holds it, when it holds no other write on this page.** The complaint arrives as
+> a Support ticket, and this is the remedy. It is safe at that level because it touches nothing
+> the platform keeps about the person. The worst a wrong press can do is have one customer's
+> next message answered without memory of the last chat, which is how every new customer
+> starts. Contrast the two credential routes above: either one can hand an account to whoever
+> opens the message, so Support holds neither.
+
+> **The dashboard button is the owner's frontend work.** This page is the contract it builds
+> on. Show the button when `users.bot_memory.reset` is in `GET /permissions/me`, which today is
+> every administrator.
+
+### Request body
+
+| Field | Type | Rules |
+|---|---|---|
+| `reason` | string | **Optional.** Trimmed, 3–500 characters, recorded on the audit row. **Omit the key** rather than sending `""`, because an empty string is a `400` |
+
+An empty body works: `{}`, or no body at all. Cookie-authenticated calls send the CSRF header, as
+on every other write ([README](README.md)).
+
+```json
+{ "reason": "Customer says the bot keeps quoting an order they cancelled" }
+```
+
+### Response `200`
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "userId": "665f1c2a9b3e4a91c7d2e5f0",
+    "memoryEpoch": 4,
+    "resetAt": "2026-09-22T10:00:00.000Z"
+  },
+  "message": "Bot memory reset — the next conversation starts fresh"
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `userId` | string | The account whose bot memory was reset |
+| `memoryEpoch` | number | jovi-mall's counter for this person's bot memory. A reset starts a new epoch. **Treat it as opaque:** display it if useful, never compute with it |
+| `resetAt` | ISO-8601 | When jovi-mall performed the reset |
+
+Exactly these three fields. wi-admin names them one by one, so nothing else jovi-mall might add
+reaches the client. Two presses mean two resets and two audit rows, and neither does any harm.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Not a valid user id, a `reason` outside 3–500 characters (`""` included), or an unknown key |
+| 403 | `AUTHZ_PERMISSION_DENIED` | The caller's level lacks `users.bot_memory.reset`. No level lacks it today |
+| 404 | `NOT_FOUND` | No such user. Checked here **first**, before jovi-mall is called |
+| 4xx | `PLATFORM_OPERATION_REJECTED` | jovi-mall refused. Its status is kept, and its code is in `details.platformCode`. A `404` with this code means jovi-mall does not know the user or, during a rollout, does not serve the route yet |
+| 500 | `INTERNAL_SERVER_ERROR` | The audit trail could not record the attempt. **Nothing was reset:** jovi-mall is not called until the audit row exists |
+| 502 | `SERVICE_DEPENDENCY_UNAVAILABLE` | jovi-mall failed while doing it (a 5xx on its side) |
+| 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | jovi-mall is unreachable or not configured. A write is **never retried** automatically, so the reset may not have happened. Pressing again is safe |
+
+### Audit
+
+| Action | Sensitive | Records |
+|---|---|---|
+| `users.bot_memory.reset` | — | The actor, the target user, the optional `reason` (as `null` when none was given), the outcome, and on success `after: { memoryEpoch, resetAt }`. `before` is `null`: the account itself did not change |
+
+The row is written **before** jovi-mall is called. If it cannot be written, the reset does not
+happen.

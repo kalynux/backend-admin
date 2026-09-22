@@ -867,6 +867,35 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'users', action: 'write', phase: 6,
         summary: 'Send a customer a passwordless sign-in link over email, WhatsApp or Telegram',
     },
+    /**
+     * Making the customer bot forget one person's chat, so their next conversation starts
+     * fresh.
+     *
+     * ── Held by ALL THREE tiers, by the owner's decision (2026-09-22) ───────────
+     * It is the one `users.*` write Support holds, and the reason is the job. The complaint
+     * arrives as a ticket: the bot is confused by something it remembers from an earlier chat.
+     * The fix is this button. Withholding it would escalate every such ticket to a tier that
+     * knows nothing more about it.
+     *
+     * ── Why that is safe at tier 3, when the two entries above are not ──────────
+     * It changes nothing the platform keeps about the person. No order, message record,
+     * account field or credential is touched; only the bot's short conversation memory is
+     * dropped, and jovi-mall owns that mechanism. The worst a mistaken or hostile press can do
+     * is have one customer's next message answered with no memory of the last chat. Every new
+     * customer starts that way. Compare `users.password.reset` and `users.login_link.send`:
+     * either one can hand an account to whoever opens the message, which is why Support must
+     * never hold them.
+     *
+     * No flag, on purpose. It is not `destructive` in this catalog's sense, because no record
+     * is hard-deleted and nothing cascades. Flagging it would also make the boot assertion
+     * refuse it to tier 3, which would overrule the decision above. The audit row limits it
+     * instead: every reset is recorded with its actor, and a Support administrator can read
+     * that row.
+     */
+    'users.bot_memory.reset': {
+        family: 'users', action: 'write', phase: 6,
+        summary: 'Reset the customer bot’s conversation memory for one user, so their next chat starts fresh',
+    },
     'users.roles.manage': {
         family: 'users', action: 'write', phase: 6, destructive: true,
         summary: 'Add or remove a user’s platform roles',
