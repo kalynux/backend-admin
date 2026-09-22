@@ -74,15 +74,15 @@ Every permission that exists, with its metadata.
 
 | Field | Type | Notes |
 |---|---|---|
-| `families[]` | array | The 20 families in declaration order, each listing its permission names |
-| `permissions[]` | array | All 121 permissions |
+| `families[]` | array | The 21 families in declaration order, each listing its permission names |
+| `permissions[]` | array | All 124 permissions |
 | `permissions[].action` | `"read"` \| `"write"` \| `"approve"` | |
 | `permissions[].summary` | string | Written for an administrator, not an engineer — safe to render in a UI |
 | `permissions[].financial` etc. | boolean | The four sensitivity flags. **The dual-control *predicate* is never exposed** — only whether one exists |
 | `permissions[].scoped` | boolean | Whether reads behind it are additionally narrowed row-by-row |
 | `permissions[].phase` | number | The build phase. Includes permissions whose endpoints are **not built yet**, so the dashboard can be written against the finished vocabulary rather than a moving one |
 
-4 of the 118 have no endpoint yet — see the `†` markers in [permissions.md](permissions.md).
+4 of the 124 have no endpoint yet — see the `†` markers in [permissions.md](permissions.md).
 
 ---
 
@@ -140,17 +140,25 @@ you move someone from Support to Admin.
   "success": true,
   "data": {
     "tiers": [
-      { "tier": 1, "label": "Developer", "permissions": ["administrators.create", "…"], "total": 118 },
-      { "tier": 2, "label": "Admin",     "permissions": ["agencies.read", "…"],          "total": 101 },
-      { "tier": 3, "label": "Support",   "permissions": ["agencies.read", "…"],          "total": 31  }
+      { "tier": 1, "label": "Developer", "permissions": ["administrators.create", "…"], "total": 124 },
+      { "tier": 2, "label": "Admin",     "permissions": ["agencies.read", "…"],          "total": 104 },
+      { "tier": 3, "label": "Support",   "permissions": ["agencies.read", "…"],          "total": 38  }
     ]
   }
 }
 ```
 
 `permissions` is sorted alphabetically within each level. **These three totals move**: they were
-116 / 99 / 30 two rounds ago and are 118 / 101 / 31 today. Read them from this response, never from
-a constant — and if you need the numbers for prose, derive them with `npm run authz:matrix`.
+116 / 99 / 30 three rounds ago, 118 / 101 / 31, then 121 / 101 / 31, and are **124 / 104 / 38**
+today. Read them from this response, never from a constant — and if you need the numbers for
+prose, derive them with `npm run authz:matrix`.
+
+⚠ **The tier-3 total jumped by seven since 31, and only three of those are new permissions.**
+`users.bot_memory.reset`, `cod.triage` and `money.payouts.triage` were genuinely added. The other
+four — `cod.overview.read`, `cod.remittances.read`, `cod.deposits.read` and `money.payouts.read` —
+were **already granted in code** and merely mis-documented until 2026-09-22. A dashboard that
+hard-coded the old matrix was under-reporting what Support could reach, which is the argument for
+reading this response instead.
 
 ---
 

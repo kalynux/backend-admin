@@ -1,6 +1,8 @@
 # Permissions and administrator levels
 
-⚠ **Amended 2026-09-22: `users.bot_memory.reset` added, granted to all three levels** (the customer bot's memory reset, [users.md](users.md#the-customer-bots-memory)). Each level total and the matrix below moved by one. ⚠ **The matrix is still behind the code, and not because of this change.** ADR-024's `cod.triage` and `money.payouts.triage` have no rows here yet, and neither do four tier-3 grants (`cod.overview.read`, `cod.remittances.read`, `cod.deposits.read`, `money.payouts.read`). `npm run authz:matrix` gives **124 / 104 / 38** with this change included. The totals in the level table below count **this document's matrix**, so the two stay consistent with each other. Re-derive rather than quoting.
+⚠ **Re-measured against source 2026-09-22: 124 permissions across 21 families, tier totals 124 / 104 / 38.** This closes the gap the previous note flagged. ADR-024's `cod.triage` and `money.payouts.triage` now have rows, and four tier-3 grants that this document showed as withheld — `cod.overview.read`, `cod.remittances.read`, `cod.deposits.read`, `money.payouts.read` — are marked as granted, which is what the code has always said. **The matrix below now equals `npm run authz:matrix`**; the totals in the level table count it, so the two agree with the code rather than merely with each other.
+
+⚠ **Two consequences of that correction are not arithmetic, and a client mirroring this file must pick them up.** *"Support holds nothing financial"* is **no longer true without qualification** — `money.payouts.triage` is `financial` and tier 3 holds it under a named exemption — and the `any`-mode guard count moved from three to **four**, because `POST /money/payouts/:payoutId/reject` accepts `money.payouts.reject` **or** `money.payouts.triage`. Both are detailed below. Re-derive rather than quoting.
 
 ⚠ **Re-measured 2026-09-14 (ADR-023): 121 permissions across 21 families, tier totals 121 / 101 / 31.** The new family is `employees` (2 permissions) and the new name in `administrators` is `administrators.activate`; all three are **tier 1 only**, so tiers 2 and 3 are unchanged. Re-derive rather than quoting — `npm run authz:matrix`.
 
@@ -21,9 +23,9 @@ Design records: [`../../docs/ADR-003-GRANULAR-PERMISSIONS.md`](../../docs/ADR-00
 
 | Level (`tier`) | Label | Holds | Shape of the job |
 |---|---|---|---|
-| **1** | Developer | 122 of 122 | Everything, including the developer tools and every escalation-flagged action |
-| **2** | Admin | 102 of 122 | The operational tier — runs the platform day to day, including the money |
-| **3** | Support | 32 of 122 | Ticket work, the lookups needed to answer a ticket, editorial write on articles and bylines, and resetting the customer bot's memory of a chat. Nothing financial, nothing destructive, and publishing stays a level above |
+| **1** | Developer | 124 of 124 | Everything, including the developer tools and every escalation-flagged action |
+| **2** | Admin | 104 of 124 | The operational tier — runs the platform day to day, including the money |
+| **3** | Support | 38 of 124 | Ticket work, the lookups needed to answer a ticket, editorial write on articles and bylines, resetting the customer bot's memory of a chat, and **pre-screening** a declared COD handover or a payout request. Nothing destructive, publishing stays a level above, and the one `financial` permission it holds cannot send money anywhere |
 
 A level is an administrator's **entire** authorization state. `tier` appears on the profile
 returned by `GET /auth/me`.
@@ -109,7 +111,7 @@ and the boot-time grant assertion enforces the level restrictions below.
 
 | Flag | Meaning | Enforcement |
 |---|---|---|
-| `financial` | Moves money, changes a record money is computed from, **or discloses a payment destination** | **Refused to Support (tier 3) at boot** |
+| `financial` | Moves money, changes a record money is computed from, **or discloses a payment destination** | **Refused to Support (tier 3) at boot**, except the one name on a typed allowlist |
 | `escalation` | Changes who is an administrator or what level they hold | **Developer (tier 1) only, at boot** |
 | `destructive` | Irreversible, or reversible only by hand | Never granted by family expansion |
 | `dual-control` | Queued for a second administrator | Never granted by family expansion |
@@ -122,6 +124,24 @@ about yet.
 carries `financial`, because its *output* is the material a fraudulent payout instruction is
 built from. `money.earnings.read` and `cod.overview.read` are unflagged and belong that way —
 do not reach for `financial` merely because a read concerns money.
+
+**`money.payouts.triage` is the second edge case, and it is the only `financial` permission any
+Support administrator holds** (ADR-024). It is flagged honestly rather than conveniently: one of
+its two verdicts moves money between columns, because a payout request holds the owner's whole
+balance in `requested_balance` from the moment it opens and **rejecting releases that hold** back
+to `available_balance`. Endorsing touches nothing. Rather than mis-flag it to make the grant table
+accept it, the grant table takes a **named exemption** — `TIER_3_FINANCIAL_ALLOWLIST` in
+`tier-grants.ts`, a one-element array, so admitting a second name is a deliberate two-file change.
+The line it draws: **Support may release a hold back to the owner it belongs to, and may never
+send money out of the platform.** `money.payouts.mark_paid` is a separate permission tier 3 does
+not hold, and no combination of triage verdicts causes money to leave.
+
+⚠ **Its COD sibling `cod.triage` is deliberately NOT flagged, and the asymmetry is real.** A COD
+deposit or remittance sitting in `declared` holds **nothing** — only a *confirmed* one moves cash —
+so neither endorsing nor rejecting one is a money movement. It therefore needs no exemption and
+takes none, and being unflagged means `allInFamily('cod')` expands it to Admin without anyone
+typing it in by hand. It does **not** grant confirming: `cod.deposits.confirm` and
+`cod.remittances.confirm` stay `financial` and stay out of Support's reach.
 
 ### Four reads are audited, and three of them are held by Support
 
@@ -158,7 +178,7 @@ record were one decision, not two. See [ADR-020](../../docs/ADR-020-ADMIN-DATA-D
 ## The matrix
 
 ● granted  ·  not granted  ·  **†** = catalogued policy with **no endpoint built yet**
-(**4** of 122 permissions — down from 27, and the four that remain each have a written reason
+(**4** of 124 permissions — down from 27, and the four that remain each have a written reason
 below. The policy is decided ahead of the surface, deliberately.)
 
 ### `agents`
@@ -171,7 +191,7 @@ below. The policy is decided ahead of the surface, deliberately.)
 | `agents.kyc.review` | write | ● | ● | · | — | Approve or reject an agent’s identity documents — this is what lets an agent work |
 | `agents.tracking.set` | write | ● | ● | · | — | Override an agent’s live-location tracking permission |
 | `agents.tracking.read` | read | ● | ● | ● | — | Read an agent’s live tracking state and live position from geo-tracker — every position read is recorded in the audit trail |
-| `agents.cod_threshold.set` | write | ● | ● | · | financial | Set how much cash on delivery an agent may hold before remitting |
+| `agents.cod_threshold.set` | write | ● | ● | · | financial | Pin (or release) how much cash on delivery an agent may hold, overriding their plan |
 | `agents.transfer` | write | ● | ● | · | — | Move an agent from one delivery agency to another |
 | `agents.contracts.manage` | write | ● | ● | · | — | Suspend, reinstate or terminate one agent↔agency contract (never its terms) |
 
@@ -197,11 +217,11 @@ below. The policy is decided ahead of the surface, deliberately.)
 
 | Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
 |---|---|:-:|:-:|:-:|---|---|
-| `cod.overview.read` | read | ● | ● | · | — | View the cash-on-delivery position across the platform |
-| `cod.remittances.read` | read | ● | ● | · | — | View cash remittances declared by agencies |
+| `cod.overview.read` | read | ● | ● | ● | — | View the cash-on-delivery position across the platform |
+| `cod.remittances.read` | read | ● | ● | ● | — | View cash remittances declared by agencies |
 | `cod.remittances.confirm` | write | ● | ● | · | financial | Confirm a cash remittance — settles collections FIFO and unlocks the agency’s earnings |
 | `cod.remittances.reject` | write | ● | ● | · | financial | Reject a declared cash remittance |
-| `cod.deposits.read` | read | ● | ● | · | — | View cash deposits paid directly to the platform |
+| `cod.deposits.read` | read | ● | ● | ● | — | View cash deposits paid directly to the platform |
 | `cod.deposits.create` | write | ● | ● | · | financial | Record cash received directly from an agent or agency |
 | `cod.deposits.confirm` | write | ● | ● | · | financial | Confirm a recorded cash deposit |
 | `cod.deposits.reject` | write | ● | ● | · | financial | Reject a recorded cash deposit |
@@ -209,17 +229,50 @@ below. The policy is decided ahead of the surface, deliberately.)
 | `cod.discrepancies.resolve` | write | ● | ● | · | financial | Resolve a cash discrepancy, deciding who absorbs the shortfall |
 | `cod.holders.read` | read | ● | ● | · | — | View which agents and agencies are currently holding platform cash |
 | `cod.trust.adjust` | write | ● | ● | · | financial | Manually adjust an agent’s cash trust score, changing how much they may carry |
+| `cod.triage` | write | ● | ● | ● | — | Endorse a declared COD deposit or remittance as genuine — never confirms cash |
+
+**Support reaches four names here, and every one that moves cash is still Admin and above**
+(ADR-024). The three reads plus `cod.triage`; the seven `financial` writes — including
+`cod.deposits.create`, the one route that asserts money arrived — are unchanged. The line is
+narrower than "nothing here is Support's" and it is still a line: **a reviewer may say a declared
+handover looks genuine; only an Admin may say the cash arrived.**
+
+⛔ **Endorsement gates nothing.** An un-endorsed remittance is exactly as confirmable as an
+endorsed one, so do not disable a confirm control on a missing `triage`. And the triage surface is
+smaller than the table suggests: `POST /cod/deposits/:depositId/triage` reaches
+**platform-recipient deposits only**, because jovi-mall refuses an administrator on an
+agency-recipient deposit — that handover is counter-signed by the agency itself and the platform
+never saw the cash. Remittances are all administrator-confirmed, so triage applies to every one.
+Full contract in [cod.md](cod.md).
 
 ### `money`
 
 | Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
 |---|---|:-:|:-:|:-:|---|---|
 | `money.earnings.read` | read | ● | ● | · | — | View platform earnings and the earnings ledger |
-| `money.payouts.read` | read | ● | ● | · | — | View the payout request queue |
+| `money.payouts.read` | read | ● | ● | ● | — | View the payout request queue |
 | `money.payouts.mark_paid` | write | ● | ● | · | financial, dual-control | Mark a payout request as paid — records that money has left the platform |
 | `money.payouts.reject` | write | ● | ● | · | financial | Reject a payout request |
+| `money.payouts.triage` | write | ● | ● | ● | financial | Endorse a payout request as genuine, or reject it — never sends money |
 | `money.payouts.destination.read` | read | ● | ● | · | financial | Reveal the full payout destination (account or mobile number) on one payout request — every reveal is recorded in the audit trail |
 | `money.payments.read` | read | ● | ● | ● | — | View gateway payment and refund settlements |
+
+**Payout review is two stages and only one of them moves money** (ADR-024). `money.payouts.triage`
+opens `POST /money/payouts/:payoutId/triage`, the pre-screen: a reviewer endorses the request as
+genuine, which moves no money, changes no status and gates nothing. It is the only permission on
+this surface a Support administrator can **write** with, and — with `money.payouts.read` beside it
+— one of only three they hold here.
+
+⚠ **The rejection is not a second triage verdict; it is the same terminal write anyone else
+makes.** `POST /money/payouts/:payoutId/reject` accepts **either** `money.payouts.reject` **or**
+`money.payouts.triage`, so a reviewer and an approver reach one code path and close the record one
+way. That release is what makes the triage permission `financial` — see the § on the flags above,
+and the fourth `any`-mode row under Composite guards below.
+
+⛔ **Endorsement is advisory. A payout nobody has endorsed is exactly as payable as one that has
+been** — do not disable an approve control on a missing `triage`, because an empty Support queue
+must never stall payments. Sending stays `money.payouts.mark_paid`, which tier 3 does not hold and
+cannot reach. Full contract in [money.md](money.md).
 
 ### `orders`
 
@@ -276,7 +329,7 @@ own but **not** `publish`, which carries no flag (Phase 5 P-1).
 | Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
 |---|---|:-:|:-:|:-:|---|---|
 | `files.resolve` | read | ● | ● | ● | — | Resolve file ids returned by this service into names, types and URLs |
-| `files.content.read` | read | ● | ● | ● | **audited** | Open a file's contents, including delivery proofs and other private files |
+| `files.content.read` | read | ● | ● | ● | **audited** | Open a file’s contents, including delivery proofs and other private files — every read is recorded in the audit trail |
 | `files.orphans.read` | read | ● | ● | · | — | List uploaded files no record refers to |
 | `files.library.read` | read | ● | ● | · | — | Browse every uploaded file on the platform, with its owner and what uses it |
 | `files.upload` | write | ● | ● | · | — | Upload a file to the platform as the administration |
@@ -556,11 +609,13 @@ to see it. (This row was missing from the table until BR-012, and the count abov
 "Thirteen". admin-dash's own `ROUTE-MAP.md` and `MIGRATION-2026-08.md` § 8 — authored in
 `frontend/admin-dash/api-doc/`, not part of this tree — were both already right.)
 
-### The three `any`-mode guards
+### The four `any`-mode guards
 
-Three endpoints accept **any** of three permissions and return a *different projection* per
-level. The permission does not decide whether you get an answer; it decides how much of the
-answer you see.
+Four endpoints accept **any** of several permissions. **They are not all the same shape**, and the
+difference decides what a client should do with them.
+
+**Three are graded reads.** They return a *different projection* per level: the permission does not
+decide whether you get an answer, it decides how much of the answer you see.
 
 | Endpoint | Accepts any of | Contract |
 |---|---|---|
@@ -568,16 +623,37 @@ answer you see.
 | `GET /automation/failures` | `developer_tools.logs.read`, `system.automation.read`, `support.automation.lookup` | [automation.md](automation.md) |
 | `GET /automation/summary` | `developer_tools.logs.read`, `system.automation.read`, `support.automation.lookup` | [automation.md](automation.md) |
 
-**These three are not counted in the seventeen above**: seventeen `all`-mode guards plus three
-`any`-mode ones, **twenty** composite guards in all.
+**The fourth is a write, and it is not graded at all** — both holders perform exactly the same
+thing, with the same body and the same result.
 
-⚠ **This count has been stale three separate times, so derive it rather than quoting it.** It
+| Endpoint | Accepts any of | Contract |
+|---|---|---|
+| `POST /money/payouts/:payoutId/reject` | `money.payouts.reject`, `money.payouts.triage` | [money.md](money.md) |
+
+⚠ **Do not model that one as a graded read.** A reviewer's rejection is *terminal* — it closes the
+request and releases the hold back to the owner's available balance — and there is deliberately no
+second "reject" verdict on `/triage`, because two routes writing the same terminal state is how a
+record ends up closed two different ways. This is also the route that makes `money.payouts.triage`
+`financial`: without it accepting that name, the flag and its tier-3 exemption would be describing
+a capability the permission did not have.
+
+**These four are not counted in the seventeen above**: seventeen `all`-mode guards plus four
+`any`-mode ones, **twenty-one** composite guards in all.
+
+⚠ **This count has been stale four separate times, so derive it rather than quoting it.** It
 read *"Thirteen"* until BR-012 added `GET /contracts/:contractId`; *"fourteen `all`-mode plus the
-`any`-mode one"* until BR-018 added `GET /vendors/:vendorId/agencies`; and *"fifteen … sixteen in
-all"* until this re-count, which found that `GET /agents/:agentId/cod-allocation` and
+`any`-mode one"* until BR-018 added `GET /vendors/:vendorId/agencies`; *"fifteen … sixteen in
+all"* until a re-count found that `GET /agents/:agentId/cod-allocation` and
 `GET /agents/:agentId/assignability` had never been listed and that the automation pair had landed
-since. Every composite guard is a `permission(a, b)` or `anyPermission(a, b, c)` argument at a
-`defineRoute` call site, so the live route manifest can be counted instead of read.
+since; and *"three `any`-mode … twenty in all"* until 2026-09-22, when ADR-024's
+`POST /money/payouts/:payoutId/reject` turned out to have been an `anyPermission` site all along.
+Every composite guard is a `permission(a, b)` or `anyPermission(a, b, c)` argument at a
+`defineRoute` call site, so the live route manifest can be counted instead of read:
+
+```bash
+grep -rn "anyPermission(" src/modules/*/routes/*.ts          # the any-mode guards
+grep -rn "access: permission([^)]*,[^)]*)" src/modules/*/routes/*.ts   # the all-mode ones
+```
 
 ---
 
@@ -587,17 +663,29 @@ since. Every composite guard is a `permission(a, b)` or `anyPermission(a, b, c)`
 
 - The administrator directory — `administrators.*` is entirely withheld, which is why
   `audit.read` is scoped: without the scope the audit feed would be a side door onto it.
-- Anything `financial` — enforced at boot, not by review.
+- Anything `financial` — enforced at boot, not by review — **with exactly one exemption**,
+  `money.payouts.triage`, which is named in a one-element allowlist rather than waved through
+  by a weakened rule. Every other `financial` name is refused to tier 3 at boot as before.
 - `audit.export`, because an export is the precondition for a retention purge and so carries
   `destructive`.
-- Every write on users, vendors, agencies, agents, orders, shipments, COD, billing and money,
-  with one exception on users: `users.bot_memory.reset`, which touches no platform record and
-  is held by every level.
+- Anything `destructive`, without exception — there is no allowlist for that flag.
+- Every write on users, vendors, agencies, agents, orders, shipments, billing and money,
+  with three exceptions: `users.bot_memory.reset`, which touches no platform record;
+  `cod.triage`; and `money.payouts.triage`. The last two are **pre-screens** — they endorse a
+  declaration as genuine. Neither confirms cash and neither sends money.
 
-What Support **does** hold that surprises people: `money.payments.read` (gateway settlements).
-"Did my payment go through, and was I refunded" is one of the commonest ticket questions, and
-the sharp fields — raw gateway payload, payload hash, idempotency key — are removed by
-**projection**, for everyone, rather than by permission.
+What Support **does** hold that surprises people, and the reason is the same each time — the
+question arrives as a ticket, so refusing it to the tier that answers tickets escalates every one:
+
+- `money.payments.read` (gateway settlements). *"Did my payment go through, and was I refunded"*
+  is one of the commonest ticket questions, and the sharp fields — raw gateway payload, payload
+  hash, idempotency key — are removed by **projection**, for everyone, rather than by permission.
+- The three COD reads and `money.payouts.read`, so a reviewer can see the queue and the cash
+  position they are being asked to pre-screen against.
+- `cod.triage` and `money.payouts.triage` — the pre-screens themselves, and the latter is the
+  only `financial` permission this tier holds anywhere.
+- `agents.tracking.read`, `shipments.tracking.read` and `files.content.read`, all three of which
+  are **audited per disclosure and fail closed**. See the § on audited reads above.
 
 ### What Admin (tier 2) deliberately does **not** hold
 

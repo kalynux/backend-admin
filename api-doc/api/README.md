@@ -28,7 +28,7 @@ the dashboard's behalf and returns the result in its own envelope.
 | [../FRONTEND-CHANGELOG-phase-2-3.md](../FRONTEND-CHANGELOG-phase-2-3.md) | **What readiness Phases 2 and 3 changed for this dashboard.** No endpoint changed; Tracking Allow became reliable, the database screen's permanent phantom index drift is gone, and there is still no geo-tracker data door |
 | [../FRONTEND-CHANGELOG-phase-4-5.md](../FRONTEND-CHANGELOG-phase-4-5.md) | **What readiness Phases 4 and 5 changed for this dashboard — the largest instalment so far.** 🔴 Every note this service created was filed **public**; an expired approval was still approvable; `resolvedByUserId` → `resolvedBy`. Plus **three new modules** (`content`, `files` orphans + permanent delete, `messaging`), a deleted `GET /audit/legacy`, and the deleted `customers.*` permissions |
 | [errors.md](errors.md) | The complete error-code registry, the nine categories, and the exposure rule |
-| [permissions.md](permissions.md) | All 121 permissions, the three administrator levels, and the grant matrix |
+| [permissions.md](permissions.md) | All 124 permissions, the three administrator levels, and the grant matrix |
 | [health.md](health.md) | `/health/live`, `/health/ready` — unversioned probes |
 | [auth.md](auth.md) | `/auth` — login, MFA, refresh, sessions, own password |
 | [administrators.md](administrators.md) | `/administrators` — administrator management, levels, **the `pending` → `active` lifecycle**, suspension, sessions |

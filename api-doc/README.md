@@ -27,6 +27,7 @@ dashboard's behalf and returns the result in its own envelope.
 | [`FRONTEND-CHANGELOG-phase-2-3.md`](./FRONTEND-CHANGELOG-phase-2-3.md) | What readiness Phases 2–3 changed **for this dashboard**. |
 | [`FRONTEND-CHANGELOG-phase-4-5.md`](./FRONTEND-CHANGELOG-phase-4-5.md) | What readiness Phases 4–5 changed — the largest instalment, and the one with breaking renames in it. |
 | [`FRONTEND-CHANGELOG-agent-cod-pool-and-emergency-contact.md`](./FRONTEND-CHANGELOG-agent-cod-pool-and-emergency-contact.md) | 2026-09-21: the agent detail shows the **emergency contact**; the COD pool is automatic from plan × KYC; ⚠ `PUT /agents/:agentId/cod-threshold` now **requires `reason`** (it pins), with a new `…/release`; plans gain `maxCodPool`. |
+| [`FRONTEND-CHANGELOG-bot-memory-reset.md`](./FRONTEND-CHANGELOG-bot-memory-reset.md) | 2026-09-22: a button on a customer's page resets **the bot's memory of their chat** — `POST /users/:userId/bot-memory/reset`, the one `users.*` write **Support** holds. ⚠ Carries the permission re-mirror: the vocabulary moves **121 → 124** (with ADR-024's two `triage` names), so the dashboard's `permissions.types`, `permissions.pending` and `route-map` suites all move with it. |
 
 ## The four pages to read first
 
