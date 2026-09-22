@@ -433,11 +433,27 @@ export const AUDIT_CATALOG = Object.freeze({
         transport: 'delegated',
         summary: 'Changed whether an agent may be tracked',
     },
+    /**
+     * Since 2026-09-21 this PINS the pool rather than setting it — the pool is otherwise the
+     * agent's plan value once KYC is verified, 0 before — so the pin outranks the plan until
+     * released. The name is kept: it is the permission's name too, and renaming an audit
+     * action orphans every row already written under it.
+     */
     'agents.cod_threshold.set': {
         permission: 'agents.cod_threshold.set',
         target: 'agent',
         transport: 'delegated',
-        summary: 'Set how much cash on delivery an agent may hold before remitting',
+        summary: 'Pinned how much cash on delivery an agent may hold, overriding their plan',
+    },
+    /**
+     * Its own name for the `agents.unban` reason: jovi-mall clears the pin off the agent
+     * entirely, so this row is the only surviving record the pin existed.
+     */
+    'agents.cod_threshold.release': {
+        permission: 'agents.cod_threshold.set',
+        target: 'agent',
+        transport: 'delegated',
+        summary: 'Released an agent’s COD pool pin — back to their plan’s value',
     },
     'agents.ban': {
         permission: 'agents.ban',

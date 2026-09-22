@@ -110,7 +110,27 @@ export interface AgentReadModel extends Document {
             set_at?: Date;
             set_by_name?: string | null;
         } | null;
+        /**
+         * The pool's provenance (jovi-mall, 2026-09-21): the pool is plan × KYC verdict ×
+         * administrator pin, and these record which rule produced it. Written only by
+         * jovi-mall's `AgentCodPoolService` — this service reads them and never derives them,
+         * because re-deriving would mean a second copy of plan policy.
+         */
+        pool_ceiling?: number;
+        pool_source?: 'not_verified' | 'override' | 'plan';
+        pool_plan_code?: string | null;
+        pool_synced_at?: Date | null;
+        pool_override?: {
+            amount?: number;
+            reason?: string;
+            set_at?: Date;
+            set_by_user_id?: string | null;
+            set_by_source?: 'platform' | 'admin';
+            set_by_name?: string | null;
+        } | null;
     };
+    /** DETAIL ONLY — see the reversal note on `AGENT_DETAIL_EXTRAS`. */
+    emergency_contact?: { name?: string | null; phone?: string | null } | null;
     trust_signals?: {
         on_time_rate?: number | null;
         assignment_response_rate?: number | null;
@@ -189,12 +209,18 @@ const AGENT_LIST_PROJECTION = {
  * |                     | SECURITY comments on this field for the same reason.
  * | `payout_details`    | Bank account numbers and mobile-money MSISDNs, masked even for
  * |                     | the agent themselves.
- * | `emergency_contact` | A THIRD PARTY's name and phone. The only field on this document
- * |                     | whose subject is not on the platform at all, and the one most
- * |                     | likely to be added back by somebody who has not thought about it.
  * | `home_base.location`| A 2dsphere point on a person's residence. `home_base.label`
  * |                     | ("Douala — Akwa") answers the operational question without it.
  * | `wa`, `avatar_url`  | A messaging-channel binding, and a deprecated field.
+ *
+ * ── `emergency_contact` IS projected — on the DETAIL only, since 2026-09-21 ──
+ * It sat in the table above until the owner reversed it: the agent enters it in the agent
+ * app precisely so that somebody can be reached when something happens to them on a
+ * delivery, and the platform's own staff are who would make that call. It remains the one
+ * field here whose subject never joined the platform, which is why it is still NOT on the
+ * list projection — a directory of every courier's next-of-kin is a different disclosure
+ * from one agent's detail page. Enumerated as `name` + `phone`, not taken whole, for the
+ * whitelist reason below. See ADR-009 § Amendment 2026-09-21.
  *
  * ── `trust_signals` is enumerated, not taken whole ───────────────────────────
  * `trust_signals: 1` and the dotted paths below are DIFFERENT guarantees. The former lets
@@ -257,6 +283,21 @@ const AGENT_DETAIL_EXTRAS = {
     'last_known_tracking_state.last_place.source': 1,
     'last_known_tracking_state.last_place.resolved_at': 1,
     'cod.max_threshold': 1,
+    // The pool's provenance and the administrator's pin (2026-09-21). Enumerated, like the
+    // trust override: the pin's actor stamp is three fields, and all three are wanted.
+    'cod.pool_ceiling': 1,
+    'cod.pool_source': 1,
+    'cod.pool_plan_code': 1,
+    'cod.pool_synced_at': 1,
+    'cod.pool_override.amount': 1,
+    'cod.pool_override.reason': 1,
+    'cod.pool_override.set_at': 1,
+    'cod.pool_override.set_by_user_id': 1,
+    'cod.pool_override.set_by_source': 1,
+    'cod.pool_override.set_by_name': 1,
+    // DETAIL ONLY (owner reversal 2026-09-21) — see the note above this constant.
+    'emergency_contact.name': 1,
+    'emergency_contact.phone': 1,
     // The detail projection extends the list one, which already carries `trust_score` and
     // the four `trust_override` paths.
     'trust_signals.on_time_rate': 1,

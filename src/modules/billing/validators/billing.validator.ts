@@ -140,6 +140,11 @@ const PlanFields = z.object({
     /** What every future order's split multiplies by. Vendor plans only, in practice. */
     commissionPercent: z.number().min(0).max(100).nullable().optional(),
     maxUnterminatedShipments: z.number().int().min(0).nullable().optional(),
+    /**
+     * Agent plans: the COD pool a KYC-verified agent gets. ⚠ Unlike the limits above, `null`
+     * here means NO COD rather than unlimited — jovi-mall fails it closed.
+     */
+    maxCodPool: z.number().int().min(0).nullable().optional(),
     liveTrackingEnabled: z.boolean().optional(),
     isActive: z.boolean().optional(),
     sortOrder: z.number().int().optional(),

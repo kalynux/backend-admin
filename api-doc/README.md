@@ -26,6 +26,7 @@ dashboard's behalf and returns the result in its own envelope.
 | [`dashboard/`](./dashboard/) | The dashboard-facing working record: the [integration matrix](./dashboard/BACKEND-INTEGRATION-MATRIX.md), the [data-exposure register](./dashboard/DATA-EXPOSURE-REGISTER.md), the [frontend architecture assessment](./dashboard/FRONTEND-ARCHITECTURE-ASSESSMENT.md), and [`backend-requests/`](./dashboard/backend-requests/) — the request/answer channel between the dashboard team and this service. |
 | [`FRONTEND-CHANGELOG-phase-2-3.md`](./FRONTEND-CHANGELOG-phase-2-3.md) | What readiness Phases 2–3 changed **for this dashboard**. |
 | [`FRONTEND-CHANGELOG-phase-4-5.md`](./FRONTEND-CHANGELOG-phase-4-5.md) | What readiness Phases 4–5 changed — the largest instalment, and the one with breaking renames in it. |
+| [`FRONTEND-CHANGELOG-agent-cod-pool-and-emergency-contact.md`](./FRONTEND-CHANGELOG-agent-cod-pool-and-emergency-contact.md) | 2026-09-21: the agent detail shows the **emergency contact**; the COD pool is automatic from plan × KYC; ⚠ `PUT /agents/:agentId/cod-threshold` now **requires `reason`** (it pins), with a new `…/release`; plans gain `maxCodPool`. |
 
 ## The four pages to read first
 
@@ -34,7 +35,7 @@ dashboard's behalf and returns the result in its own envelope.
 | calling anything at all | [`api/README.md`](./api/README.md) — envelope, auth, CSRF, paging |
 | handling a failure | [`api/errors.md`](./api/errors.md) — the code registry, the nine categories, and what the client is allowed to show |
 | hiding or showing a control | [`api/permissions.md`](./api/permissions.md) — the permission list and the grant-by-tier matrix |
-| upgrading an existing screen | the two `FRONTEND-CHANGELOG-*` pages above |
+| upgrading an existing screen | the `FRONTEND-CHANGELOG-*` pages above, newest last |
 
 ---
 

@@ -188,6 +188,13 @@ export interface EntitlementsDto {
     maxActiveProducts: number | null;
     maxStorageBytes: number | null;
     maxUnterminatedShipments: number | null;
+    /**
+     * Agent plans only (2026-09-21): the COD pool this plan grants a KYC-verified agent.
+     * `null` for vendor/agency and for "no active plan". It is the plan's number — the
+     * agent's ACTUAL pool (after KYC, a pin, or their own lower choice) is on
+     * `GET /api/v1/agents/:id` → `cod.maxThreshold` / `cod.pool`.
+     */
+    maxCodPool: number | null;
     liveTrackingEnabled: boolean | null;
 }
 
@@ -498,6 +505,7 @@ function toSubscriptionDto(sources: AccountSources): SubscriptionDto {
             maxActiveProducts: sources.entitlements.maxActiveProducts ?? null,
             maxStorageBytes: sources.entitlements.maxStorageBytes ?? null,
             maxUnterminatedShipments: sources.entitlements.maxUnterminatedShipments ?? null,
+            maxCodPool: sources.entitlements.maxCodPool ?? null,
             liveTrackingEnabled: sources.entitlements.liveTrackingEnabled ?? null,
         },
     };

@@ -83,6 +83,7 @@ order somebody happened to create them.
         "maxStorageBytes": 5368709120,
         "commissionPercent": 8.5,
         "maxUnterminatedShipments": null,
+        "maxCodPool": null,
         "liveTrackingEnabled": null
       },
       "isActive": true,
@@ -230,6 +231,7 @@ Create a tier.
 | `maxStorageBytes` | integer \| null | Optional. `null` = unlimited |
 | `commissionPercent` | number \| null | Optional, 0–100. Vendor plans in practice |
 | `maxUnterminatedShipments` | integer \| null | Optional. `null` = unlimited |
+| `maxCodPool` | integer \| null | Optional. **Agent plans** (2026-09-21): the COD pool a KYC-verified agent on this tier may carry, in XAF. ⚠ **`null` = NO COD**, not unlimited, the one limit that fails closed. Values above 5 000 000 are clamped by jovi-mall. Editing it on an existing plan **re-syncs every agent immediately**; no reassignment needed |
 | `liveTrackingEnabled` | boolean | Optional |
 | `isActive` | boolean | Optional |
 | `sortOrder` | integer | Optional |

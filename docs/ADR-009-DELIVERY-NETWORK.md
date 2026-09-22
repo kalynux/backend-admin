@@ -4,6 +4,7 @@
 
 **Status:** Accepted · **Date:** 2026-08-11 · **Phase:** 9
 **Amends:** ADR-004's *Agents* row (read: HTTP → direct read)
+**Amended by:** [§ Amendment 2026-09-21](#amendment-2026-09-21--the-emergency-contact-is-shown-and-the-cod-pool-is-pinned-not-set): D-8's `emergency_contact` row is **reversed** (the detail now shows it), and `PUT /agents/:agentId/cod-threshold` now **pins** a pool that is otherwise derived from plan × KYC
 **Depends on:** ADR-004 (transports) · ADR-005 (list contract) · ADR-006 (the trail) ·
 ADR-007 (the `/users` precedent this copies) · ADR-008 (vendors, the same split taken further)
 
@@ -263,7 +264,7 @@ searches on a joined field, so it must join before it pages, and the call site s
 |---|---|
 | `legal_identity` | `drivers_license_number`, `national_id_number` — government identity documents |
 | `payout_details` | Bank account numbers and mobile-money MSISDNs; masked even for the owner |
-| `emergency_contact` | A **third party's** name and phone — the only field whose subject never joined the platform |
+| ~~`emergency_contact`~~ | ~~A **third party's** name and phone — the only field whose subject never joined the platform~~ **Reversed 2026-09-21**: projected on the DETAIL (never the list). See the amendment below |
 | `home_base.location` | A 2dsphere point on a person's residence |
 | `wa`, `avatar_url` | A messaging-channel binding; a deprecated field |
 | agency `payout_details`, `wa` | As above |
@@ -314,6 +315,52 @@ excluded for the same reason.
 - **jovi-mall's `auditLogger` is still a console stub** (D-5).
 - **No deactivation-reason column** on `delivery_agencies`. The reason lives in the audit
   row; add the column when an agency-facing screen renders it (ADR-006 D-7's test).
+
+## Amendment 2026-09-21 — the emergency contact is shown, and the COD pool is pinned, not set
+
+Two owner decisions, taken together on 2026-09-21 and landed in one change.
+
+### A-1 · `emergency_contact` moves from D-8's refusal list to the agent DETAIL
+
+**Decision (owner):** administrators must be able to see the emergency contact an agent enters in
+the agent app. It was asked as a bug ("the admin can't see it") and the answer was that it was
+withheld on purpose (D-8). The owner confirmed the reversal and chose the narrowest form offered:
+the detail read, under `agents.read`, never the directory.
+
+**Why the reversal is sound, and what D-8 still holds.** D-8's reason was not wrong: the contact is
+still the one field whose subject never joined the platform. But the field has exactly one purpose,
+which is that somebody can be reached when something happens to the agent on a delivery, and the
+people who would make that call are platform staff. Withholding it from them defeated the reason
+the agent was asked for it. What D-8's reasoning still buys:
+
+- **Detail only.** A directory of every courier's next-of-kin is a different disclosure from one
+  agent's page. `AGENT_LIST_PROJECTION` does not carry it and `test:agents` § 3 pins that.
+- **Enumerated** (`emergency_contact.name`, `emergency_contact.phone`), not taken whole, for the
+  whitelist reason D-8 gives for `trust_signals`.
+- **Not audited per read.** Considered and offered to the owner as an alternative (an audited
+  "reveal" with a reason, the `live-position` shape), and declined in favour of the plain detail
+  read. `agents.read` is held by Support, deliberately, because Support takes the call.
+- `role-profile.read.repository.ts` (`/users` detail) still refuses it: that screen asks "what is
+  this person on the platform", and the answer does not need a third party's phone.
+
+### A-2 · The COD pool is derived; `PUT /cod-threshold` now PINS it
+
+**Decision (owner):** an agent's COD pool comes from their plan (`max_cod_pool`: Free 500 000 ·
+Plus 1 000 000 · Pro 2 000 000), applies only once KYC is `verified` (`0` before), and is set
+automatically. The agent may lower it themselves. An administrator's value is kept as a
+**persistent override** that wins over the plan until cleared.
+
+The rule lives in jovi-mall (`agent-cod-pool.ts` / `AgentCodPoolService`), and this service still
+decides nothing about it (D-1). What changed on this surface:
+
+| Before | After |
+|---|---|
+| `PUT /agents/:agentId/cod-threshold { maxThreshold }` **set** the pool | `{ maxThreshold, reason }` **pins** it. `reason` required, a breaking body change made in both repos together |
+| no way back from an administrator's number | `POST /agents/:agentId/cod-threshold/release { reason }`, its own audit action `agents.cod_threshold.release`, for the `unban` reasoning (the release clears the pin off the agent, so the audit row is the only record it existed) |
+| detail showed `cod.maxThreshold` alone | plus `cod.pool` (ceiling, source, plan code, self-limited, synced-at) and `cod.poolOverride` |
+
+The pin does not outrank KYC, and the verdict write (`PUT /agents/:agentId/kyc`) now moves the pool
+in jovi-mall in the same request, so the reviewer sees `codPool` in its answer.
 
 ## Verification
 

@@ -326,6 +326,23 @@ t.assert('dates leave as ISO strings, never Date objects', () => {
     return dto.createdAt === '2026-01-01T00:00:00.000Z' && typeof dto.updatedAt === 'string';
 });
 
+/**
+ * `maxCodPool` (2026-09-21) — an agent plan's COD pool. Present-and-null on a vendor plan
+ * like every other inapplicable limit, carried through on an agent plan, and projected at
+ * the source: a whitelist that forgot it would render every agent tier as "no COD".
+ */
+t.assert('maxCodPool is in the limits block — null on a vendor plan, the number on an agent plan', () => {
+    const vendor = toPlanDto(planRow).limits;
+    const agent = toPlanDto({ ...planRow, role: 'agent', max_cod_pool: 500_000 } as typeof planRow).limits;
+    return 'maxCodPool' in vendor && vendor.maxCodPool === null && agent.maxCodPool === 500_000;
+});
+
+t.assert('…projected by the plan read repository, and mapped to max_cod_pool on the way out', () => {
+    const repo = readCode(SRC, 'modules', 'billing', 'repositories', 'pricing-plan.read.repository.ts');
+    const gateway = readCode(...BILLING_GATEWAY);
+    return repo.includes('max_cod_pool: 1') && gateway.includes("set('max_cod_pool', input.maxCodPool)");
+});
+
 const subscriptionRow = {
     _id: { toString: () => OID },
     owner_type: 'vendor',

@@ -37,6 +37,23 @@ interface PlatformThresholdAllocation {
     maxThreshold?: number;
     allocated?: number;
     headroom?: number;
+    overAllocatedBy?: number;
+    pool?: {
+        maxThreshold?: number;
+        ceiling?: number;
+        source?: string;
+        planCode?: string | null;
+        selfLimited?: boolean;
+        syncedAt?: string | null;
+    };
+    override?: {
+        amount?: number;
+        reason?: string;
+        setAt?: string;
+        setByUserId?: string | null;
+        setBySource?: string;
+        setByName?: string | null;
+    } | null;
     contracts?: {
         contractId?: string;
         agencyId?: string;
@@ -94,6 +111,35 @@ export interface CodAllocationDto {
     /** `maxThreshold - allocated`. Never negative. */
     headroom: number;
     /**
+     * `allocated - maxThreshold` when contracts hold MORE than the pool, else 0 (2026-09-21).
+     *
+     * Only an automatic change produces it — a plan downgrade, or a KYC verdict revoked —
+     * because the platform cannot rewrite what agencies agreed. While it is above 0 no slice
+     * can be raised, and jovi-mall caps every dispatch at the pool rather than at the larger
+     * slice. A screen should say so rather than show a headroom of 0 with no explanation.
+     */
+    overAllocatedBy: number;
+    /**
+     * Where `maxThreshold` comes from (2026-09-21) — the pool is the agent's plan value once
+     * KYC is `verified`, 0 while it is not, or an administrator's pin. `selfLimited` is the
+     * agent choosing to carry less than `ceiling`. `source` is for display, never a branch.
+     */
+    pool: {
+        ceiling: number;
+        source: 'not_verified' | 'override' | 'plan';
+        planCode: string | null;
+        selfLimited: boolean;
+        syncedAt: string | null;
+    };
+    /** The administrator's pin — reason and author included. `null` = no pin. */
+    override: {
+        amount: number;
+        reason: string | null;
+        setAt: string | null;
+        setByName: string | null;
+        setBySource: string | null;
+    } | null;
+    /**
      * One entry per allocating contract, unpaginated.
      *
      * Unpaginated is jovi-mall's shape and is kept: the list is bounded by one agent's
@@ -103,6 +149,10 @@ export interface CodAllocationDto {
      */
     contracts: CodAllocationSliceDto[];
 }
+
+type PoolSource = 'not_verified' | 'override' | 'plan';
+/** An unknown value reads as the fail-closed one — a pool of unknown origin is not assumed to be the plan. */
+const POOL_SOURCES: readonly PoolSource[] = ['not_verified', 'override', 'plan'];
 
 function num(value: unknown): number {
     return typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -127,6 +177,25 @@ export function toCodAllocationDto(
         maxThreshold: num(allocation.maxThreshold),
         allocated: num(allocation.allocated),
         headroom: num(allocation.headroom),
+        overAllocatedBy: num(allocation.overAllocatedBy),
+        pool: {
+            ceiling: num(allocation.pool?.ceiling),
+            source: POOL_SOURCES.includes(allocation.pool?.source as PoolSource)
+                ? (allocation.pool?.source as PoolSource)
+                : 'not_verified',
+            planCode: str(allocation.pool?.planCode),
+            selfLimited: allocation.pool?.selfLimited === true,
+            syncedAt: str(allocation.pool?.syncedAt),
+        },
+        override: allocation.override && typeof allocation.override.amount === 'number'
+            ? {
+                amount: allocation.override.amount,
+                reason: str(allocation.override.reason),
+                setAt: str(allocation.override.setAt),
+                setByName: str(allocation.override.setByName),
+                setBySource: str(allocation.override.setBySource),
+            }
+            : null,
         contracts: (allocation.contracts ?? []).map((slice) => {
             const agencyId = str(slice.agencyId);
             const agency = agencyId ? agencies.get(agencyId) : undefined;

@@ -29,6 +29,7 @@ Design record: [`../../docs/ADR-009-DELIVERY-NETWORK.md`](../../docs/ADR-009-DEL
 | `PUT` | `/agents/:agentId/kyc` | `agents.kyc.review` | **delegated** | ✅ |
 | `PUT` | `/agents/:agentId/tracking` | `agents.tracking.set` | **delegated** | ✅ |
 | `PUT` | `/agents/:agentId/cod-threshold` | `agents.cod_threshold.set` | **delegated** | ✅ |
+| `POST` | `/agents/:agentId/cod-threshold/release` | `agents.cod_threshold.set` | **delegated** | ✅ |
 | `POST` | `/agents/:agentId/ban` | `agents.ban` | **delegated** | ✅ |
 | `POST` | `/agents/:agentId/unban` | `agents.ban` | **delegated** | ✅ |
 
@@ -54,7 +55,7 @@ failed audit write means nothing is disclosed. See
 | ~~**A live position**~~ | **No longer true — Phase 6.I built it** ([ADR-020](../../docs/ADR-020-ADMIN-DATA-DOOR.md)). `GET /agents/:agentId/live-position`, its own permission, audited on every call. Struck through rather than deleted because "wi-admin has no geo-tracker data door" was the standing answer for three phases and is still what most of this repository says |
 | **Editing contract terms** | A live contract's terms change by proposal between the two parties, never by edit — an administrator imposing a fee split neither party proposed would bind an agent to a number nobody agreed. `transfer` moves a relationship rather than rewriting one |
 | **Approving a pending contract** | Same reasoning, sharper: a contract with `terms.proposedBy: null` exists precisely because nobody has stated terms, so approving it binds an agent to a default that pays **zero** |
-| **Adjusting a contract's `cod.threshold`** | A third reason, not the same one. It is that contract's slice of a pool bounded across every allocating contract, `0` **blocks all COD** rather than meaning "no limit", and the arithmetic is jovi-mall's. `PUT /agents/:agentId/cod-threshold` sets the agent's whole pool and is the lever that exists |
+| **Adjusting a contract's `cod.threshold`** | A third reason, not the same one. It is that contract's slice of a pool bounded across every allocating contract, `0` **blocks all COD** rather than meaning "no limit", and the arithmetic is jovi-mall's. `PUT /agents/:agentId/cod-threshold` **pins** the agent's whole pool (since 2026-09-21 the pool is otherwise automatic, from the agent's plan) and is the lever that exists |
 
 > **Freezing and ending a relationship ARE offered**, as of the dashboard-request round —
 > `POST /contracts/:contractId/{suspend,reinstate,terminate}`, documented in
@@ -192,6 +193,7 @@ Every list field, plus:
       "photoFileId": "6612aabbccddeeff00112233"
     },
     "homeBase": { "label": "Bonapriso, Douala", "serviceRadiusKm": 12 },
+    "emergencyContact": { "name": "Ada Mbarga", "phone": "+237670000002" },
 
     "kyc": {
       "status": "verified",
@@ -238,7 +240,15 @@ Every list field, plus:
       "computedTrustScore": 87,
       "trustSource": "computed",
       "trustOverride": null,
-      "maxThreshold": 250000
+      "maxThreshold": 500000,
+      "pool": {
+        "ceiling": 500000,
+        "source": "plan",
+        "planCode": "agent_free",
+        "selfLimited": false,
+        "syncedAt": "2026-09-21T09:30:00.000Z"
+      },
+      "poolOverride": null
     },
     "trustSignals": {
       "onTimeRate": 0.94,
@@ -288,6 +298,47 @@ that a human pinned it, nor what releasing it would do. The same four now appear
 > a sort ordering is not worth the write cost — but do not describe that column as "effective".
 
 ---
+
+### `emergencyContact`: new on 2026-09-21, detail only
+
+The person the agent named to be called if something happens to them, entered in the agent app
+(`PATCH /api/agent/profile` → `emergency_contact`). `{ name, phone }` or **`null`** when the agent
+has not given one (never `{ name: null, phone: null }`). `phone` is E.164, as entered.
+
+⚠ **It was deliberately withheld until the owner reversed that decision on 2026-09-21**
+([ADR-009 § Amendment 2026-09-21](../../docs/ADR-009-DELIVERY-NETWORK.md)). It is still the one
+field on this record whose subject never joined the platform, so:
+
+- it is on **this detail only**, never on `GET /agents` rows, and `test:agents` pins that;
+- it is under `agents.read`, so **Support sees it too**. That is intended: Support is who takes
+  the call when something happens on a delivery;
+- render it as a contact card with a click-to-call, not as editable data. There is no admin
+  write to it; the agent owns it.
+
+### `cod.pool` and `cod.poolOverride`: where the COD pool comes from (2026-09-21)
+
+The agent's COD pool (`cod.maxThreshold`) is **no longer a number an administrator types in**. jovi-mall
+derives it:
+
+| `cod.pool.source` | `cod.pool.ceiling` | When |
+|---|---|---|
+| `not_verified` | `0` | The agent's KYC is not `verified`. Always wins, even over a pin |
+| `override` | the pin's `amount` | An administrator pinned a value (`PUT …/cod-threshold`) |
+| `plan` | the plan's `max_cod_pool` | Otherwise. Free 500 000 · Plus 1 000 000 · Pro 2 000 000 |
+
+| Field | Meaning |
+|---|---|
+| `cod.maxThreshold` | **What every gate acts on.** At most `pool.ceiling`; lower when the agent chose to carry less |
+| `cod.pool.ceiling` | The most `maxThreshold` can be right now |
+| `cod.pool.source` | Which row of the table above produced it. **Display only, never branch on it** |
+| `cod.pool.planCode` | The plan read, when `source` is `plan`; else `null` |
+| `cod.pool.selfLimited` | `true` → the agent chose to carry less than the ceiling (`PUT /api/agent/cod/pool`) |
+| `cod.pool.syncedAt` | When jovi-mall last wrote the pool. `null` = an agent from before 2026-09-21 that has not been synced yet: its `maxThreshold` is the OLD number until the `agent-cod-pool-reconcile` worker runs |
+| `cod.poolOverride` | The pin, `{ amount, reason, setAt, setByName, setBySource }`, or `null`. A pin survives plan changes and an unverified spell, and applies again on re-verification |
+
+A KYC verdict moves the pool immediately (`PUT /agents/:agentId/kyc` now answers with a `codPool`
+block beside `kyc`), a plan change resets it, and editing a plan's `maxCodPool` re-syncs every
+agent. Nothing here needs a follow-up write.
 
 ### ⚠️ `tracking.lastKnown` is a stale business mirror, not a live position
 
@@ -555,6 +606,15 @@ endpoint's subject there has no reason to join.
     "maxThreshold": 500000,
     "allocated": 350000,
     "headroom": 150000,
+    "overAllocatedBy": 0,
+    "pool": {
+      "ceiling": 500000,
+      "source": "plan",
+      "planCode": "agent_free",
+      "selfLimited": false,
+      "syncedAt": "2026-09-21T09:30:00.000Z"
+    },
+    "override": null,
     "contracts": [
       {
         "contractId": "6661aabbccddeeff00112233",
@@ -575,7 +635,10 @@ endpoint's subject there has no reason to join.
 
 | Field | Notes |
 |---|---|
-| `maxThreshold` | The agent's **global** pool. Defaults to `0`, so a new agent can carry no COD at all until it is set |
+| `maxThreshold` | The agent's **global** pool. Since 2026-09-21 it is automatic: `0` until the agent's KYC is verified, then their plan's value, or an administrator's pin. See `pool` |
+| `overAllocatedBy` | `allocated - maxThreshold` when contracts hold **more** than the pool, else `0`. Only an automatic change produces it (plan downgrade, KYC withdrawn). While above 0 no slice can be raised, and jovi-mall caps every dispatch at the pool. Show it; a bare `headroom: 0` does not explain itself |
+| `pool` | `{ ceiling, source, planCode, selfLimited, syncedAt }`, the same block as `cod.pool` on the agent detail |
+| `override` | The pin, `{ amount, reason, setAt, setByName, setBySource }`, or `null` |
 | `allocated` | Sum of `threshold` across the **allocating** contracts listed. `active`, `paused` and `suspended` all consume the pool — **pausing does not free capacity**, because the agent may still be holding that agency's cash. `pending` and `deactivated` do not, and are absent from `contracts` |
 | `headroom` | `maxThreshold - allocated`. Never negative |
 | `contracts[].status` | ⚠ **The CONTRACT's status** |
@@ -1040,7 +1103,15 @@ switch tracking off mid-shipment is the opposite situation and lives in geo-trac
 
 ## `PUT /agents/:agentId/cod-threshold`
 
-Set the agent's **whole COD pool** — the ceiling every contract sub-allocates from.
+**Pin** the agent's **whole COD pool**, the ceiling every contract sub-allocates from, to a value that
+replaces their plan's until released.
+
+> ⚠ **Changed 2026-09-21. BREAKING: `reason` is now required.** The pool is no longer set here: it
+> is `0` until the agent's KYC is verified and then their plan's `max_cod_pool`. This write pins a
+> value that outranks the plan **in both directions** (a trusted agent on the free tier, a risky
+> one on a paid tier) until `POST …/cod-threshold/release`. A pin does **not** outrank KYC: on an
+> unverified agent it is stored and the pool stays `0` until the verdict. Pinning resets any lower
+> choice the agent had made.
 
 | | |
 |---|---|
@@ -1051,14 +1122,15 @@ Set the agent's **whole COD pool** — the ceiling every contract sub-allocates 
 
 | Field | Type | Rules |
 |---|---|---|
-| `maxThreshold` | number | Required. Finite and non-negative |
+| `maxThreshold` | integer | Required. Non-negative |
+| `reason` | string | **Required** (new). 3–500 characters, trimmed. Recorded on the pin and in the audit row |
 
-Bounds beyond that are **not** checked here. jovi-mall owns the min/max and, more importantly,
-owns the rule this write can actually fail: **lowering the pool below what its contracts have
-already allocated is refused there**, and that check needs the contracts.
+Bounds beyond that are **not** checked here. jovi-mall owns the min/max (0–5 000 000) and, more
+importantly, owns the rule this write can actually fail: **leaving the pool below what its
+contracts have already allocated is refused there**, and that check needs the contracts.
 
 ```json
-{ "maxThreshold": 250000 }
+{ "maxThreshold": 750000, "reason": "Trusted long-standing agent; approved by ops lead" }
 ```
 
 ### Response (200)
@@ -1070,12 +1142,15 @@ already allocated is refused there**, and that check needs the contracts.
   "success": true,
   "data": {
     "agentId": "665b…",
-    "maxThreshold": 250000,
+    "maxThreshold": 750000,
     "allocated": 180000,
-    "headroom": 70000,
+    "headroom": 570000,
+    "overAllocatedBy": 0,
+    "pool": { "maxThreshold": 750000, "ceiling": 750000, "source": "override", "planCode": null, "selfLimited": false, "syncedAt": "2026-09-21T10:02:00.000Z" },
+    "override": { "amount": 750000, "reason": "Trusted long-standing agent; approved by ops lead", "setAt": "2026-09-21T10:02:00.000Z", "setByUserId": "66a0…", "setBySource": "admin", "setByName": "Awa N." },
     "contracts": [ /* per-contract slices */ ]
   },
-  "message": "COD threshold updated"
+  "message": "COD pool pinned"
 }
 ```
 
@@ -1091,13 +1166,54 @@ and therefore recorded `null` on every row of the one write on this surface flag
 
 | Status | Code | When |
 |---|---|---|
-| 400 | `VALIDATION_ERROR` | Negative or non-finite |
+| 400 | `VALIDATION_ERROR` | Missing `reason`, negative, or not an integer |
 | 404 | `NOT_FOUND` | |
-| 409 / 422 | `PLATFORM_OPERATION_REJECTED` | Below what contracts have allocated, or outside the platform's bounds. `details.platformCode` names which |
+| 422 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode`: `AGENT_COD_THRESHOLD_BELOW_ALLOCATED` (the pool would fall below what contracts hold; jovi-mall's `details` name the contracts) or `AGENT_COD_THRESHOLD_OUT_OF_BOUNDS` |
+| 409 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: AGENT_COD_POOL_CONFLICT`: the pool changed between read and write. Re-read and retry |
 
 ### Audit
 
-`agents.cod_threshold.set`
+`agents.cod_threshold.set`: payload `{ maxThreshold, reason }`, and the before/after carry
+`codMaxThreshold` and `codPoolOverride`.
+
+---
+
+## `POST /agents/:agentId/cod-threshold/release`
+
+**Release** the pin. The agent goes back to their plan's value, or `0` while unverified. **New on
+2026-09-21.**
+
+| | |
+|---|---|
+| **Permission** | `agents.cod_threshold.set`, the same as the pin |
+| **Body** | **Strict** |
+
+### Request body
+
+| Field | Type | Rules |
+|---|---|---|
+| `reason` | string | **Required**, 3–500 characters |
+
+```json
+{ "reason": "Review closed; back to the plan value" }
+```
+
+### Response (200)
+
+The same `CodAllocation` as the pin, with `override: null`, `pool.source` back to `"plan"` (or
+`"not_verified"`) and `message: "COD pool pin released"`.
+
+### Errors
+
+As for the pin. ⚠ Note one case: releasing is **refused** with `AGENT_COD_THRESHOLD_BELOW_ALLOCATED`
+when the plan's value is below what contracts already hold. The pin was holding the pool up, and
+releasing it would over-commit it. Lower the contract slices first, or pin a smaller value instead.
+
+### Audit
+
+`agents.cod_threshold.release`, its **own** action (the `ban` / `unban` reasoning). jovi-mall
+clears the pin off the agent entirely, so this row is the only record that it existed. Filter the
+agent activity feed on it with `?action=agents.cod_threshold.release`.
 
 ---
 

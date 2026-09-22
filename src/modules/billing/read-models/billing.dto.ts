@@ -56,7 +56,9 @@ export interface PlanDto {
      * `price` and `name`, it reads as a plan with half its fields missing.
      *
      * `null` is jovi-mall's own "unlimited" for every one of them except
-     * `liveTrackingEnabled`, which is a boolean the entitlement service reads directly.
+     * `liveTrackingEnabled`, which is a boolean the entitlement service reads directly —
+     * and ⚠ `maxCodPool`, where `null` means **no COD at all** (it is cash, so it fails
+     * closed). Render `null` there as "0 — no cash on delivery", never as "unlimited".
      */
     limits: {
         maxActiveProducts: number | null;
@@ -64,6 +66,13 @@ export interface PlanDto {
         /** What every future order's split multiplies by. The reason plan detail exists. */
         commissionPercent: number | null;
         maxUnterminatedShipments: number | null;
+        /**
+         * Agent plans only (2026-09-21): the COD pool a KYC-VERIFIED agent on this tier may
+         * carry across every agency, in XAF. Seeded Free 500 000 · Plus 1 000 000 ·
+         * Pro 2 000 000. ⚠ `null` = NO COD, the one limit here that is not "unlimited".
+         * Editing it in place re-syncs every agent in jovi-mall — no reassignment needed.
+         */
+        maxCodPool: number | null;
         liveTrackingEnabled: boolean | null;
     };
     /** Whether the tier is purchasable. A defined-but-not-yet-sold tier is a real state. */
@@ -103,6 +112,7 @@ export function toPlanDto(plan: PricingPlanReadModel): PlanDto {
             maxStorageBytes: plan.max_storage_bytes ?? null,
             commissionPercent: plan.commission_percent ?? null,
             maxUnterminatedShipments: plan.max_unterminated_shipments ?? null,
+            maxCodPool: plan.max_cod_pool ?? null,
             liveTrackingEnabled: plan.live_tracking_enabled ?? null,
         },
         // `?? true` and `?? 0` are the schema's own defaults, applied to a legacy row

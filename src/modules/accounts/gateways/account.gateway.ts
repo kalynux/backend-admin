@@ -52,6 +52,8 @@ export interface PlatformEntitlements {
     maxStorageBytes?: number | null;
     commissionPercent?: number | null;
     maxUnterminatedShipments?: number | null;
+    /** Agent plans (2026-09-21). `null` for other roles and for "no active plan". */
+    maxCodPool?: number | null;
     liveTrackingEnabled?: boolean | null;
     [key: string]: unknown;
 }

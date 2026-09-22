@@ -35,6 +35,7 @@ import {
     SearchAgentsQuery,
     SetAgentStatusBody,
     SetThresholdBody,
+    ReleaseThresholdBody,
     SetTrackingBody,
     TrackingReadQuery,
     TransferAgentBody,
@@ -210,6 +211,22 @@ function toAgentDetailDto(agent: AgentReadModel) {
             // `home_base.location` is NOT here and is not projected. It is a 2dsphere point
             // on a person's residence; the label answers the operational question.
         },
+        /**
+         * The person the agent named to be called if something happens to them — entered in
+         * the agent app (`PATCH /api/agent/profile` → `emergency_contact`). `null` when they
+         * have not given one; never `{ name: null, phone: null }`.
+         *
+         * ⚠ **On the DETAIL only, and new on 2026-09-21** — it was deliberately withheld
+         * until the owner reversed that (ADR-009 § Amendment 2026-09-21). It is still the one
+         * field on this record whose subject never joined the platform, which is why the
+         * directory row does not carry it. `phone` is E.164 as the agent entered it.
+         */
+        emergencyContact: agent.emergency_contact?.name || agent.emergency_contact?.phone
+            ? {
+                  name: agent.emergency_contact.name ?? null,
+                  phone: agent.emergency_contact.phone ?? null,
+              }
+            : null,
         kyc: {
             status: kyc.status ?? null,
             reference: kyc.reference ?? null,
@@ -366,6 +383,35 @@ function toAgentDetailDto(agent: AgentReadModel) {
                   }
                 : null,
             maxThreshold: agent.cod?.max_threshold ?? null,
+            /**
+             * Where `maxThreshold` comes from (jovi-mall, 2026-09-21). The pool is no longer a
+             * number an administrator types in: it is the agent's plan value once their KYC
+             * is `verified` (Free 500 000), `0` while it is not, or an administrator's PIN,
+             * which replaces the plan's value until released. The agent may carry LESS than
+             * `ceiling` — `selfLimited` says they chose to.
+             *
+             * `source` is for display, never a branch: `not_verified` · `override` · `plan`.
+             * An agent written before the rule reads `ceiling: 0, source: 'not_verified'`
+             * until jovi-mall's nightly reconcile (or a manual trigger of
+             * `agent-cod-pool-reconcile`) converges them — `syncedAt: null` is that state.
+             */
+            pool: {
+                ceiling: agent.cod?.pool_ceiling ?? 0,
+                source: agent.cod?.pool_source ?? 'not_verified',
+                planCode: agent.cod?.pool_plan_code ?? null,
+                selfLimited: (agent.cod?.max_threshold ?? 0) < (agent.cod?.pool_ceiling ?? 0),
+                syncedAt: toIso(agent.cod?.pool_synced_at),
+            },
+            /** The administrator's pin, with its reason and author. `null` = none. */
+            poolOverride: agent.cod?.pool_override
+                ? {
+                      amount: agent.cod.pool_override.amount ?? null,
+                      reason: agent.cod.pool_override.reason ?? null,
+                      setAt: toIso(agent.cod.pool_override.set_at),
+                      setByName: agent.cod.pool_override.set_by_name ?? null,
+                      setBySource: agent.cod.pool_override.set_by_source ?? null,
+                  }
+                : null,
         },
         /**
          * ⚠ **Named-field mapping as of the dashboard-request round**, for the same reason
@@ -427,6 +473,8 @@ function toAuditState(agent: AgentReadModel): Record<string, unknown> {
         banned: agent.platform_ban?.banned === true,
         trackingAllowed: agent.tracking?.allowed === true,
         codMaxThreshold: agent.cod?.max_threshold ?? null,
+        // The pin, so a release's audit row records what was released.
+        codPoolOverride: agent.cod?.pool_override?.amount ?? null,
     };
 }
 
@@ -844,7 +892,10 @@ export class AgentController {
         });
     });
 
-    /** PUT /api/v1/agents/:agentId/cod-threshold — the whole pool every contract slices. */
+    /**
+     * PUT /api/v1/agents/:agentId/cod-threshold — PIN the whole pool every contract slices.
+     * Replaces the agent's plan value until released; does not outrank KYC.
+     */
     static setCodThreshold = asyncHandler(async (req: Request, res: Response) => {
         const body = req.body as SetThresholdBody;
         const before = await loadOr404(req.params.agentId);
@@ -852,11 +903,30 @@ export class AgentController {
         const updated = await gateway.setCodThreshold(
             req.params.agentId,
             body.maxThreshold,
+            body.reason,
             toAuditState(before),
             actorContextOf(req),
         );
 
-        sendSuccess(res, updated, { message: 'COD threshold updated' });
+        sendSuccess(res, updated, { message: 'COD pool pinned' });
+    });
+
+    /**
+     * POST /api/v1/agents/:agentId/cod-threshold/release — back to the plan's value (0 while
+     * unverified). Its own route and audit action, for the `unban` reason.
+     */
+    static releaseCodThreshold = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as ReleaseThresholdBody;
+        const before = await loadOr404(req.params.agentId);
+
+        const updated = await gateway.releaseCodThreshold(
+            req.params.agentId,
+            body.reason,
+            toAuditState(before),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, updated, { message: 'COD pool pin released' });
     });
 
     /**
