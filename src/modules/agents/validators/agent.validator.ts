@@ -210,17 +210,30 @@ export const SetTrackingSchema = z
     });
 
 /**
- * Set the agent's whole COD pool, which every contract sub-allocates from.
+ * PIN the agent's whole COD pool, which every contract sub-allocates from.
  *
- * The bounds are NOT validated here beyond being a non-negative finite number.
- * jovi-mall owns `COD_THRESHOLD_MIN`/`MAX` and, more importantly, owns the rule this write
- * can actually fail: lowering the pool below what its contracts have already allocated is
- * refused there, and that check needs the contracts. A copy of the bounds here would be a
- * second definition of a limit this service does not own, drifting silently.
+ * Since 2026-09-21 the pool is derived in jovi-mall (plan value once KYC is `verified`, 0
+ * otherwise), so this no longer SETS it — it pins a value that replaces the plan's until
+ * released (`POST …/cod-threshold/release`). `reason` is required, as on every other write
+ * here that outranks a rule.
+ *
+ * The bounds are NOT validated here beyond being a non-negative integer. jovi-mall owns
+ * `COD_THRESHOLD_MIN`/`MAX` and, more importantly, owns the rule this write can actually
+ * fail: leaving the pool below what its contracts have already allocated is refused there,
+ * and that check needs the contracts. A copy of the bounds here would be a second
+ * definition of a limit this service does not own, drifting silently.
  */
 export const SetThresholdSchema = z
     .object({
-        maxThreshold: z.number().finite().nonnegative(),
+        maxThreshold: z.number().int().nonnegative(),
+        reason: reasonText('A reason is required to pin an agent’s COD pool'),
+    })
+    .strict();
+
+/** Release the pin — the agent returns to their plan's value (0 while unverified). */
+export const ReleaseThresholdSchema = z
+    .object({
+        reason: reasonText('A reason is required to release an agent’s COD pool pin'),
     })
     .strict();
 
@@ -255,6 +268,7 @@ export type SetAgentStatusBody = z.infer<typeof SetAgentStatusSchema>;
 export type ReviewAgentKycBody = z.infer<typeof ReviewAgentKycSchema>;
 export type SetTrackingBody = z.infer<typeof SetTrackingSchema>;
 export type SetThresholdBody = z.infer<typeof SetThresholdSchema>;
+export type ReleaseThresholdBody = z.infer<typeof ReleaseThresholdSchema>;
 export type BanAgentBody = z.infer<typeof BanAgentSchema>;
 export type TransferAgentBody = z.infer<typeof TransferAgentSchema>;
 

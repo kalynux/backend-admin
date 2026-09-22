@@ -180,7 +180,7 @@ export const PERMISSION_CATALOG = Object.freeze({
     },
     'agents.cod_threshold.set': {
         family: 'agents', action: 'write', phase: 5, financial: true,
-        summary: 'Set how much cash on delivery an agent may hold before remitting',
+        summary: 'Pin (or release) how much cash on delivery an agent may hold, overriding their plan',
     },
     'agents.transfer': {
         family: 'agents', action: 'write', phase: 5,

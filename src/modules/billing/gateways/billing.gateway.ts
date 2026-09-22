@@ -180,6 +180,7 @@ function toPlatformPlanBody(input: Partial<CreatePlanBody>): Record<string, unkn
     set('max_storage_bytes', input.maxStorageBytes);
     set('commission_percent', input.commissionPercent);
     set('max_unterminated_shipments', input.maxUnterminatedShipments);
+    set('max_cod_pool', input.maxCodPool);
     set('live_tracking_enabled', input.liveTrackingEnabled);
     set('is_active', input.isActive);
     set('sort_order', input.sortOrder);

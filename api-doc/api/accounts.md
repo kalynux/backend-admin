@@ -130,6 +130,7 @@ assembling it from four calls would render the halves at different moments.
         "maxActiveProducts": null,
         "maxStorageBytes": null,
         "maxUnterminatedShipments": 4,
+        "maxCodPool": 500000,
         "liveTrackingEnabled": true
       }
     },

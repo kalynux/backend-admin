@@ -46,6 +46,7 @@ import {
     SearchAgentsQuerySchema,
     SetAgentStatusSchema,
     SetThresholdSchema,
+    ReleaseThresholdSchema,
     SetTrackingSchema,
     TrackingPresenceQuerySchema,
     TrackingReadQuerySchema,
@@ -227,14 +228,18 @@ t.assert('the contract-event filter is scoped to one side only', () => {
 t.section('3. What leaves the database');
 
 /**
- * The five fields that must never be projected, each for its own reason. The third is the
- * one most likely to be added back by somebody who has not thought about it: an emergency
- * contact is a person who never joined this platform.
+ * The four fields that must never be projected, each for its own reason.
+ *
+ * ⚠ There were FIVE until 2026-09-21. `emergency_contact` sat third, described as "the one
+ * most likely to be added back by somebody who has not thought about it" — and the owner,
+ * having thought about it, reversed it: the agent enters it precisely so that somebody can
+ * be reached when something happens to them, and platform staff are who would call. It is
+ * now projected on the DETAIL only, enumerated, and pinned as such by the assertions below
+ * this one. ADR-009 § Amendment 2026-09-21 is the record.
  */
 const FORBIDDEN_AGENT_FIELDS = [
     'legal_identity',
     'payout_details',
-    'emergency_contact',
     'home_base.location',
     'avatar_url',
 ];
@@ -242,6 +247,32 @@ const FORBIDDEN_AGENT_FIELDS = [
 t.assert('no forbidden field appears in either agent projection', () => {
     const source = readCode(...AGENT_REPO);
     return FORBIDDEN_AGENT_FIELDS.every((field) => !source.includes(`'${field}'`) && !source.includes(`${field}:`));
+});
+
+/**
+ * The reversal, pinned in the shape the owner decided: the DETAIL carries the emergency
+ * contact, the DIRECTORY never does. A directory of every courier's next-of-kin is a
+ * different disclosure from one agent's page, and the list projection is the one a future
+ * "add it everywhere for consistency" edit would reach for.
+ */
+t.assert('emergency_contact is on the DETAIL projection, enumerated as name + phone', () => {
+    const source = readCode(...AGENT_REPO);
+    const detail = source.slice(source.indexOf('const AGENT_DETAIL_EXTRAS'), source.indexOf('export interface AgentSearchQuery'));
+    return detail.includes("'emergency_contact.name': 1") && detail.includes("'emergency_contact.phone': 1")
+        && !/['\s]emergency_contact'?:\s*1/.test(detail);
+});
+
+t.assert('…and NEVER on the list projection', () => {
+    const source = readCode(...AGENT_REPO);
+    const list = source.slice(source.indexOf('const AGENT_LIST_PROJECTION'), source.indexOf('const AGENT_DETAIL_EXTRAS'));
+    return list.length > 0 && !list.includes('emergency_contact');
+});
+
+t.assert('…and the controller maps it in the detail DTO only, never the directory row', () => {
+    const source = readCode(...AGENT_CONTROLLER);
+    const row = source.slice(source.indexOf('function toAgentDto'), source.indexOf('function toAgentDetailDto'));
+    const detail = source.slice(source.indexOf('function toAgentDetailDto'), source.indexOf('function toAuditState'));
+    return !row.includes('emergency_contact') && detail.includes('emergencyContact:');
 });
 
 t.assert('both agent projections are whitelists — no `: 0` exclusion anywhere', () => {
@@ -530,9 +561,18 @@ const agentRoutes = routeManifest().filter((r) => r.fullPath.startsWith('/api/v1
 
 /**
  * Fifteen at Phase 5, plus the two geo-tracker data reads at Phase 6.I (ADR-020), plus the
- * assignability diagnostic at Phase 6.J, plus the KYC evidence read (2026-09-14).
+ * assignability diagnostic at Phase 6.J, plus the KYC evidence read (2026-09-14), plus the
+ * COD-pool pin RELEASE (2026-09-21) — its own route for the `unban` reason.
  */
-t.assert('nineteen agent routes are registered', () => agentRoutes.length === 19);
+t.assert('twenty agent routes are registered', () => agentRoutes.length === 20);
+
+t.assert('the pin release is its own route, own audit action, same permission as the pin', () => {
+    const release = agentRoutes.find((r) => r.fullPath === '/api/v1/agents/:agentId/cod-threshold/release');
+    const pin = agentRoutes.find((r) => r.fullPath === '/api/v1/agents/:agentId/cod-threshold');
+    return release?.method === 'post' && pin?.method === 'put'
+        && isAuditAction('agents.cod_threshold.release')
+        && readCode(SRC, 'modules', 'agents', 'routes', 'agent.routes.ts').includes("audit: records('agents.cod_threshold.release')");
+});
 
 /**
  * ⚠ The KYC evidence read is `agents.read` and is NOT audited, unlike the two tracking reads
@@ -703,8 +743,18 @@ t.assert('banning always requires a reason', () =>
     !BanAgentSchema.safeParse({}).success && BanAgentSchema.safeParse({ reason: 'Fraud' }).success);
 
 t.assert('a negative COD threshold is refused', () =>
-    !SetThresholdSchema.safeParse({ maxThreshold: -1 }).success
-    && SetThresholdSchema.safeParse({ maxThreshold: 0 }).success);
+    !SetThresholdSchema.safeParse({ maxThreshold: -1, reason: 'cash risk' }).success
+    && SetThresholdSchema.safeParse({ maxThreshold: 0, reason: 'cash risk' }).success);
+
+/**
+ * Since 2026-09-21 this write PINS a pool that outranks the agent's plan, so it carries a
+ * reason — as does its release, which clears the pin off the agent entirely and leaves the
+ * audit row as the only record it existed.
+ */
+t.assert('pinning the COD pool requires a reason, and so does releasing it', () =>
+    !SetThresholdSchema.safeParse({ maxThreshold: 500_000 }).success
+    && !ReleaseThresholdSchema.safeParse({}).success
+    && ReleaseThresholdSchema.safeParse({ reason: 'back to the plan value' }).success);
 
 t.assert('the threshold’s UPPER bound is NOT copied — jovi-mall owns it', () => {
     const source = readCode(SRC, 'modules', 'agents', 'validators', 'agent.validator.ts');

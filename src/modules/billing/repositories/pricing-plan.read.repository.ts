@@ -38,6 +38,8 @@ export interface PricingPlanReadModel extends Document {
     max_storage_bytes?: number | null;
     commission_percent?: number | null;
     max_unterminated_shipments?: number | null;
+    /** Agent plans: the COD pool a KYC-verified agent gets. ⚠ `null` = NO COD, not unlimited. */
+    max_cod_pool?: number | null;
     live_tracking_enabled?: boolean;
     is_active?: boolean;
     sort_order?: number;
@@ -72,6 +74,7 @@ const PLAN_PROJECTION = {
     max_storage_bytes: 1,
     commission_percent: 1,
     max_unterminated_shipments: 1,
+    max_cod_pool: 1,
     live_tracking_enabled: 1,
     is_active: 1,
     sort_order: 1,

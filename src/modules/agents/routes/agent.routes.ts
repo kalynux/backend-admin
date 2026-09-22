@@ -13,6 +13,7 @@ import {
     SearchAgentsQuerySchema,
     SetAgentStatusSchema,
     SetThresholdSchema,
+    ReleaseThresholdSchema,
     SetTrackingSchema,
     TrackingPresenceQuerySchema,
     TrackingReadQuerySchema,
@@ -296,6 +297,14 @@ defineRoute(router, {
     handler: AgentController.setTracking,
 });
 
+/**
+ * PIN (PUT) and RELEASE (POST …/release) the agent's COD pool — two routes over one
+ * jovi-mall endpoint, one permission, two audit actions, for the `ban`/`unban` reason below.
+ *
+ * Since 2026-09-21 the pool is derived in jovi-mall — the agent's plan value once KYC is
+ * `verified`, 0 otherwise — and this is no longer "set the pool" but "pin one that outranks
+ * the plan until released". Both still carry `agents.cod_threshold.set`, `financial`.
+ */
 defineRoute(router, {
     mountedAt,
     method: 'put',
@@ -304,6 +313,16 @@ defineRoute(router, {
     validate: { params: AgentIdParamSchema, body: SetThresholdSchema },
     audit: records('agents.cod_threshold.set'),
     handler: AgentController.setCodThreshold,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/:agentId/cod-threshold/release',
+    access: permission('agents.cod_threshold.set'),
+    validate: { params: AgentIdParamSchema, body: ReleaseThresholdSchema },
+    audit: records('agents.cod_threshold.release'),
+    handler: AgentController.releaseCodThreshold,
 });
 
 /**

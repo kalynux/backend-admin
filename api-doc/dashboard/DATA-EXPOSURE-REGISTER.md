@@ -31,8 +31,10 @@ stated otherwise.
 
 Credit where due: `AGENT_LIST_PROJECTION` / `AGENT_DETAIL_EXTRAS` are **whitelists**, and the
 repository names what it refuses and why — `legal_identity` (driver's licence and national ID
-numbers), `payout_details` (bank accounts and mobile-money MSISDNs), `emergency_contact` (a third
-party's name and phone), `home_base.location` (a 2dsphere point on a residence), `wa`. The agency
+numbers), `payout_details` (bank accounts and mobile-money MSISDNs), `home_base.location` (a
+2dsphere point on a residence), `wa`. (`emergency_contact`, a third party's name and phone, was on
+this list until **2026-09-21**, when the owner reversed it: it is now on the agent **detail** only,
+never the list, under `agents.read`, so Support sees it. See ADR-009 § Amendment 2026-09-21.) The agency
 repository refuses `payout_details` and `wa` on the same reasoning. `trust_signals` and `device` are
 enumerated field by field rather than taken whole, with a comment explaining that the alternative
 lets a sensitive field added next year arrive automatically.

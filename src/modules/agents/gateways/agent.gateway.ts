@@ -110,9 +110,9 @@ function asState(result: unknown): Record<string, unknown> | null {
          * ⚠ **Two shapes, and reading only the first was a real defect.**
          *
          * Five of the six writes here answer with an agent, where the threshold is nested
-         * at `cod.maxThreshold`. `PUT /cod-threshold` does not: jovi-mall runs
-         * `setAgentThreshold` and then returns `getAllocation`, so the answer is a
-         * `CodAllocation` carrying `maxThreshold` at the TOP level.
+         * at `cod.maxThreshold`. `PUT /cod-threshold` does not: jovi-mall writes the
+         * pin (`AgentCodPoolService.setOverride`) and then returns `getAllocation`, so the
+         * answer is a `CodAllocation` carrying `maxThreshold` at the TOP level.
          *
          * Reading `cod?.maxThreshold` alone therefore recorded `null` on every row of the
          * one write on this surface flagged `financial` — the audit trail could say a
@@ -123,6 +123,12 @@ function asState(result: unknown): Record<string, unknown> | null {
          * answering either shape is covered without anybody remembering this.
          */
         codMaxThreshold: cod?.maxThreshold ?? (agent.maxThreshold as number | undefined) ?? null,
+        /**
+         * The administrator's PIN on the pool (2026-09-21), from the allocation answer's
+         * top-level `override`. `null` after a release — which is the whole point of the
+         * release row's `after`, since jovi-mall clears the pin off the agent entirely.
+         */
+        codPoolOverride: (agent.override as { amount?: number } | null | undefined)?.amount ?? null,
     };
 }
 
@@ -328,21 +334,32 @@ export async function setTracking(
 }
 
 /**
- * Set the agent's whole COD pool.
+ * PIN the agent's whole COD pool, replacing their plan's value as the ceiling until an
+ * administrator releases it (jovi-mall, 2026-09-21).
  *
- * jovi-mall refuses a value below what the agent's contracts have already allocated —
- * that check needs the contracts, which is why the bound is not validated here. The
- * refusal reaches the dashboard as its own 4xx with `details.platformCode`.
+ * ── What changed underneath this call ────────────────────────────────────────
+ * Until 2026-09-21 this SET the pool, and a pool nobody set was 0. The pool is now derived
+ * in jovi-mall — the agent's plan value once their KYC is `verified`, 0 while it is not —
+ * so an administrator no longer sets it; they pin a value that outranks the plan in either
+ * direction. The pin does NOT outrank KYC: on an unverified agent it is stored and waits
+ * for the verdict, and the pool stays 0. Same endpoint, two new body rules: `reason` is
+ * required, and `maxThreshold: null` releases (see `releaseCodThreshold`).
+ *
+ * jovi-mall refuses a pin that would leave the pool below what the agent's contracts have
+ * already allocated — that check needs the contracts, which is why the bound is not
+ * validated here. The refusal reaches the dashboard as its own 4xx with
+ * `details.platformCode`.
  *
  * ⚠ **This answers a `CodAllocation`, NOT an agent**, and the annotation used to say
- * otherwise. jovi-mall's handler runs `setAgentThreshold` then `getAllocation` and returns
- * the latter — which is the more useful answer (a client gets the fresh headroom rather
- * than an agent it has to re-read), but it is a different shape, and `asState` reading
- * only the agent one is what made every audit row on this write record a `null` threshold.
+ * otherwise. jovi-mall's handler writes the pin then returns `getAllocation` — which is the
+ * more useful answer (a client gets the fresh headroom rather than an agent it has to
+ * re-read), but it is a different shape, and `asState` reading only the agent one is what
+ * made every audit row on this write record a `null` threshold.
  */
 export async function setCodThreshold(
     agentId: string,
     maxThreshold: number,
+    reason: string,
     before: AgentSnapshot,
     context: ActorContext,
 ): Promise<PlatformCodAllocation> {
@@ -350,13 +367,50 @@ export async function setCodThreshold(
         'agents.cod_threshold.set',
         context,
         { id: agentId, label: labelOf(before) },
-        { maxThreshold },
+        { maxThreshold, reason },
         before,
         async () => {
             const result = await platformRequest<PlatformCodAllocation>({
                 method: 'PUT',
                 path: `/agents/${agentId}/cod-threshold`,
-                body: { maxThreshold },
+                body: { maxThreshold, reason },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return result.data;
+        },
+    );
+}
+
+/**
+ * RELEASE the pin — the agent goes back to their plan's value (or 0 while unverified).
+ *
+ * The same jovi-mall endpoint with `maxThreshold: null`, under its OWN audit action for the
+ * reason `agents.unban` is separate from `agents.ban`: jovi-mall clears the pin off the agent
+ * entirely, so this row is the only surviving record that it existed, and two opposite acts
+ * under one label would make the agent's history unreadable.
+ *
+ * Refused (by jovi-mall) when the plan's value is below what contracts already hold — the
+ * release would leave the pool over-committed, and a person choosing to do that can be told
+ * which contracts are in the way.
+ */
+export async function releaseCodThreshold(
+    agentId: string,
+    reason: string,
+    before: AgentSnapshot,
+    context: ActorContext,
+): Promise<PlatformCodAllocation> {
+    return auditedDelegation(
+        'agents.cod_threshold.release',
+        context,
+        { id: agentId, label: labelOf(before) },
+        { reason },
+        before,
+        async () => {
+            const result = await platformRequest<PlatformCodAllocation>({
+                method: 'PUT',
+                path: `/agents/${agentId}/cod-threshold`,
+                body: { maxThreshold: null, reason },
                 actor: context.actor,
                 requestId: context.requestId,
             });
@@ -376,6 +430,26 @@ export interface PlatformCodAllocation {
     maxThreshold: number;
     allocated: number;
     headroom: number;
+    /** Contracts holding MORE than the pool — only an automatic sync produces this. */
+    overAllocatedBy?: number;
+    /** Where the pool comes from (2026-09-21). */
+    pool?: {
+        maxThreshold: number;
+        ceiling: number;
+        source: 'not_verified' | 'override' | 'plan';
+        planCode: string | null;
+        selfLimited: boolean;
+        syncedAt: string | null;
+    };
+    /** The administrator's pin, with reason and author — admin reads only. */
+    override?: {
+        amount: number;
+        reason: string;
+        setAt: string;
+        setByUserId: string | null;
+        setBySource: string;
+        setByName: string | null;
+    } | null;
     contracts: unknown[];
 }
 
