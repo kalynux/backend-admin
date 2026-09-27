@@ -8,6 +8,7 @@ import {
     CodCashLedgerReadModel,
     CodTrustEventReadModel,
 } from '../repositories/cod-cash.read.repository';
+import { FileDetail } from '../../../infra/storage/file-detail';
 
 /**
  * Wire shapes for `/api/v1/cod`.
@@ -110,8 +111,13 @@ export interface RemittanceDto {
     agency: PartyRef;
     amount: number;
     currency: string | null;
-    /** The external bank/transfer/receipt id — evidence, not a credential. */
+    /** The external bank/transfer/receipt id — evidence, not a credential. Optional. */
     reference: string | null;
+    /**
+     * The proof image the agency attached to its declaration. `url` is null (private tree);
+     * the bytes come from `GET /api/v1/files/:fileId/content`. Null on legacy rows.
+     */
+    proof: FileDetail | null;
     note: string | null;
     status: string;
     declaredAt: string | null;
@@ -156,6 +162,7 @@ export interface RemittanceDetailDto extends RemittanceDto {
 export function toRemittanceDto(
     row: AgencyRemittanceReadModel,
     names: CodPartyNames,
+    proof: FileDetail | null,
 ): RemittanceDto {
     const agencyId = row.agency_id.toString();
     return {
@@ -167,6 +174,7 @@ export function toRemittanceDto(
         amount: row.amount,
         currency: row.currency ?? null,
         reference: row.reference ?? null,
+        proof,
         note: row.note ?? null,
         status: row.status,
         declaredAt: toIso(row.declared_at),
@@ -199,9 +207,10 @@ export function toRemittanceDetailDto(
     row: AgencyRemittanceReadModel,
     names: CodPartyNames,
     movements: CodCashLedgerReadModel[],
+    proof: FileDetail | null,
 ): RemittanceDetailDto {
     return {
-        ...toRemittanceDto(row, names),
+        ...toRemittanceDto(row, names, proof),
         cashMovements: movements.map(toCashLedgerEntryDto),
     };
 }
@@ -223,6 +232,12 @@ export interface DepositDto {
     recipient: string;
     status: string;
     reference: string | null;
+    /**
+     * The proof image the agent attached to their declaration. `url` is null (private tree);
+     * the bytes come from `GET /api/v1/files/:fileId/content`. Null on a deposit recorded in
+     * one step by its receiver, and on legacy rows.
+     */
+    proof: FileDetail | null;
     declaredAt: string | null;
     declaredByUserId: string | null;
     resolvedAt: string | null;
@@ -263,7 +278,11 @@ export interface DepositDetailDto extends DepositDto {
     cashMovements: CashLedgerEntryDto[];
 }
 
-export function toDepositDto(row: AgentDepositReadModel, names: CodPartyNames): DepositDto {
+export function toDepositDto(
+    row: AgentDepositReadModel,
+    names: CodPartyNames,
+    proof: FileDetail | null,
+): DepositDto {
     const agentId = row.agent_id.toString();
     const agencyId = row.agency_id.toString();
 
@@ -279,6 +298,7 @@ export function toDepositDto(row: AgentDepositReadModel, names: CodPartyNames): 
         recipient: row.recipient,
         status: row.status,
         reference: row.reference ?? null,
+        proof,
         declaredAt: toIso(row.declared_at),
         declaredByUserId: row.declared_by_user_id ? row.declared_by_user_id.toString() : null,
         resolvedAt: toIso(row.resolved_at),
@@ -308,9 +328,10 @@ export function toDepositDetailDto(
     row: AgentDepositReadModel,
     names: CodPartyNames,
     movements: CodCashLedgerReadModel[],
+    proof: FileDetail | null,
 ): DepositDetailDto {
     return {
-        ...toDepositDto(row, names),
+        ...toDepositDto(row, names, proof),
         cashMovements: movements.map(toCashLedgerEntryDto),
     };
 }
@@ -411,11 +432,15 @@ export function toDiscrepancyDto(
 export function toDiscrepancyDetailDto(
     row: CodDiscrepancyReadModel,
     names: CodPartyNames,
-    context: { deposit: AgentDepositReadModel | null; trustEvents: CodTrustEventReadModel[] },
+    context: {
+        deposit: AgentDepositReadModel | null;
+        depositProof: FileDetail | null;
+        trustEvents: CodTrustEventReadModel[];
+    },
 ): DiscrepancyDetailDto {
     return {
         ...toDiscrepancyDto(row, names),
-        deposit: context.deposit ? toDepositDto(context.deposit, names) : null,
+        deposit: context.deposit ? toDepositDto(context.deposit, names, context.depositProof) : null,
         trustEvents: context.trustEvents.map(toTrustEventDto),
     };
 }

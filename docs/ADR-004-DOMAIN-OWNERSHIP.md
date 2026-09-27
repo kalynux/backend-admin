@@ -384,4 +384,5 @@ on it. (`platform.client.ts` said Phase 4; deliberate deviation.)
   `PRODUCTION-READINESS/10-IMPLEMENTATION-PLAN.md` **Part 6.C**, and it is a **feature, not
   hardening** — agencies still have deactivate/reactivate and no KYC approval, unlike vendors
   (whose `kyc_details` gained a three-valued `status` and a reviewer stamp) and agents (whose
-  `kyc.status` gates dispatch entirely). Deliberately out of Phase 4's scope.
+  `kyc.status` gates dispatch entirely — *2026-09-27: no longer; it now gates COD shipments
+  only*). Deliberately out of Phase 4's scope.

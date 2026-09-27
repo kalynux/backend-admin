@@ -172,6 +172,13 @@ const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
     'money.payments.read',
 
     /**
+     * Account statements — owner decision 2026-09-27: "send me my statement" arrives as a
+     * ticket, and Support answers it. Bounded by the audit row (committed before the read) and
+     * by jovi-mall choosing the recipient; never carries a payout account number.
+     */
+    'money.statements.send',
+
+    /**
      * The payout queue, and the verdict on it. Added when payout review became a two-stage
      * job (tier 3 pre-screens, tier 1/2 sends).
      *

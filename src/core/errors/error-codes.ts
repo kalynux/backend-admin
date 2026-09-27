@@ -532,6 +532,14 @@ export const ERROR_CODES = Object.freeze({
      */
     FILE_UPLOAD_TOO_LARGE: 'FILE_UPLOAD_TOO_LARGE',
 
+    // ── ACCOUNT STATEMENTS (2026-09-27) ───────────────────────────────────────
+    /**
+     * The rendered statement is over the 8 MB the mail providers accept. Raised at **413**
+     * BEFORE the relay call, so the operator is told to download or shorten the period rather
+     * than seeing a provider refusal. `details` carries `bytes` and `maxBytes`.
+     */
+    STATEMENT_TOO_LARGE_TO_EMAIL: 'STATEMENT_TOO_LARGE_TO_EMAIL',
+
     // ── CONTENT / EDITORIAL ───────────────────────────────────────────────────
     //
     // The `BLOG_` prefix is jovi-mall's, and it is kept deliberately. Ownership of

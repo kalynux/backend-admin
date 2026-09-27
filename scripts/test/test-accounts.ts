@@ -537,10 +537,19 @@ t.assert('an earning row takes the account currency, and null when there is none
         _id: oid(OID), entry_type: 'release', amount: 8000,
         source_type: 'order', source_id: oid(OTHER_OID), created_at: new Date(),
     } as never;
+    // A `release` is the SAME money moving escrow → available: `internal`, not `in`. This
+    // assertion used to pin `in`, which is exactly the double count fixed on 2026-09-27 — the
+    // `hold` of that money was already `in`.
     return toEarningActivity(ledgerRow, 'XAF').currency === 'XAF'
         && toEarningActivity(ledgerRow, null).currency === null
-        && toEarningActivity(ledgerRow, 'XAF').direction === 'in';
+        && toEarningActivity(ledgerRow, 'XAF').direction === 'internal';
 });
+
+t.assert('a hold is the money arriving — the one earning entry that points IN', () =>
+    toEarningActivity({
+        _id: oid(OID), entry_type: 'hold', amount: 8000,
+        source_type: 'order', source_id: oid(OTHER_OID), created_at: new Date(),
+    } as never, 'XAF').direction === 'in');
 
 t.assert('...and a reversal is the one earning that points OUT', () =>
     toEarningActivity({
@@ -685,8 +694,21 @@ t.section('6. The route manifest — every gate is a composition');
 
 const accountRoutes = routeManifest().filter((route) => route.fullPath.startsWith('/api/v1/accounts'));
 
-t.assert('five routes are declared on /accounts, and all of them are GETs', () =>
-    accountRoutes.length === 5 && accountRoutes.every((route) => route.method === 'get'));
+/**
+ * Six since 2026-09-27: the five account reads, plus the STATEMENT, which is a POST because it
+ * records an audit row and may send mail — not because it writes platform state. Its
+ * computation lives in `modules/statements/`, which is why the "writes nothing, audits
+ * nothing" scan above still holds for this module's own source.
+ */
+t.assert('six routes on /accounts: five GET reads, and the audited statement POST', () => {
+    const posts = accountRoutes.filter((route) => route.method !== 'get');
+    return (
+        accountRoutes.length === 6 &&
+        posts.length === 1 &&
+        posts[0].method === 'post' &&
+        posts[0].fullPath.endsWith('/:ownerType/:ownerId/statements')
+    );
+});
 
 t.assert('every one of them declares a permission — none is public or self-service', () =>
     accountRoutes.every((route) => route.access.kind === 'permission' && route.access.mode === 'all'));

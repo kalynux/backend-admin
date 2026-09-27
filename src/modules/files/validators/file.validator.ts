@@ -142,7 +142,7 @@ const STORAGE_PROVIDERS = ['local', 's3', 'gcs', 'r2', 'firebase', 'cloudinary']
 const FILE_OWNER_TYPES = ['vendor', 'admin', 'customer', 'agent', 'agency', 'system'] as const;
 
 /**
- * `IFileReference.entityType` — jovi-mall's twelve-value union, verbatim.
+ * `IFileReference.entityType` — jovi-mall's fourteen-value union, verbatim.
  *
  * An allowlist rather than a free string because the value goes into a Mongo filter against
  * an indexed column: an arbitrary one would be a scan of `file_references` answering
@@ -151,6 +151,7 @@ const FILE_OWNER_TYPES = ['vendor', 'admin', 'customer', 'agent', 'agency', 'sys
 const FILE_REFERENCE_ENTITY_TYPES = [
     'product', 'variant', 'digital_asset', 'ticket', 'vendor', 'store',
     'agency', 'agency_magazin', 'customer', 'agent', 'admin', 'shipment',
+    'agent_deposit', 'agency_remittance',
 ] as const;
 
 export const FileLibraryQuerySchema = listQuery(FILE_LIBRARY_SORT, '-createdAt', {

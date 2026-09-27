@@ -9,6 +9,8 @@ import { sendCreated, sendPaginated, sendSuccess } from '../../../core/http/resp
 import { AgencyReadRepository } from '../../agencies/repositories/agency.read.repository';
 import { AgentCodProfile, AgentReadRepository } from '../../agents/repositories/agent.read.repository';
 import * as cod from '../gateways/cod.gateway';
+import { FileLibraryReadRepository } from '../../files/repositories/file-library.read.repository';
+import { FileDetail, toFileDetail } from '../../../infra/storage/file-detail';
 import {
     AgencyRemittanceReadModel,
     AgencyRemittanceReadRepository,
@@ -85,6 +87,27 @@ const trustEvents = new CodTrustEventReadRepository();
 // it declared here would be a second thing to get right.
 const agents = new AgentReadRepository();
 const agencies = new AgencyReadRepository();
+const files = new FileLibraryReadRepository();
+
+/**
+ * A COD record's proof image as a `FileDetail` — the same shape jovi-mall's list DTO emits
+ * under the same name, so a row and its detail agree. Private tree, so `url` is null and the
+ * bytes come from the audited `GET /api/v1/files/:fileId/content`.
+ */
+async function resolveProof(fileId: ObjectId | null | undefined): Promise<FileDetail | null> {
+    if (!fileId) return null;
+    const row = await files.findLiveById(fileId.toString());
+    return row
+        ? toFileDetail({
+              id: row._id.toString(),
+              key: row.key,
+              mimeType: row.mimeType,
+              size: row.size,
+              originalName: row.originalName ?? null,
+              quotaBlockedAt: row.quotaBlockedAt ?? null,
+          })
+        : null;
+}
 
 /**
  * jovi-mall's page shape and this service's are the same fields in a different envelope,
@@ -267,12 +290,13 @@ export class CodController {
     static getRemittance = asyncHandler(async (req: Request, res: Response) => {
         const row = await loadRemittanceOr404(req.params.remittanceId);
 
-        const [names, movements] = await Promise.all([
+        const [names, movements, proof] = await Promise.all([
             hydrateNames([row]),
             cashLedger.findForRef(req.params.remittanceId),
+            resolveProof(row.proof_file_id),
         ]);
 
-        sendSuccess(res, toRemittanceDetailDto(row, names, movements));
+        sendSuccess(res, toRemittanceDetailDto(row, names, movements, proof));
     });
 
     /**
@@ -372,12 +396,13 @@ export class CodController {
     static getDeposit = asyncHandler(async (req: Request, res: Response) => {
         const row = await loadDepositOr404(req.params.depositId);
 
-        const [names, movements] = await Promise.all([
+        const [names, movements, proof] = await Promise.all([
             hydrateNames([row]),
             cashLedger.findForRef(req.params.depositId),
+            resolveProof(row.proof_file_id),
         ]);
 
-        sendSuccess(res, toDepositDetailDto(row, names, movements));
+        sendSuccess(res, toDepositDetailDto(row, names, movements, proof));
     });
 
     /**
@@ -505,7 +530,8 @@ export class CodController {
         // feed the name lookup rather than only the discrepancy.
         const names = await hydrateNames(deposit ? [row, deposit] : [row]);
 
-        sendSuccess(res, toDiscrepancyDetailDto(row, names, { deposit, trustEvents: events }));
+        const depositProof = await resolveProof(deposit?.proof_file_id);
+        sendSuccess(res, toDiscrepancyDetailDto(row, names, { deposit, depositProof, trustEvents: events }));
     });
 
     /**

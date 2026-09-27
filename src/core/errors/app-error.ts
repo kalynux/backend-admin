@@ -174,6 +174,8 @@ export const DEFAULT_MESSAGES: Partial<Record<ErrorCode, string>> = {
         'An upload must be sent as multipart/form-data with a `files` field',
     [ERROR_CODES.FILE_UPLOAD_TOO_LARGE]:
         'This upload is larger than the administration upload limit',
+    [ERROR_CODES.STATEMENT_TOO_LARGE_TO_EMAIL]:
+        'This statement is too large to email. Download it instead, or choose a shorter period.',
     [ERROR_CODES.BLOG_ARTICLE_NOT_FOUND]: 'No article with this id',
     [ERROR_CODES.BLOG_ARTICLE_KEY_TAKEN]: 'An article already uses this id',
     [ERROR_CODES.BLOG_ARTICLE_NOT_PUBLISHABLE]: 'This article is not ready to publish',

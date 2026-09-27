@@ -636,7 +636,7 @@ endpoint's subject there has no reason to join.
 | Field | Notes |
 |---|---|
 | `maxThreshold` | The agent's **global** pool. Since 2026-09-21 it is automatic: `0` until the agent's KYC is verified, then their plan's value, or an administrator's pin. See `pool` |
-| `overAllocatedBy` | `allocated - maxThreshold` when contracts hold **more** than the pool, else `0`. Only an automatic change produces it (plan downgrade, KYC withdrawn). While above 0 no slice can be raised, and jovi-mall caps every dispatch at the pool. Show it; a bare `headroom: 0` does not explain itself |
+| `overAllocatedBy` | `allocated - maxThreshold` when contracts hold **more** than the pool, else `0`. Only an automatic change produces it (plan downgrade, KYC withdrawn, or — since 2026-09-27 — verification opening a pool smaller than the dormant slices an unverified agent's contracts carried). While above 0 no slice can be raised, and jovi-mall caps every dispatch at the pool. Show it; a bare `headroom: 0` does not explain itself |
 | `pool` | `{ ceiling, source, planCode, selfLimited, syncedAt }`, the same block as `cod.pool` on the agent detail |
 | `override` | The pin, `{ amount, reason, setAt, setByName, setBySource }`, or `null` |
 | `allocated` | Sum of `threshold` across the **allocating** contracts listed. `active`, `paused` and `suspended` all consume the pool — **pausing does not free capacity**, because the agent may still be holding that agency's cash. `pending` and `deactivated` do not, and are absent from `contracts` |
@@ -702,8 +702,14 @@ reimplementation loses first, and the reason this read is delegated.
 
 | Family | Gates | Reachable before this endpoint |
 |---|---|---|
-| **platform** | banned · KYC · active · available · tracking allowed · device location · capacity | ✅ `/eligibility` |
-| **contract** | active contract · coverage region · per-shipment value ceiling · **COD exposure** | ❌ **nowhere** |
+| **platform** | banned · active · available · tracking allowed · device location · capacity | ✅ `/eligibility` |
+| **contract** | active contract · coverage region · per-shipment value ceiling · **COD exposure** (incl. KYC) | ❌ **nowhere** |
+
+> ⚠ **KYC moved from the platform half to the COD gate on 2026-09-27.** `/eligibility` no longer
+> has a `kyc` rule or a `kyc_not_verified` reason. An unverified agent fails `cod_exposure` on a COD
+> shipment only: `reason: "AGENT_KYC_NOT_VERIFIED"`, `observed.blocker: "kyc_not_verified"`, a new
+> `kycStatus` on the raw verdict, and the single remedy **`verify_agent_kyc`** (`params: { kycStatus }`)
+> — render it as a link to `PUT /agents/:agentId/kyc`, not as something the agency can fix.
 
 The contract half is where the numbers are, and its absence had a concrete cost: an agency refused
 with `COD_AGENT_EXPOSURE_EXCEEDED` could read its own COD threshold off three screens in this
@@ -992,7 +998,8 @@ The updated agent, message `"Agent status set to suspended"`.
 ## `GET /agents/:agentId/verification`
 
 **The evidence the verdict below rests on** — and the write below is the one that decides
-whether an agent may work at all, since eligibility passes only on `verified`.
+whether an agent may carry cash on delivery. (Until 2026-09-27 it decided whether they could work
+at all; KYC now gates COD only.)
 
 Until this existed, the whole of what a reviewer could see was `legal_identity.national_id_number`
 (a string the agent typed) and `kyc.reference` — a free-text note an **administrator** had
@@ -1019,8 +1026,12 @@ Full contract: **[verification.md](verification.md)**.
 
 ## `PUT /agents/:agentId/kyc`
 
-**The write that lets an agent work.** Eligibility passes only on `verified`, so this is a gate,
-not a label.
+**The write that lets an agent carry cash on delivery.** ⚠ **Changed 2026-09-27 (owner decision,
+jovi-mall):** KYC no longer gates contracts or dispatch — an unverified agent can contract, is
+listed in the agency directory and takes prepaid work. It gates **COD only**: until `verified` the
+agent's pool is `0` and every COD shipment to them is refused (`AGENT_KYC_NOT_VERIFIED`; in
+`/assignability` the `cod_exposure` gate with remedy `verify_agent_kyc`). So it is still a gate,
+not a label — for cash. (Until that date eligibility passed only on `verified`.)
 
 | | |
 |---|---|
@@ -1043,8 +1054,10 @@ not a label.
 
 The updated agent, message `"Identity documents marked rejected"`.
 
-Moving an agent **off** `verified` makes them undispatchable immediately. It does not touch
-their contracts, and in-flight shipments they already hold are unaffected.
+Moving an agent **off** `verified` closes their COD pool to `0` and refuses them new COD shipments
+immediately; prepaid dispatch continues (since 2026-09-27 — before, it made them undispatchable
+altogether). It does not touch their contracts, and in-flight shipments they already hold are
+unaffected.
 
 ### Audit
 
@@ -1112,6 +1125,10 @@ replaces their plan's until released.
 > one on a paid tier) until `POST …/cod-threshold/release`. A pin does **not** outrank KYC: on an
 > unverified agent it is stored and the pool stays `0` until the verdict. Pinning resets any lower
 > choice the agent had made.
+>
+> Since 2026-09-27 an unverified agent's contracts may already carry COD slices, which stay
+> **dormant** until verification. If they sum past the pool that verification opens,
+> `/cod-allocation` shows `overAllocatedBy > 0` — the same state a downgrade produces.
 
 | | |
 |---|---|

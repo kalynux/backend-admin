@@ -16,8 +16,11 @@ Design record: [`../../docs/ADR-011-ACCOUNTS-AND-FINANCE.md`](../../docs/ADR-011
 | `GET` | `/accounts/:ownerType/:ownerId/payouts` | `money.payouts.read` | — |
 | `GET` | `/accounts/:ownerType/:ownerId/credits` | `billing.plans.read` | — |
 | `GET` | `/accounts/:ownerType/:ownerId/cash-ledger` | `cod.overview.read` | — |
+| `POST` | `/accounts/:ownerType/:ownerId/statements` | `money.statements.send` (**every tier**) | ✅ `money.statements.send_<ownerType>` |
 
-**Read-only. There are no writes on this mount.**
+**No platform writes on this mount.** The one `POST` (added 2026-09-27) generates an account
+statement: it records an audit row and may send an email, and it changes nothing on the
+platform. See [the last section](#post-accountsownertypeowneridstatements--account-statement).
 
 ## Authorization is composed, not invented
 
@@ -326,9 +329,9 @@ permission.
       "id": "66a0aabbccddeeff00112233",
       "category": "earning",
       "type": "earning_release",
-      "status": "completed",
+      "status": "release",
       "unit": "money",
-      "direction": "in",
+      "direction": "internal",
       "amount": 25162,
       "currency": "XAF",
       "credits": null,
@@ -361,7 +364,7 @@ permission.
 |---|---|
 | `id` | **The source document's id** — not synthetic, so a row can be looked up where it lives |
 | `category` | `plan` · `credit` · `earning` · `payout` |
-| `direction` | **From the owner's perspective**: value arriving vs leaving |
+| `direction` | **From the owner's perspective.** `in` means money arriving: an `earning_hold`, or credits granted. `out` means money leaving: an `earning_reversal`, a **paid** payout, or a purchase. `internal` means money moving between the owner's own balances: an `earning_release` (escrow → available), the two COD reserve entries, and a payout that is pending, rejected or failed. ⚠ **Changed 2026-09-27.** Before, a release was `in`, which counted every earning twice, and every payout was `out`. Now **Σ in − Σ out over earning and payout rows equals the change in the earnings balance.** |
 | `amount` | Magnitude in `unit`, **always positive**. The sign lives in `direction` |
 | `credits` | `null` on a row that moves no credit |
 | `meta.nextCursor` | Pass back as `?before=`. **`null` at the end of the feed** |
@@ -496,3 +499,100 @@ what the liability became.
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | **`ownerType=vendor`** → *"A cash ledger exists for agent and agency accounts only"*. A vendor never collects cash, so a `400` naming the reason beats an empty page that reads as "no movements" when the truth is "cannot have any" |
 | 404 | `ACCOUNT_OWNER_NOT_FOUND` | |
+
+## `POST /accounts/:ownerType/:ownerId/statements` — account statement
+
+**Added 2026-09-27.** Generates the account holder's **full statement** for a period, as an
+**Excel workbook** or a **PDF**. You can download it, or have it **emailed to the account
+holder**. Record: `PRODUCTION-READINESS/ACCOUNT-STATEMENTS-AND-ANALYTICS-PLAN.md`.
+
+| | |
+|---|---|
+| Permission | `money.statements.send`. **Every tier holds it, Support included** (owner decision). |
+| Audited | Always. The audit row is written **before** anything is read, and if that write fails nothing is produced. Action: `money.statements.send_vendor`, `_agency` or `_agent`. The row lands on that owner's activity feed. |
+| Computed by | wi-admin, reading `jovi_mall` directly. jovi-mall only sends the email. |
+
+### Body
+
+```json
+{ "from": "2026-09-01", "to": "2026-09-30", "format": "xlsx", "delivery": "email" }
+```
+
+| Field | Rule |
+|---|---|
+| `from`, `to` | `YYYY-MM-DD`. Both days are **included**, and are read in `Africa/Douala` (UTC+01:00). `from` must not be after `to`, and the period can be **at most 366 days**. |
+| `format` | `xlsx` \| `pdf` |
+| `delivery` | `download` \| `email` |
+
+The body is **strict**. Any other field (`email`, `to_email`, …) is a `400`. **The dashboard
+cannot choose the recipient.** jovi-mall sends only to the account's **registered, verified**
+email address.
+
+### Response — `delivery: "download"` (200)
+
+The response is **the file itself**, not a JSON envelope. It comes with these headers:
+- `Content-Type`: `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` or `application/pdf`
+- `Content-Disposition: attachment; filename="statement-<type>-<last6 of id>-<from>-to-<to>.<ext>"`
+- `Cache-Control: no-store`
+
+Read it as a blob.
+
+### Response — `delivery: "email"` (200)
+
+```json
+{
+  "success": true,
+  "data": {
+    "delivery": "email",
+    "fileName": "statement-vendor-8a91c2-2026-09-01-to-2026-09-30.xlsx",
+    "sent": true,
+    "recipient": "j***@example.com",
+    "bytes": 48213
+  }
+}
+```
+
+`recipient` is **masked**. It is enough to tell the operator where the file went, and it
+never reveals the full address.
+
+### What is in the file
+
+The Excel file has a **Summary** sheet, then one sheet per section below. Every section is
+present even when it is empty, and an empty one says so.
+
+The PDF has the summary page and the narrower tables. The wide per-order tables are in the
+Excel file only, and the PDF lists them by name.
+
+| Section | Vendor | Agency | Agent |
+|---|:-:|:-:|:-:|
+| Sales and deductions: gross, bargain fee, commission (and %), delivery fee, COD fee, **net**, status | ✅ | | |
+| Orders: placed at and by whom, phone (masked), payment method and means, paid at, paid by, reference, total, completion, agency, agent *(Excel only)* | ✅ | | |
+| Products sold: listed price, your floor, final (negotiated) price, quantity, bargain fee per line *(Excel only)* | ✅ | | |
+| Deliveries: tracking number, agency, agent, fee, when assigned, picked up, delivered or returned *(Excel only)* | ✅ | | |
+| Cash on delivery: collected by whom and when, **settled to the platform when**, which remittance and who confirmed it | ✅ | | |
+| Delivery earnings: fee earned, COD fee, agent's share, agency net | | ✅ | ✅ |
+| Cash collected on delivery / cash handed over by agents | | ✅ | ✅ |
+| Cash remitted to the platform (who confirmed it) · COD reserve | | ✅ | |
+| Adjustments (reversed earnings; delivery fees returned) | ✅ | ✅ | ✅ |
+| Refunds to customers · service bookings · order timeline *(timeline in Excel only)* | ✅ | | |
+| Payouts (method kind and provider only, **never the account number**) · credit purchases · credit movements · plans | ✅ | ✅ | ✅ |
+
+**Net revenue** = gross − bargain fee − commission − delivery fee − COD fee. Every figure is the
+amount jovi-mall recorded when the payment was split, so the net equals what reached the
+wallet. The file never recalculates anything from a rate.
+
+**Balances** are printed "at the time of generation", and they are asked from jovi-mall.
+When jovi-mall cannot be reached, a download still works and the file says the balances were
+unavailable.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Bad dates, `from` after `to`, a period over 366 days, or an unknown field in the body. |
+| 413 | `STATEMENT_TOO_LARGE_TO_EMAIL` | `delivery: "email"` and the file is over 8 MB. Download it instead, or use a shorter period. |
+| 409 | `PLATFORM_OPERATION_REJECTED` with `details.platformCode: STATEMENT_RECIPIENT_MISSING` | The account has no email on file. Offer the download instead. |
+| 409 | `PLATFORM_OPERATION_REJECTED` with `details.platformCode: STATEMENT_RECIPIENT_UNVERIFIED` | The account has an email that is not yet verified. Offer the download instead. |
+| 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | `delivery: "email"` while jovi-mall is unreachable. |
+
+A failed email is still on the audit trail, stamped `failed`.

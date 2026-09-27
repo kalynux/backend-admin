@@ -1,5 +1,7 @@
 import { Router } from 'express';
-import { defineRoute, permission } from '../../../api/route-manifest';
+import { defineRoute, permission, records } from '../../../api/route-manifest';
+import { StatementController } from '../../statements/controllers/statement.controller';
+import { CreateStatementBodySchema } from '../../statements/validators/statement.validator';
 import { AccountController } from '../controllers/account.controller';
 import {
     AccountOwnerParamsSchema,
@@ -129,6 +131,29 @@ defineRoute(router, {
     access: permission('cod.overview.read'),
     validate: { params: CashLedgerOwnerParamsSchema, query: ListCashLedgerQuerySchema },
     handler: AccountController.getCashLedger,
+});
+
+/**
+ * An account STATEMENT — every order, fee, COD settlement, payout, credit and plan movement in
+ * a period, as xlsx or pdf, downloaded or emailed to the account holder.
+ *
+ * `money.statements.send` alone, held by every tier (owner decision 2026-09-27). The
+ * composition rule above does not apply, and on purpose: a statement is its own disclosure
+ * with its own audit row, not a view assembled from the three families. It is a POST because
+ * it records (and may send mail), not because it writes platform state.
+ *
+ * Computed HERE from `jovi_mall` directly; jovi-mall only relays the mail and chooses the
+ * recipient. See `modules/statements/` and
+ * `PRODUCTION-READINESS/ACCOUNT-STATEMENTS-AND-ANALYTICS-PLAN.md`.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/:ownerType/:ownerId/statements',
+    access: permission('money.statements.send'),
+    validate: { params: AccountOwnerParamsSchema, body: CreateStatementBodySchema },
+    audit: records('money.statements.send_vendor', 'money.statements.send_agency', 'money.statements.send_agent'),
+    handler: StatementController.create,
 });
 
 export const accountRoutes = router;

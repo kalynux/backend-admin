@@ -179,6 +179,15 @@ export class FileLibraryReadRepository extends PlatformReadRepository<StoredFile
      * the ids are resolved from it first and arrive here as an `$in`. See
      * `FileReferenceReadRepository.findFileIdsForEntity`.
      */
+    /**
+     * One live file by id, or null — for a record that names its file (a COD proof) and must
+     * render it as a `FileDetail`. Soft-deleted files answer null, as jovi-mall's resolver does.
+     */
+    async findLiveById(fileId: string): Promise<StoredFileReadModel | null> {
+        if (!ObjectId.isValid(fileId)) return null;
+        return this.findOneBy({ _id: new ObjectId(fileId), deletedAt: null } as Filter<StoredFileReadModel>);
+    }
+
     async search(
         query: FileLibraryQuery,
         entityFileIds: ObjectId[] | null,

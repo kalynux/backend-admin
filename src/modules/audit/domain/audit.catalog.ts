@@ -403,8 +403,9 @@ export const AUDIT_CATALOG = Object.freeze({
     //
     // All `delegated`: every one of these lands in jovi-mall, and each is load-bearing
     // there in a way flipping the column from here would not reproduce. `kyc.status`
-    // decides whether the agent may be dispatched at all (`assertEligible` passes only on
-    // `verified`); `platform_ban` is consulted by every gate; `cod.max_threshold` bounds a
+    // decides whether the agent may carry COD cash (the COD exposure gate — since
+    // 2026-09-27 it no longer gates dispatch) and re-syncs their COD pool;
+    // `platform_ban` is consulted by every gate; `cod.max_threshold` bounds a
     // shared pool whose sub-allocation must stay transactional.
 
     'agents.status.set': {
@@ -1285,6 +1286,26 @@ export const AUDIT_CATALOG = Object.freeze({
     'money.payouts.destination.read': {
         permission: 'money.payouts.destination.read', target: 'payout', transport: 'external',
         summary: 'Revealed the full payout destination on a payout request',
+    },
+    /**
+     * Account statements (2026-09-27). `external`, like the destination reveal above: the row
+     * IS the control on a disclosure every tier may make, so the intent commits before the
+     * read and a failed audit write stops it. Three actions, one per owner type, because a
+     * catalog action has a single target type and each row must land on its owner's own
+     * activity feed — the `billing.subscriptions.assign_*` split. The payload names the
+     * period, format and channel; never a figure.
+     */
+    'money.statements.send_vendor': {
+        permission: 'money.statements.send', target: 'vendor', transport: 'external',
+        summary: "Generated a vendor's account statement (downloaded or emailed to them)",
+    },
+    'money.statements.send_agency': {
+        permission: 'money.statements.send', target: 'agency', transport: 'external',
+        summary: "Generated an agency's account statement (downloaded or emailed to them)",
+    },
+    'money.statements.send_agent': {
+        permission: 'money.statements.send', target: 'agent', transport: 'external',
+        summary: "Generated an agent's account statement (downloaded or emailed to them)",
     },
 
     // ═══ AUDIT — the trail's own operations ═══════════════════════════════════

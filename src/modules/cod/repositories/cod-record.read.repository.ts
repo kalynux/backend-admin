@@ -50,8 +50,10 @@ export interface AgencyRemittanceReadModel extends Document {
     agency_id: ObjectId;
     amount: number;
     currency?: string | null;
-    /** The external bank/transfer/receipt id. The evidence, not a credential. */
+    /** The external bank/transfer/receipt id. Optional since proofs arrived. Not a credential. */
     reference?: string | null;
+    /** The proof image the agency attached (private `cod-proofs/` tree). Null on legacy rows. */
+    proof_file_id?: ObjectId | null;
     note?: string | null;
     status: string;
     declared_by_user_id?: ObjectId | null;
@@ -90,6 +92,7 @@ const REMITTANCE_PROJECTION = {
     amount: 1,
     currency: 1,
     reference: 1,
+    proof_file_id: 1,
     note: 1,
     status: 1,
     declared_by_user_id: 1,
@@ -138,6 +141,8 @@ export interface AgentDepositReadModel extends Document {
     recipient: string;
     status: string;
     reference?: string | null;
+    /** The proof image the agent attached; null on a receiver-recorded deposit or a legacy row. */
+    proof_file_id?: ObjectId | null;
     declared_by_user_id?: ObjectId | null;
     declared_at?: Date | null;
     recorded_by_user_id?: ObjectId | null;
@@ -173,6 +178,7 @@ const DEPOSIT_PROJECTION = {
     recipient: 1,
     status: 1,
     reference: 1,
+    proof_file_id: 1,
     declared_by_user_id: 1,
     declared_at: 1,
     recorded_by_user_id: 1,

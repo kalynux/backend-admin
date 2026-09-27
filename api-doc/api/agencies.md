@@ -541,7 +541,9 @@ jovi-mall leaves the agency's `status` alone — it is not deactivated, and no c
 >
 > **What a refusal still costs is cash.** COD eligibility now tests the KYC flag explicitly
 > (it was changed in the same release, because it had been using `active` as a stand-in for
-> "an administrator approved this"), and an unverified owner's payouts can be capped. The
+> "an administrator approved this"). (An unverified owner's payouts could also be capped from
+> 2026-09-15; that allowance was **deleted 2026-09-27** in jovi-mall — verification no longer
+> limits payouts, and the payout queue's verdict is information only.) The
 > conclusion — this records a verdict rather than adding enforcement — is unchanged; the
 > reasoning under it is not.
 

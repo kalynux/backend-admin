@@ -162,8 +162,9 @@ export const SetAgentStatusSchema = z
     });
 
 /**
- * Review the identity documents. This is the write that decides whether an agent may work
- * at all — `assertEligible` passes only on `verified`.
+ * Review the identity documents. This is the write that decides whether an agent may carry
+ * cash on delivery — since 2026-09-27 (jovi-mall) KYC no longer gates contracts or dispatch,
+ * only COD (`AGENT_KYC_NOT_VERIFIED` from the COD exposure gate).
  *
  * `rejectionReason` is required on `rejected` for the same reason a suspension reason is:
  * the agent is told, and "your documents were rejected" with no cause is an unactionable

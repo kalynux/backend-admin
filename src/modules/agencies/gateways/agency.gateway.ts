@@ -174,7 +174,8 @@ export async function verify(
  * activation, pickup resolution, COD eligibility and vendor default-agency selection", and
  * since 2026-09-15 neither half holds** — a refused agency that proved its phone is `active`,
  * and three of those four gate on `active`. What a refusal costs is cash: COD eligibility
- * tests the KYC flag explicitly now, and an unverified owner's payouts can be capped.
+ * tests the KYC flag explicitly now. (An unverified owner's payouts could also be capped from
+ * 2026-09-15; jovi-mall deleted that allowance on 2026-09-27, so payouts are not limited.)
  *
  * There is still no un-reject verb and none is needed — a fixed application goes back through
  * `verify`, whose predicate admits a rejected agency.

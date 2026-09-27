@@ -545,7 +545,7 @@ agent's tracking session opens only when they accept**, so two agents are never 
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | Missing reason, malformed id, unknown field |
 | 404 | `NOT_FOUND` | |
-| 409 / 422 | `PLATFORM_OPERATION_REJECTED` | Past pickup with no `agentId`, the target agent is ineligible, the status moved. `details.platformCode` names which |
+| 409 / 422 | `PLATFORM_OPERATION_REJECTED` | Past pickup with no `agentId`, the target agent is ineligible, the status moved. `details.platformCode` names which — incl. `AGENT_KYC_NOT_VERIFIED` (since 2026-09-27) when the target agent is unverified and the shipment is **COD**; a prepaid shipment is never refused for KYC |
 | 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | |
 
 ### Audit

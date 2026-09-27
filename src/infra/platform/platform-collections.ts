@@ -102,7 +102,7 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
     },
     [COLLECTIONS.DELIVERY_AGENT]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
-        note: 'KYC, ban and tracking state decide whether an agent may be dispatched',
+        note: 'Ban and tracking state decide whether an agent may be dispatched; KYC gates COD cash only',
     },
     [COLLECTIONS.ADMIN]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
@@ -163,6 +163,10 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
     [COLLECTIONS.REFUND_TRANSACTION]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'Created `pending` BEFORE the gateway call and finalised atomically — never written from here',
+    },
+    [COLLECTIONS.BOOKING]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'Read for account STATEMENTS only (2026-09-27): a vendor\'s booking income is money on their account',
     },
     [COLLECTIONS.TRACKING_OUTBOX]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',

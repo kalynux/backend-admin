@@ -212,6 +212,10 @@ Net-new — the legacy surface had a list and no way to open a row.
     "amount": 1240000,
     "currency": "XAF",
     "reference": "BICEC/2026/08/13/44127",
+    "proof": {
+      "id": "6680aabbccddeeff00112240", "key": "cod-proofs/2026/08/…webp", "url": null,
+      "access": "authorized", "mimeType": "image/webp", "size": 201344, "originalName": "transfer.png"
+    },
     "note": "Weekly settlement",
     "status": "confirmed",
     "declaredAt": "2026-08-13T06:00:00.000Z",
@@ -240,7 +244,8 @@ Net-new — the legacy surface had a list and no way to open a row.
 
 | Field | Notes |
 |---|---|
-| `reference` | The external bank/transfer/receipt id — **evidence, not a credential** |
+| `reference` | The external bank/transfer/receipt id — **evidence, not a credential**. **Optional** since 2026-09-27, so `null` is ordinary |
+| `proof` | **The proof image the agency attached** (receipt / transfer screenshot) as a `FileDetail`. Required on every declaration since 2026-09-27; `null` only on older rows. `url` is always `null` — private `cod-proofs/` tree — so render it through [`GET /files/:fileId/content`](./files.md) with `proof.id` (audited, `files.content.read`). Also on every list row |
 | `resolvedBy` | **`null` while still `declared`.** A stamp rendered without checking reads as "resolved by nobody", which is a claim rather than an absence |
 | `resolvedBy.source` | Which identity space the id belongs to. An `admin` id resolves in **neither** database's user collection — which is why the name is a snapshot |
 | **`cashMovements`** | **What confirming it *moved*.** Empty for a `declared` or `rejected` remittance, and that emptiness is the point: a declaration is a claim, and nothing has moved until an administrator confirms it |
@@ -406,6 +411,10 @@ Net-new. **Its cash movements are the two-sided settlement made visible.**
     "recipient": "platform",
     "status": "confirmed",
     "reference": "AFRILAND/DEP/2026-08-13/8841",
+    "proof": {
+      "id": "6682aabbccddeeff00112240", "key": "cod-proofs/2026/08/…webp", "url": null,
+      "access": "authorized", "mimeType": "image/webp", "size": 184320, "originalName": "receipt.jpg"
+    },
     "declaredAt": "2026-08-13T09:00:00.000Z",
     "declaredByUserId": "6660112233445566778899aa",
     "resolvedAt": "2026-08-13T09:20:00.000Z",
@@ -436,6 +445,8 @@ Net-new. **Its cash movements are the two-sided settlement made visible.**
 |---|---|
 | `recordedBy.source` | **The stamp that carries both an agency user and an administrator.** The same methods are reached by the agency desk and by the platform, and `source` is the only way to tell the ids apart |
 | `recordedAt` | The platform's name for this record's creation time. Kept alongside `createdAt` |
+| `proof` | **The proof image the agent attached to the declaration**, as a `FileDetail` — what to look at before confirming a `platform` deposit. Required on every agent declaration since 2026-09-27; `null` on a deposit recorded in one step (by an agency desk or through `POST /cod/deposits` here) and on older rows. Private — bytes through [`GET /files/:fileId/content`](./files.md) with `proof.id`. Also on every list row, and on the `deposit` joined into a discrepancy detail |
+| `reference` | Optional on agent declarations since 2026-09-27 — the proof is the evidence |
 
 ---
 

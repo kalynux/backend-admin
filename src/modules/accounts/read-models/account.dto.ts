@@ -330,8 +330,13 @@ export interface AccountActivityDto {
     type: string;
     status: string;
     unit: BalanceUnit;
-    /** From the OWNER's perspective: value arriving vs leaving. */
-    direction: 'in' | 'out';
+    /**
+     * From the OWNER's perspective: value arriving, leaving, or `internal` — moving between the
+     * owner's own balances. ⚠ `internal` added 2026-09-27, with jovi-mall's feed: a `hold` and
+     * its `release` were both `in`, so the feed counted every earning twice. Now Σ in − Σ out
+     * over earning + payout rows equals the change in the owner's earnings balance.
+     */
+    direction: 'in' | 'out' | 'internal';
     /** Magnitude in `unit`, always positive. The sign lives in `direction`. */
     amount: number;
     currency: string | null;
@@ -710,11 +715,20 @@ export function toEarningActivity(
     row: EarningsLedgerReadModel,
     currency: string | null,
 ): AccountActivityDto {
-    const description = row.entry_type === 'hold'
-        ? `Earning held from ${row.source_type} sale`
-        : row.entry_type === 'release'
-            ? 'Earning released to available balance'
-            : 'Earning reversed (refund)';
+    /**
+     * `hold` is the money arriving (in); `release` is the SAME money moving escrow → available
+     * (internal); `reversal` takes held money back (out); the two reserve entries move money
+     * between available and the agency's COD reserve (internal). The last two used to fall
+     * through to "Earning reversed (refund)" and `in`.
+     */
+    const byType: Record<string, { direction: AccountActivityDto['direction']; description: string }> = {
+        hold: { direction: 'in', description: `Earning credited from ${row.source_type} — held in escrow` },
+        release: { direction: 'internal', description: 'Earning released from escrow to available balance' },
+        reversal: { direction: 'out', description: 'Earning reversed (refund)' },
+        reserve_hold: { direction: 'internal', description: 'Moved to the COD reserve' },
+        reserve_release: { direction: 'internal', description: 'Returned from the COD reserve to available balance' },
+    };
+    const { direction, description } = byType[row.entry_type] ?? { direction: 'internal', description: 'Earnings movement' };
 
     return {
         id: row._id.toString(),
@@ -724,7 +738,7 @@ export function toEarningActivity(
         // become a `release` one, a second row does.
         status: row.entry_type,
         unit: 'money',
-        direction: row.entry_type === 'reversal' ? 'out' : 'in',
+        direction,
         amount: row.amount,
         currency,
         credits: null,
@@ -738,9 +752,10 @@ export function toEarningActivity(
 /**
  * The `payout` category jovi-mall reserved and never filled.
  *
- * `direction: 'out'` — money leaving the owner's platform balance for their bank. It is the
- * counterpart of `earning_release`, which is `in`, and the pair is what makes the feed add
- * up when read from top to bottom.
+ * `direction: 'out'` only once PAID — money leaving the owner's platform balance for their
+ * bank. A pending/processing request is money reserved inside the owner's balances, and a
+ * rejected or failed one went back to available: both `internal` (2026-09-27; every payout
+ * used to be `out`, so a rejected request read as money that left).
  *
  * **No destination**, masked or otherwise. A feed row is not the place to reason about where
  * money was sent, and putting one here would put a beneficiary's details on an endpoint
@@ -753,7 +768,7 @@ export function toPayoutActivity(row: PayoutRequestReadModel): AccountActivityDt
         type: 'payout_request',
         status: row.status,
         unit: 'money',
-        direction: 'out',
+        direction: row.status === 'paid' ? 'out' : 'internal',
         amount: row.amount,
         currency: row.currency,
         credits: null,

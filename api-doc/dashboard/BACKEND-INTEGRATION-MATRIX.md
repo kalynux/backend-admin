@@ -331,7 +331,9 @@ the point is a person's residence and is not projected), `kyc`, `ban`, `tracking
 **Write shapes (all strict bodies):**
 - `PUT /status` — `status` required; `reason` (3–500) **required when `suspended`, refused otherwise**.
 - `PUT /kyc` — `status` required; optional `reference` (≤200); `rejectionReason` (3–500) **required
-  when `rejected`**. Moving off `verified` makes the agent undispatchable immediately.
+  when `rejected`**. Moving off `verified` closes the agent's COD pool and refuses them COD
+  shipments immediately; since 2026-09-27 KYC gates **COD only** — an unverified agent can contract
+  and take prepaid work (it used to make them undispatchable).
 - `PUT /tracking` — `allowed` required; `reason` (3–500) **required when disabling**. Disabling
   blocks new dispatch and suppresses the live position, but does **not** close tracking sessions or
   revoke existing watchers — state both halves.

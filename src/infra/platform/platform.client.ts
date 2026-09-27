@@ -140,6 +140,17 @@ export interface PlatformRequest {
     requestId: string;
     body?: unknown;
     query?: Record<string, string | number | boolean | undefined>;
+    /**
+     * Per-call override of `JOVI_MALL_TIMEOUT_MS`. For the one call that legitimately takes
+     * longer than a read: relaying a mail with an attachment through a provider.
+     */
+    timeoutMs?: number;
+    /**
+     * Lift axios's 10 MB `maxBodyLength` for this call. An 8 MB statement is ~10.7 MB as
+     * base64 and would otherwise fail as a TRANSPORT error — a 503 blaming jovi-mall for a
+     * body this side built. jovi-mall's own path-scoped parser still caps it.
+     */
+    largeBody?: boolean;
 }
 
 /** jovi-mall's error envelope — byte-identical to this service's, deliberately. */
@@ -208,6 +219,8 @@ export async function platformRequest<T>(request: PlatformRequest): Promise<{ da
                 params: request.query,
                 data: request.body,
                 headers: actorHeaders(request.actor, request.requestId),
+                ...(request.timeoutMs ? { timeout: request.timeoutMs } : {}),
+                ...(request.largeBody ? { maxBodyLength: Infinity } : {}),
             });
 
             const payload = response.data as { data?: T; meta?: unknown };

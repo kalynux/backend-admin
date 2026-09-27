@@ -423,6 +423,21 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'money', action: 'read', phase: 11,
         summary: 'View gateway payment and refund settlements',
     },
+    /**
+     * Generate a vendor's, agency's or agent's full account statement (xlsx or pdf) and
+     * download it or have it emailed to the account holder's registered address.
+     *
+     * Deliberately NOT `financial`, and held by every tier INCLUDING Support — the owner's
+     * decision (2026-09-27, plan O-5): "send me my statement" is a support request. It moves no
+     * money, and its only recipient is the person the statement describes (jovi-mall resolves
+     * the address; the caller cannot name one). What bounds it is the audit row, committed
+     * before anything is read. It never prints a payout account number — that stays behind
+     * `money.payouts.destination.read`, one payout at a time.
+     */
+    'money.statements.send': {
+        family: 'money', action: 'read', phase: 11,
+        summary: "Download or email an account holder's full statement of orders, fees, COD, payouts, credits and plans — every request is recorded in the audit trail",
+    },
 
     // ═══ ORDERS ═══ 2 legacy endpoints + the list/search/refund surface (Ph. 6) ═
     'orders.read': {

@@ -74,6 +74,8 @@ export const STORAGE_TREE_VISIBILITY: Readonly<Record<string, TreeVisibility>> =
     // PRIVATE. Served only by an authorized route.
     digital: 'private',
     shipments: 'private',
+    /** COD cash hand-over proofs (a receipt, a transfer screenshot) — jovi-mall `modules/cod/`. */
+    'cod-proofs': 'private',
     kyc: 'private',
     /**
      * Identity evidence for a member of PLATFORM STAFF — an administrator's own identity card,

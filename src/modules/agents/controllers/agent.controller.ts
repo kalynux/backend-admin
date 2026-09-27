@@ -781,9 +781,10 @@ export class AgentController {
      *
      * ── What this adds over `/eligibility`, and why it is a separate endpoint ────
      *
-     * `eligibility` answers the PLATFORM half — banned, KYC, active, available, tracking,
-     * device, capacity. This answers that half plus the CONTRACT half — active contract,
-     * coverage region, per-shipment value ceiling and COD exposure — which was reachable
+     * `eligibility` answers the PLATFORM half — banned, active, available, tracking,
+     * device, capacity (KYC left it 2026-09-27). This answers that half plus the CONTRACT
+     * half — active contract, coverage region, per-shipment value ceiling and COD exposure,
+     * which since 2026-09-27 also refuses an unverified agent any COD shipment — which was reachable
      * from no surface at all before Phase 6.J.
      *
      * The gap was not academic. An agency refused with `COD_AGENT_EXPOSURE_EXCEEDED` could
@@ -842,11 +843,13 @@ export class AgentController {
     });
 
     /**
-     * PUT /api/v1/agents/:agentId/kyc — the write that lets an agent work.
+     * PUT /api/v1/agents/:agentId/kyc — the write that lets an agent carry cash on delivery.
      *
-     * Eligibility passes only on `verified`, so this is the gate, not a label. Moving an
-     * agent OFF `verified` makes them undispatchable immediately; it does not touch their
-     * contracts, and in-flight shipments they already hold are unaffected.
+     * Since 2026-09-27 (jovi-mall, owner decision) KYC no longer gates contracts or dispatch:
+     * an unverified agent takes prepaid work, and only COD shipments are refused
+     * (`AGENT_KYC_NOT_VERIFIED`, pool 0). Moving an agent OFF `verified` closes their COD pool
+     * and refuses new COD shipments immediately; it does not touch their contracts, and
+     * in-flight shipments they already hold are unaffected.
      */
     static reviewKyc = asyncHandler(async (req: Request, res: Response) => {
         const body = req.body as ReviewAgentKycBody;
