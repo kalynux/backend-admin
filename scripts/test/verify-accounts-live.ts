@@ -457,7 +457,8 @@ async function main(): Promise<number> {
         port = typeof address === 'object' && address ? address.port : 0;
 
         const routes = routeManifest().filter((r) => r.fullPath.startsWith('/api/v1/accounts'));
-        t.assert('five /accounts routes reached Express', () => routes.length === 5);
+        // Six since 2026-09-27: the five reads plus `POST /:ownerType/:ownerId/statements`.
+        t.assert('six /accounts routes reached Express', () => routes.length === 6);
 
         const admin = await signIn(EMAIL_ADMIN);
         const support = await signIn(EMAIL_SUPPORT);
@@ -494,10 +495,13 @@ async function main(): Promise<number> {
          * The `payout` category jovi-mall's `VendorTransaction` reserved and never filled.
          * Its own docstring says "reserved for when cash-out is built" — this is where those
          * rows finally appear.
+         *
+         * A PENDING request is money reserved inside the owner's balances, not money that left,
+         * so it reads `internal`; only `paid` is `out` (`toPayoutActivity`, 2026-09-27).
          */
         t.assert('...including the `payout` category, which jovi-mall never filled', () => {
             const payout = rows.find((r) => r.category === 'payout');
-            return payout?.amount === 30_000 && payout?.direction === 'out' && payout?.status === 'pending';
+            return payout?.amount === 30_000 && payout?.direction === 'internal' && payout?.status === 'pending';
         });
 
         t.assert('...in one descending order across all five collections', () => {
