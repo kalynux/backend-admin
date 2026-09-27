@@ -24,7 +24,9 @@ export function pdfSafe(text: string): string {
     return text
         .replace(/−/g, '-')
         .replace(/[←-⇿]/g, '->')
-        .replace(/[^\x20-\x7E -ÿ–—‘’“”•…€]/g, '?');
+        // Printable ASCII, Latin-1 (U+00A0-U+00FF), and en/em dash, curly quotes, bullet, ellipsis, euro.
+        // Escaped because the range starts at a no-break space, which ESLint rejects as irregular whitespace.
+        .replace(/[^\x20-\x7E\u00A0-\u00FF\u2013\u2014\u2018\u2019\u201C\u201D\u2022\u2026\u20AC]/g, '?');
 }
 
 function money(value: number): string {

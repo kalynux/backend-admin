@@ -16,7 +16,7 @@ const DATE_FORMAT = 'yyyy-mm-dd hh:mm';
 
 const OWNER_LABEL = { vendor: 'Vendor', agency: 'Delivery agency', agent: 'Delivery agent' } as const;
 
-function cell(value: CellValue, column: StatementColumn): ExcelJS.CellValue {
+function cell(value: CellValue, _column: StatementColumn): ExcelJS.CellValue {
     if (value === null || value === undefined || value === '') return null;
     if (value instanceof Date) return toWallClock(value);
     return value;
@@ -24,7 +24,7 @@ function cell(value: CellValue, column: StatementColumn): ExcelJS.CellValue {
 
 /** Sheet names: ≤ 31 chars, no `[]:*?/\`. */
 function sheetName(title: string, used: Set<string>): string {
-    let base = title.replace(/[[\]:*?/\\]/g, ' ').slice(0, 31).trim();
+    const base = title.replace(/[[\]:*?/\\]/g, ' ').slice(0, 31).trim();
     let name = base;
     for (let i = 2; used.has(name); i++) name = `${base.slice(0, 28)} ${i}`;
     used.add(name);
