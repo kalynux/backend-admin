@@ -471,6 +471,8 @@ below.
 |---|---|
 | `destination` | **`null` on legacy rows predating the snapshot** — a different fact from a destination with no details |
 | `resolvedBy` | `null` while pending. Nobody has resolved it, which is not the same as unknown |
+| `transferGateway` | The aggregator the transfer went through, **stamped on the first attempt**; retries and callbacks follow the stamp, never the current routing switch. `null` means **either** no transfer was attempted **or** it was sent before the stamp existed — in which case it was `NOTCHPAY`, the only payout aggregator then. Passed through as stored, not resolved, because only the second meaning has an answer. An open string |
+| `transferGatewayRef` | The aggregator's own transfer id, when one was issued. Never our merchant reference |
 
 ---
 
@@ -707,6 +709,7 @@ What a customer actually paid.
       },
       "payer": { "id": "665f1c2a9b3e4a91c7d2e5f0", "kind": "customer_or_user" },
       "gateway": "NOTCHPAY",
+      "provider": "MTN",
       "method": "MOBILE",
       "gatewayRef": "trx.p8Kq2mFh3xR7",
       "merchantRef": "jm_pt_9f2c41ab77e0463d8a15c6be02d7f318",
@@ -726,7 +729,8 @@ What a customer actually paid.
 |---|---|
 | **`settles`** | Exactly one of the three is set. **`cartId` with `orderIds` is the common case and the one that surprises people**: a multi-vendor checkout is *one* payment settling *N* orders, so a row whose `orderId` is `null` is not an incomplete record |
 | `payer.kind` | Always `"customer_or_user"` — **a deliberate `unknown` rather than a guess.** Nothing on the row says which |
-| `gateway` | `NOTCHPAY` · `MYCOOLPAY` · `STRIPE`, stored uppercase exactly as written here |
+| `gateway` | **Which aggregator carried it; informational.** An open, uppercase string — today `NOTCHPAY` · `MYCOOLPAY` · `STRIPE`, with `CAMPAY` and `FLUTTERWAVE` coming. **Never branch on it** and never validate it against a closed list: the active aggregator is switched at runtime ([`PUT /dev-tools/payments`](dev-tools.md#put-dev-toolspayments)), and a row keeps the one that actually carried it. `?gateway=` filters by exact value |
+| `provider` | What the customer paid **with** — `MTN` · `ORANGE` · `MOOV` · `CARD`. **`null` on every row written before payment routing** (jovi-mall ADR-A08); there is no backfill. Also an open string |
 | `method` | `MOBILE` · `CARD` · `CASH` |
 | `gatewayRef` | **The provider's own reference — the string quoted in a dispute** |
 | `merchantRef` | **Ours**, `jm_pt_<32 hex>`, minted per attempt and echoed back by the provider on its callback. `null` on rows written before the field existed and on any row whose provider never returned one. Searchable through `?reference=` |

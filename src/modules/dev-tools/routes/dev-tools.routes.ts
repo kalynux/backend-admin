@@ -4,10 +4,12 @@ import { DevToolsController } from '../controllers/dev-tools.controller';
 import {
     FeatureFlagParamSchema,
     FlushCacheSchema,
+    PaymentStatsQuerySchema,
     PruneOutboxSchema,
     ReplayOutboxSchema,
     SetFeatureFlagSchema,
     SetMaintenanceSchema,
+    SetPaymentSettingsSchema,
     WorkerKeyParamSchema,
 } from '../validators/dev-tools.validator';
 
@@ -153,6 +155,41 @@ defineRoute(router, {
     validate: { body: SetMaintenanceSchema },
     audit: records('developer_tools.maintenance.set'),
     handler: DevToolsController.setMaintenance,
+});
+
+// ─── Payment routing (jovi-mall ADR-A08) ─────────────────────────────────────
+
+/**
+ * `GET /payments` — which aggregator collects and pays out, what each can do, and how each has
+ * been doing. The one administrator surface that names aggregators; `/api/payments/options`
+ * deliberately never does.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/payments',
+    access: permission('developer_tools.payments.read'),
+    validate: { query: PaymentStatsQuerySchema },
+    handler: DevToolsController.getPaymentRouting,
+});
+
+/**
+ * `PUT /payments` — the manual failover switch, and the SECOND tool on this router that is not
+ * behind `dev_tools.enabled`.
+ *
+ * Maintenance's carve-out, for maintenance's reason (owner decision 5, ADR-014 D-7): it exists
+ * for an aggregator outage, when nobody should first have to flip an unrelated flag, and a flag
+ * turned off would lock the platform onto a dead aggregator. The tier-1 permission and the
+ * fail-closed audit row still apply. See `gateways/dev-tools.gateway.ts`.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'put',
+    path: '/payments',
+    access: permission('developer_tools.payments.set'),
+    validate: { body: SetPaymentSettingsSchema },
+    audit: records('developer_tools.payments.set'),
+    handler: DevToolsController.setPaymentRouting,
 });
 
 /**

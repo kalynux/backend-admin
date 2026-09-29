@@ -68,6 +68,9 @@ export const AUDIT_TARGET_TYPES = [
     // the single most consequential thing an operator can do to this platform, and a
     // `target: 'none'` row for it would be a poor trail.
     'maintenance_window',
+    // jovi-mall ADR-A08. Same argument as the maintenance window: which aggregator takes the
+    // platform's money is one singleton, and a switch of it is the row to find after an outage.
+    'payment_settings',
     // Phase 5 Part B. Same argument, one step further: `files.delete` is the only
     // UNRECOVERABLE operation on this surface, and it addresses exactly one record. A
     // `target: 'none'` row would put the deleted file's id in the payload and nothing in

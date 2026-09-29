@@ -1400,6 +1400,23 @@ export const AUDIT_CATALOG = Object.freeze({
         summary: 'Deleted delivered tracking-outbox rows past a retention age',
     },
 
+    // ═══ Payment routing (jovi-mall ADR-A08) ══════════════════════════════════
+    /**
+     * A real target type, for the maintenance-window reason: switching which company takes the
+     * platform's money is one thing with one id, and the row an investigator needs after "every
+     * payment failed from 14:02" should be findable by target rather than buried under `none`.
+     *
+     * `delegated`: the settings singleton lives in jovi-mall. The before/after on the row come
+     * from jovi-mall's own compare-and-set result (`previous` / `settings`), never from a GET
+     * made first here — that would race with a second operator.
+     */
+    'developer_tools.payments.set': {
+        permission: 'developer_tools.payments.set',
+        target: 'payment_settings',
+        transport: 'delegated',
+        summary: 'Changed payment routing — the collection or payout aggregator, Stripe, or the offered providers',
+    },
+
     /**
      * ── These three are `external`, and `wi_admin_txn` was wrong for all of them ──
      *

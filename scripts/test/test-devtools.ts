@@ -46,12 +46,24 @@ import {
     FeatureFlagParamSchema,
     FlushCacheSchema,
     LogQuerySchema,
+    PaymentStatsQuerySchema,
     PruneOutboxSchema,
     ReplayOutboxSchema,
     SetFeatureFlagSchema,
     SetMaintenanceSchema,
+    SetPaymentSettingsSchema,
     WorkerKeyParamSchema,
 } from '../../src/modules/dev-tools/validators/dev-tools.validator';
+import { isPlatformRouteMissing, platformTooOldError } from '../../src/modules/dev-tools/gateways/dev-tools.gateway';
+import { summariseByGateway } from '../../src/modules/dev-tools/domain/payment-routing-stats';
+import {
+    GATEWAY_STATS_SOURCES,
+    GatewayStatsRow,
+    STUCK_PENDING_AFTER_MINUTES,
+    buildGatewayStatsPipeline,
+} from '../../src/modules/money/repositories/payment-transaction.read.repository';
+import { createAppError } from '../../src/core/errors/app-error';
+import { ERROR_CODES } from '../../src/core/errors/error-codes';
 import { AUDIT_CATALOG, auditSpec, isAuditAction } from '../../src/modules/audit/domain/audit.catalog';
 import { subjectClassOf } from '../../src/modules/audit/domain/audit-subject';
 import { isPermissionName, permissionSpec } from '../../src/modules/authorization/domain/permission.catalog';
@@ -308,7 +320,8 @@ function devToolsGatewaySource(): string {
 
 t.assert('every gated tool in the gateway is behind the enabled check', () => {
     // FIVE gated tools: runWorker, replayOutbox, pruneOutbox, vectoriseCatalogue, flushCache.
-    // `listWorkers` is a read. `setMaintenance` is the documented carve-out below.
+    // `listWorkers` and `getPaymentSettings` are reads. `setMaintenance` and `setPaymentSettings`
+    // are the documented carve-outs (below, and § 9).
     //
     // `pruneOutbox` took this from 4 to 5 in Phase 15. The COUNT is asserted rather than the
     // names because the failure it guards against is a tool added *without* the check — and a
@@ -759,5 +772,210 @@ t.assert('the geo-tracker client builds no path from request input', () => {
     // Every `http.get(...)` call takes the typed `path` parameter, never an interpolation.
     return !/http\.get\(`/.test(source) && /http\.get\(path\)/.test(source);
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+t.section('9. Payment routing (jovi-mall ADR-A08) — the aggregator switch');
+
+t.assert('payments.read is a non-destructive developer_tools read', () => {
+    const spec = permissionSpec('developer_tools.payments.read');
+    return spec.family === 'developer_tools' && spec.action === 'read' && spec.destructive === undefined;
+});
+
+t.assert('payments.set is a DESTRUCTIVE developer_tools write', () => {
+    const spec = permissionSpec('developer_tools.payments.set');
+    return spec.family === 'developer_tools' && spec.action === 'write' && spec.destructive === true;
+});
+
+/** Owner decision 5: developer tier only. By derivation, so pinned — see § 7's note. */
+t.assert('only tier 1 holds either payments permission', () =>
+    (['developer_tools.payments.read', 'developer_tools.payments.set'] as const).every((name) =>
+        hasPermission(1, name) && !hasPermission(2, name) && !hasPermission(3, name)));
+
+t.assert('the switch is audited, delegated, and targets payment_settings', () =>
+    isAuditAction('developer_tools.payments.set')
+    && auditSpec('developer_tools.payments.set').transport === 'delegated'
+    && auditSpec('developer_tools.payments.set').target === 'payment_settings'
+    && auditSpec('developer_tools.payments.set').permission === 'developer_tools.payments.set');
+
+t.assert('payment_settings classifies as internal — Support does not see it', () =>
+    subjectClassOf('payment_settings') === 'internal');
+
+t.assert('GET /dev-tools/payments is a permissioned read with no audit row', () => {
+    const route = routeManifest().find((r) => r.fullPath === '/api/v1/dev-tools/payments' && r.method === 'get');
+    return route !== undefined
+        && route.access.kind === 'permission'
+        && route.audit === null;
+});
+
+t.assert('PUT /dev-tools/payments records developer_tools.payments.set', () => {
+    const route = routeManifest().find((r) => r.fullPath === '/api/v1/dev-tools/payments' && r.method === 'put');
+    return route?.audit?.kind === 'records';
+});
+
+// ─── The validator mirrors jovi-mall's `.strict()` body ─────────────────────
+
+const validSwitch = { collectionAggregator: 'MYCOOLPAY', expectedVersion: 3, reason: 'NotchPay outage since 14:02' };
+
+t.assert('a minimal switch parses', () => SetPaymentSettingsSchema.safeParse(validSwitch).success);
+
+t.assert('a partial providers map parses', () =>
+    SetPaymentSettingsSchema.safeParse({ ...validSwitch, providers: { ORANGE: { enabled: false } } }).success);
+
+/**
+ * `.strict()` is what refuses an old client's `gateway`, and a typo such as `collectionAggregater`
+ * — which a lax schema would strip, leaving a no-op write that returns 200 and switches nothing.
+ */
+t.assert('an unknown key is refused (.strict())', () =>
+    !SetPaymentSettingsSchema.safeParse({ ...validSwitch, gateway: 'NOTCHPAY' }).success
+    && !SetPaymentSettingsSchema.safeParse({ ...validSwitch, collectionAggregater: 'MYCOOLPAY' }).success);
+
+t.assert('expectedVersion and reason are both required', () =>
+    !SetPaymentSettingsSchema.safeParse({ collectionAggregator: 'MYCOOLPAY', reason: 'NotchPay outage since 14:02' }).success
+    && !SetPaymentSettingsSchema.safeParse({ collectionAggregator: 'MYCOOLPAY', expectedVersion: 3 }).success);
+
+t.assert('a too-short reason is refused', () =>
+    !SetPaymentSettingsSchema.safeParse({ ...validSwitch, reason: 'outage' }).success);
+
+t.assert('expectedVersion 0 (no document yet) parses; a negative one does not', () =>
+    SetPaymentSettingsSchema.safeParse({ ...validSwitch, expectedVersion: 0 }).success
+    && !SetPaymentSettingsSchema.safeParse({ ...validSwitch, expectedVersion: -1 }).success);
+
+/**
+ * The aggregator list is jovi-mall's and OPEN here. A copy of today's three would refuse Campay
+ * the day it ships — during exactly the outage this switch exists to end.
+ */
+t.assert('an aggregator this service has never heard of still parses (jovi-mall decides)', () =>
+    SetPaymentSettingsSchema.safeParse({ ...validSwitch, collectionAggregator: 'CAMPAY' }).success);
+
+t.assert('a lowercase aggregator name is refused before the hop', () =>
+    !SetPaymentSettingsSchema.safeParse({ ...validSwitch, collectionAggregator: 'notchpay' }).success);
+
+t.assert('the stats window is 24h or 7d, nothing else', () =>
+    PaymentStatsQuerySchema.safeParse({ window: '7d' }).success
+    && PaymentStatsQuerySchema.safeParse({}).success
+    && !PaymentStatsQuerySchema.safeParse({ window: '30d' }).success);
+
+// ─── Always available: the switch bypasses the flag ─────────────────────────
+
+function functionBody(source: string, name: string): string | null {
+    const start = source.indexOf(`export async function ${name}`);
+    if (start === -1) return null;
+    const end = source.indexOf('export async function', start + 1);
+    return source.slice(start, end === -1 ? undefined : end);
+}
+
+/**
+ * Owner decision 5, ADR-014 D-7. The switch exists for an aggregator outage; behind the flag, an
+ * operator would first have to find and flip an unrelated switch, and a flag turned off would
+ * lock the platform onto a dead aggregator. Asserted at the source because the gate lives in the
+ * gateway and a route file cannot express its absence.
+ */
+t.assert('setPaymentSettings is NOT behind the flag', () => {
+    const body = functionBody(devToolsGatewaySource(), 'setPaymentSettings');
+    return body !== null && !body.includes('assertDevToolsEnabled');
+});
+
+t.assert('getPaymentSettings is NOT behind the flag either — you decide by reading it', () => {
+    const body = functionBody(devToolsGatewaySource(), 'getPaymentSettings');
+    return body !== null && !body.includes('assertDevToolsEnabled');
+});
+
+/** The diff comes from jovi-mall's compare-and-set, never from a racy GET first. */
+t.assert('the audit before/after come from the write result, and the write makes no GET', () => {
+    const body = functionBody(devToolsGatewaySource(), 'setPaymentSettings') ?? '';
+    return body.includes('before: { ...result.previous }')
+        && body.includes('...result.settings')
+        && !body.includes("method: 'GET'")
+        && !body.includes('getPaymentSettings(');
+});
+
+// ─── "Platform too old" is never success ────────────────────────────────────
+
+t.assert("jovi-mall's catch-all 404 is recognised as a missing route", () =>
+    isPlatformRouteMissing(createAppError(ERROR_CODES.PLATFORM_OPERATION_REJECTED, 404, 'x', { platformCode: 'NOT_FOUND' })));
+
+/** A newer jovi-mall's genuine 404 must pass through, not be misread as "too old". */
+t.assert('a 404 with any other platform code is NOT read as "too old"', () =>
+    !isPlatformRouteMissing(createAppError(ERROR_CODES.PLATFORM_OPERATION_REJECTED, 404, 'x', { platformCode: 'PAYMENT_SETTINGS_NOT_FOUND' }))
+    && !isPlatformRouteMissing(createAppError(ERROR_CODES.PLATFORM_OPERATION_REJECTED, 409, 'x', { platformCode: 'NOT_FOUND' }))
+    && !isPlatformRouteMissing(createAppError(ERROR_CODES.NOT_FOUND, 404, 'x', { platformCode: 'NOT_FOUND' }))
+    && !isPlatformRouteMissing(new Error('NOT_FOUND')));
+
+/**
+ * The refusal must SURVIVE the error boundary. 503 would derive to `external_service`, whose
+ * message the boundary replaces with "A required dependency is unavailable" — sending the
+ * operator to check whether jovi-mall is up, when it is up and merely older.
+ */
+t.assert('the too-old refusal is a 4xx business_rule, so its message reaches the operator', () => {
+    const error = platformTooOldError();
+    return error.statusCode === 422
+        && error.category === 'business_rule'
+        && /deploy jovi-mall first/i.test(error.message)
+        && error.details?.platformSupported === false;
+});
+
+// ─── Stats: the fold and the pipelines ──────────────────────────────────────
+
+const statsRow = (over: Partial<GatewayStatsRow>): GatewayStatsRow => ({
+    gateway: 'NOTCHPAY', source: 'payments', total: 0, succeeded: 0, failed: 0, pending: 0,
+    stuckPending: 0, settleP50Seconds: null, settleP90Seconds: null, lastSuccessAt: null, ...over,
+});
+
+t.assert('the fold sums sources per gateway and rates DECIDED rows only', () => {
+    const [summary] = summariseByGateway([
+        statsRow({ source: 'payments', total: 10, succeeded: 6, failed: 2, pending: 2, stuckPending: 1 }),
+        statsRow({ source: 'credit_topups', total: 4, succeeded: 2, failed: 0, pending: 2 }),
+    ]);
+    // 8 succeeded of 10 decided → 0.8; the four pending rows are not failures yet.
+    return summary.gateway === 'NOTCHPAY' && summary.total === 14 && summary.pending === 4
+        && summary.stuckPending === 1 && summary.successRate === 0.8 && summary.sources.length === 2;
+});
+
+t.assert('nothing decided gives a null success rate, not 0 or 1', () =>
+    summariseByGateway([statsRow({ total: 3, pending: 3 })])[0].successRate === null);
+
+t.assert('lastSuccessAt is the latest across sources', () => {
+    const [summary] = summariseByGateway([
+        statsRow({ source: 'payments', lastSuccessAt: new Date('2026-09-30T10:00:00Z') }),
+        statsRow({ source: 'plan_purchases', lastSuccessAt: new Date('2026-09-30T12:00:00Z') }),
+    ]);
+    return summary.lastSuccessAt === '2026-09-30T12:00:00.000Z';
+});
+
+t.assert('gateways stay separate', () =>
+    summariseByGateway([statsRow({ gateway: 'NOTCHPAY', total: 1 }), statsRow({ gateway: 'MYCOOLPAY', total: 2 })])
+        .map((s) => s.gateway).join(',') === 'MYCOOLPAY,NOTCHPAY');
+
+/**
+ * The two vocabularies are the database's. A pipeline that matched `created_at` against
+ * `payment_transactions` would return zero rows for every gateway — which renders as an aggregator
+ * nobody used, not as an error.
+ */
+t.assert('payments are matched on camelCase createdAt, billing on snake_case created_at', () => {
+    const since = new Date('2026-09-29T00:00:00Z');
+    const now = new Date('2026-09-30T00:00:00Z');
+    const payments = JSON.stringify(buildGatewayStatsPipeline(GATEWAY_STATS_SOURCES.payments, since, now));
+    const topups = JSON.stringify(buildGatewayStatsPipeline(GATEWAY_STATS_SOURCES.credit_topups, since, now));
+    return payments.includes('"createdAt"') && payments.includes('"$paidAt"') && !payments.includes('created_at')
+        && topups.includes('"created_at"') && topups.includes('"$paid_at"') && !topups.includes('createdAt');
+});
+
+t.assert('the status buckets use each collection\'s own case', () =>
+    GATEWAY_STATS_SOURCES.payments.succeeded.includes('SUCCEEDED')
+    && GATEWAY_STATS_SOURCES.payments.pending.includes('INITIATED')
+    && GATEWAY_STATS_SOURCES.plan_purchases.succeeded.includes('paid')
+    && GATEWAY_STATS_SOURCES.credit_topups.pending.includes('pending'));
+
+t.assert('stuck means pending for more than 30 minutes', () => {
+    const now = new Date('2026-09-30T12:00:00Z');
+    const pipeline = JSON.stringify(buildGatewayStatsPipeline(GATEWAY_STATS_SOURCES.payments, now, now));
+    return STUCK_PENDING_AFTER_MINUTES === 30 && pipeline.includes('2026-09-30T11:30:00.000Z');
+});
+
+t.assert('the stats pipelines only read ($out / $merge appear nowhere)', () =>
+    Object.values(GATEWAY_STATS_SOURCES).every((spec) => {
+        const text = JSON.stringify(buildGatewayStatsPipeline(spec, new Date(), new Date()));
+        return !text.includes('$out') && !text.includes('$merge');
+    }));
 
 process.exit(t.finish());

@@ -308,6 +308,12 @@ export interface PayoutListItemDto {
         by: { id: string | null; name: string | null };
         at: string | null;
     } | null;
+    /**
+     * The aggregator that carried the transfer, once one was attempted. Passed through as stored:
+     * `null` means never attempted OR sent before the stamp existed (then NOTCHPAY). Not
+     * resolved here, because only the second meaning has an answer.
+     */
+    transferGateway: string | null;
     /** The gateway's own transfer id, when one was issued. Never our merchant reference. */
     transferGatewayRef: string | null;
     /** Why the last transfer attempt failed. The funds are still held when this is set. */
@@ -351,6 +357,7 @@ export function toPayoutListItemDto(
                   at: row.triage.at ? new Date(row.triage.at).toISOString() : null,
               }
             : null,
+        transferGateway: row.transfer_gateway ?? null,
         transferGatewayRef: row.transfer_gateway_ref ?? null,
         transferFailureReason: row.transfer_failure_reason ?? null,
         ticketId: toId(row.ticket_id),
@@ -400,7 +407,10 @@ export interface PaymentDto {
      * rather than a guess — the platform itself resolves it by how the row was created.
      */
     payer: { id: string; kind: 'customer_or_user' };
+    /** Which aggregator carried it. Informational, an open string — never branch on it. */
     gateway: string;
+    /** `MTN` · `ORANGE` · `MOOV` · `CARD`, or `null` on rows written before payment routing. */
+    provider: string | null;
     method: string;
     /** The gateway's own reference — the string quoted in a dispute. */
     gatewayRef: string;
@@ -440,6 +450,7 @@ export function toPaymentDto(row: PaymentTransactionReadModel): PaymentDto {
         },
         payer: { id: row.userId.toString(), kind: 'customer_or_user' },
         gateway: row.gateway,
+        provider: row.provider ?? null,
         method: row.method,
         gatewayRef: row.gatewayRef,
         merchantRef: row.merchantRef ?? null,

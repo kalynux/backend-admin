@@ -184,6 +184,60 @@ export const PruneOutboxSchema = z.object({
     confirm: z.string(),
 });
 
+// ═══ Payment routing (jovi-mall ADR-A08) ══════════════════════════════════════
+//
+// Same rule as the phases above: this MIRRORS jovi-mall's `.strict()` body, is never laxer, and
+// exists for a good 400 before the hop. Contract: `jovi-mall/api-doc/payments/routing.md`
+// § Administrator surface.
+
+/**
+ * An aggregator is a NAME, shape-checked here and pinned there.
+ *
+ * Not an enum, for the `WorkerKeyParamSchema` reason: the registry of aggregators is jovi-mall's,
+ * and Campay and Flutterwave are coming. A second list here would refuse the new aggregator the
+ * day it ships, which is exactly the outage this switch exists to end. jovi-mall answers 422
+ * `PAYMENT_SETTINGS_INVALID` with `COLLECTION_AGGREGATOR_UNKNOWN` / `PAYOUT_AGGREGATOR_UNKNOWN`.
+ */
+const AggregatorNameSchema = z.string().trim().regex(/^[A-Z][A-Z0-9_]{1,31}$/, 'Use the aggregator NAME, e.g. NOTCHPAY');
+
+/**
+ * `providers` is a PARTIAL map, merged per provider on jovi-mall's side. Keys are shape-checked
+ * for the same reason as aggregator names; an unknown one is jovi-mall's `PROVIDER_UNKNOWN`.
+ */
+const ProviderNameSchema = z.string().trim().regex(/^[A-Z][A-Z0-9_]{1,31}$/, 'Use the provider NAME, e.g. MTN');
+
+export const SetPaymentSettingsSchema = z.object({
+    collectionAggregator: AggregatorNameSchema.optional(),
+    payoutAggregator: AggregatorNameSchema.optional(),
+    stripeEnabled: z.boolean().optional(),
+    providers: z.record(ProviderNameSchema, z.object({ enabled: z.boolean() }).strict()).optional(),
+    /**
+     * Required, and `0` when no document exists yet. The compare-and-set is what stops two
+     * operators switching at once from each silently undoing the other; a mismatch is 409
+     * `PAYMENT_SETTINGS_VERSION_CONFLICT` — reload and decide again.
+     */
+    expectedVersion: z.number().int().min(0),
+    /**
+     * Required, and stricter than jovi-mall's non-empty rule (stricter is allowed, laxer is not).
+     * The feature-flag bound, for the feature-flag reason: a switch of which company takes the
+     * money with no stated cause is a mystery to whoever finds it weeks later.
+     */
+    reason: z.string().trim().min(10).max(500),
+}).strict();
+
+/**
+ * `?window=24h|7d` — the outcome window for the per-aggregator stats.
+ *
+ * Not `.strict()`: a read follows the service-wide rule (unknown query keys are stripped), and
+ * joining the strict set would mean a row in `api-doc/api/README.md`'s table for one optional
+ * enum. The VALUE is still closed — `?window=30d` is a 400.
+ */
+export const PaymentStatsQuerySchema = z.object({
+    window: z.enum(['24h', '7d']).optional(),
+});
+
+export type SetPaymentSettingsBody = z.infer<typeof SetPaymentSettingsSchema>;
+export type PaymentStatsQuery = z.infer<typeof PaymentStatsQuerySchema>;
 export type SetFeatureFlagBody = z.infer<typeof SetFeatureFlagSchema>;
 export type ReplayOutboxBody = z.infer<typeof ReplayOutboxSchema>;
 export type SetMaintenanceBody = z.infer<typeof SetMaintenanceSchema>;

@@ -76,6 +76,13 @@ export interface PayoutRequestReadModel extends Document {
         at: Date | null;
     } | null;
     /** The gateway's own transfer id, for reconciliation. Never our merchant reference. */
+    /**
+     * Which aggregator the transfer went through, stamped on the FIRST attempt (jovi-mall
+     * ADR-A08); retries and callbacks read it, never the current settings. `null` on a row never
+     * attempted AND on one sent before the stamp existed — the latter was NotchPay, the only
+     * payout aggregator then. An open string.
+     */
+    transfer_gateway?: string | null;
     transfer_gateway_ref?: string | null;
     transfer_failure_reason?: string | null;
     /** `manual` (the owner asked) or `auto_threshold` (the platform opened it for them). */
@@ -187,6 +194,7 @@ export const PAYOUT_LIST_PROJECTION = {
      * gateway. What reconciles a payout against the NotchPay dashboard is the gateway's own
      * id, which is what these two carry.
      */
+    transfer_gateway: 1,
     transfer_gateway_ref: 1,
     transfer_failure_reason: 1,
     resolved_at: 1,

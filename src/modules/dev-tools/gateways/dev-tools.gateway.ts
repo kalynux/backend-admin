@@ -1,10 +1,10 @@
-import { createAppError } from '../../../core/errors/app-error';
+import { AppError, createAppError } from '../../../core/errors/app-error';
 import { ERROR_CODES } from '../../../core/errors/error-codes';
 import { platformRequest } from '../../../infra/platform/platform.client';
 import { auditedAttempt } from '../../audit/domain/audit.writer';
 import { ActorContext } from '../../audit/domain/audit-context';
 import { AuditAction } from '../../audit/domain/audit.catalog';
-import { AuditTarget } from '../../audit/domain/audit.types';
+import { AuditIntent, AuditTarget } from '../../audit/domain/audit.types';
 import { flagEnabled } from '../domain/feature-flag.service';
 
 /**
@@ -54,14 +54,7 @@ function auditedTool<T>(
     return auditedAttempt(
         {
             action,
-            actor: {
-                kind: 'administrator',
-                id: context.actor.adminId,
-                email: context.actor.email,
-                displayName: context.actor.displayName,
-                tier: context.actor.tier,
-                sessionId: context.actor.sessionId,
-            },
+            actor: actorOf(context),
             target,
             context,
             payload,
@@ -71,6 +64,17 @@ function auditedTool<T>(
             return { result, after: asState(result) };
         },
     );
+}
+
+function actorOf(context: ActorContext): AuditIntent['actor'] {
+    return {
+        kind: 'administrator',
+        id: context.actor.adminId,
+        email: context.actor.email,
+        displayName: context.actor.displayName,
+        tier: context.actor.tier,
+        sessionId: context.actor.sessionId,
+    };
 }
 
 /** Whatever the tool reported, flattened onto the row so the outcome is legible. */
@@ -315,6 +319,198 @@ export async function setMaintenance(
                 requestId: context.requestId,
             });
             return result.data;
+        },
+    );
+}
+
+// ═══ Payment routing (jovi-mall ADR-A08) ══════════════════════════════════════
+//
+// Contract: `jovi-mall/api-doc/payments/routing.md` § Administrator surface. Shapes below are
+// that document's, camelCase as jovi-mall serves them.
+
+export interface PaymentSettingsView {
+    collectionAggregator: string;
+    payoutAggregator: string;
+    stripeEnabled: boolean;
+    providers: Record<string, { enabled: boolean }>;
+    version: number;
+    updatedAt: string | null;
+    updatedBy: { id: string; name: string } | null;
+    reason: string | null;
+}
+
+/**
+ * One hard error or soft warning from jovi-mall's `validateSettingsChange`.
+ *
+ * `code` is an OPEN string, deliberately not a union of today's twelve. jovi-mall owns the rules
+ * and adds to them (`NO_MOBILE_PROVIDER_ENABLED` arrived while this was being written); an
+ * exhaustive copy here would be a second list that drifts. Show `code` and `message` as given.
+ */
+export interface PaymentSettingsIssue {
+    code: string;
+    message: string;
+    provider?: string;
+    aggregator?: string;
+}
+
+export interface PaymentAggregatorFacts {
+    name: string;
+    configured: boolean;
+    capabilities: Record<string, unknown>;
+    payoutImplemented: boolean;
+    payoutAvailable: boolean;
+    refundAvailable: boolean;
+    activeForCollections: boolean;
+    activeForPayouts: boolean;
+}
+
+export interface PaymentRoutingState {
+    settings: PaymentSettingsView;
+    aggregators: PaymentAggregatorFacts[];
+    effectiveProviders: unknown;
+    warnings: PaymentSettingsIssue[];
+}
+
+export interface SetPaymentSettingsInput {
+    collectionAggregator?: string;
+    payoutAggregator?: string;
+    stripeEnabled?: boolean;
+    providers?: Record<string, { enabled: boolean }>;
+    expectedVersion: number;
+    reason: string;
+}
+
+export interface SetPaymentSettingsResult {
+    previous: PaymentSettingsView;
+    settings: PaymentSettingsView;
+    /** Top-level settings keys whose value differs. Empty means nothing changed. */
+    changed: string[];
+    warnings: PaymentSettingsIssue[];
+    convergenceSeconds: number;
+}
+
+/**
+ * Is this jovi-mall's catch-all 404 — "no route matches" — rather than a real answer?
+ *
+ * Matched on the PAIR, never the status alone. `toAppError` forwards jovi-mall's status and puts
+ * its code in `details.platformCode`; the catch-all in jovi-mall's `app.ts` raises `NOT_FOUND`.
+ * A newer jovi-mall that serves the route and answers some other 404 must not be read as "too
+ * old", so a 404 with any other platform code passes through untouched.
+ *
+ * Exported for `test-devtools.ts`.
+ */
+export function isPlatformRouteMissing(error: unknown): boolean {
+    return error instanceof AppError
+        && error.code === ERROR_CODES.PLATFORM_OPERATION_REJECTED
+        && error.statusCode === 404
+        && error.details?.platformCode === 'NOT_FOUND';
+}
+
+/**
+ * The refusal a write gets from a jovi-mall that predates payment routing.
+ *
+ * **422 `PLATFORM_OPERATION_REJECTED`, not 503 `SERVICE_DEPENDENCY_UNAVAILABLE`.** A 503
+ * derives to `external_service`, and the error boundary replaces an `external_service` message
+ * with the registry default and drops its details *in every environment* (ADR-016). The operator
+ * would read "A required dependency is unavailable" — which sends them to check whether jovi-mall
+ * is up, when it is up and simply older than this service. 422 derives to `business_rule`, which
+ * survives the boundary, so the actual instruction arrives: deploy jovi-mall first.
+ *
+ * Exported for `test-devtools.ts`.
+ */
+export function platformTooOldError(): AppError {
+    return createAppError(
+        ERROR_CODES.PLATFORM_OPERATION_REJECTED,
+        422,
+        'jovi-mall predates payment routing and has no settings to change. Deploy jovi-mall first — '
+            + 'nothing was switched.',
+        { platformCode: 'NOT_FOUND', platformSupported: false },
+    );
+}
+
+/**
+ * Read the routing settings and per-aggregator facts. A read: no audit row, no flag.
+ *
+ * `null` means the platform is too old to have them. The caller renders that as a state rather
+ * than an error, because the stats beside it are computed here and still mean something.
+ */
+export async function getPaymentSettings(context: ActorContext): Promise<PaymentRoutingState | null> {
+    try {
+        const result = await platformRequest<PaymentRoutingState>({
+            method: 'GET',
+            path: '/dev-tools/payments',
+            actor: context.actor,
+            requestId: context.requestId,
+        });
+        return result.data;
+    } catch (error) {
+        if (isPlatformRouteMissing(error)) return null;
+        throw error;
+    }
+}
+
+/**
+ * Switch payment routing — the collection aggregator, the payout aggregator, Stripe, or which
+ * providers are offered.
+ *
+ * ── ⚠ NOT BEHIND `dev_tools.enabled`, for the `setMaintenance` reason ─────────
+ * Owner decision 5 (ADR-A08), and ADR-014 D-7's argument applied to money: this switch exists for
+ * an aggregator outage, which is precisely when an operator must not first have to find and flip
+ * an unrelated flag — and a flag somebody turned off would lock the platform onto a dead
+ * aggregator. The tier-1 `destructive` permission and the fail-closed audit row still apply.
+ * `test-devtools.ts` pins the absence at the source.
+ *
+ * ── The before/after come from jovi-mall's compare-and-set, never from a GET here ──
+ * `previous` is what the write actually replaced and `settings` what it wrote. Reading first
+ * would race a second operator and record a diff against a state that never existed.
+ *
+ * ── A 404 is "platform too old", never success ────────────────────────────────
+ * The intent row is already committed by then, and the outcome stamp records the refusal.
+ */
+export async function setPaymentSettings(
+    input: SetPaymentSettingsInput,
+    context: ActorContext,
+): Promise<SetPaymentSettingsResult> {
+    return auditedAttempt(
+        {
+            action: 'developer_tools.payments.set',
+            actor: actorOf(context),
+            target: { type: 'payment_settings', id: 'payments', label: 'payment routing' },
+            context,
+            payload: {
+                collectionAggregator: input.collectionAggregator ?? null,
+                payoutAggregator: input.payoutAggregator ?? null,
+                stripeEnabled: input.stripeEnabled ?? null,
+                providers: input.providers ?? null,
+                expectedVersion: input.expectedVersion,
+                reason: input.reason,
+            },
+        },
+        async () => {
+            let result: SetPaymentSettingsResult;
+            try {
+                result = (await platformRequest<SetPaymentSettingsResult>({
+                    method: 'PUT',
+                    path: '/dev-tools/payments',
+                    body: input,
+                    actor: context.actor,
+                    requestId: context.requestId,
+                })).data;
+            } catch (error) {
+                if (isPlatformRouteMissing(error)) throw platformTooOldError();
+                throw error;
+            }
+
+            return {
+                result,
+                before: { ...result.previous },
+                after: {
+                    ...result.settings,
+                    changed: result.changed,
+                    warnings: result.warnings,
+                    convergenceSeconds: result.convergenceSeconds,
+                },
+            };
         },
     );
 }

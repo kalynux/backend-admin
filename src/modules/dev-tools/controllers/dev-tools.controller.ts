@@ -4,13 +4,16 @@ import { sendSuccess } from '../../../core/http/responses';
 import { actorContextOf } from '../../audit/domain/audit-context';
 import { FeatureFlagName } from '../domain/feature-flag.catalog';
 import { listFlags, setFlag } from '../domain/feature-flag.service';
+import { collectPaymentRoutingStats } from '../domain/payment-routing-stats';
 import * as gateway from '../gateways/dev-tools.gateway';
 import {
     FlushCacheBody,
+    PaymentStatsQuery,
     PruneOutboxBody,
     ReplayOutboxBody,
     SetFeatureFlagBody,
     SetMaintenanceBody,
+    SetPaymentSettingsBody,
 } from '../validators/dev-tools.validator';
 
 /**
@@ -116,6 +119,59 @@ export class DevToolsController {
                 ? `Platform maintenance is now "${result.mode}" (was "${result.previousMode}"). `
                   + `Other jovi-mall instances converge within ${result.convergenceSeconds}s.`
                 : `Platform maintenance was already "${result.mode}".`,
+        });
+    });
+
+    /**
+     * GET /api/v1/dev-tools/payments
+     *
+     * jovi-mall's routing state beside this service's own per-aggregator outcomes. The two are
+     * fetched in parallel and fail independently in one direction only: a platform too old to
+     * have the route answers `platformSupported: false` with the stats intact, because the
+     * stats are read here and still mean something. Any OTHER platform failure fails the
+     * request — a screen that silently showed stats with no settings would invite a switch
+     * decided on half the picture.
+     */
+    static getPaymentRouting = asyncHandler(async (req: Request, res: Response) => {
+        const query = req.query as unknown as PaymentStatsQuery;
+        const [state, stats] = await Promise.all([
+            gateway.getPaymentSettings(actorContextOf(req)),
+            collectPaymentRoutingStats(query.window ?? '24h'),
+        ]);
+
+        sendSuccess(res, {
+            platformSupported: state !== null,
+            settings: state?.settings ?? null,
+            aggregators: state?.aggregators ?? [],
+            effectiveProviders: state?.effectiveProviders ?? null,
+            warnings: state?.warnings ?? [],
+            stats,
+        }, state === null
+            ? { message: 'jovi-mall predates payment routing — deploy it first. The outcomes below are still current.' }
+            : undefined);
+    });
+
+    /**
+     * PUT /api/v1/dev-tools/payments
+     *
+     * The message states the convergence window, as `setMaintenance`'s does, and leads with a
+     * no-op when nothing changed: an operator who re-sends the current state during an incident
+     * must not read "switched" and believe traffic moved.
+     */
+    static setPaymentRouting = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as SetPaymentSettingsBody;
+        const result = await gateway.setPaymentSettings(body, actorContextOf(req));
+
+        const summary = result.changed.length === 0
+            ? 'Payment routing was already in that state — nothing changed.'
+            : `Payment routing updated (${result.changed.join(', ')}). `
+              + `Collections: ${result.settings.collectionAggregator}, payouts: ${result.settings.payoutAggregator}. `
+              + `Other jovi-mall instances converge within ${result.convergenceSeconds}s.`;
+
+        sendSuccess(res, result, {
+            message: result.warnings.length > 0
+                ? `${summary} ${result.warnings.length} warning(s) — read them before leaving this screen.`
+                : summary,
         });
     });
 

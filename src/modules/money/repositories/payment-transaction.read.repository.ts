@@ -64,7 +64,16 @@ export interface PaymentTransactionReadModel extends Document {
      * created, and nothing on the row says which.
      */
     userId: ObjectId;
+    /**
+     * Which aggregator carried this money. INFORMATIONAL (jovi-mall ADR-A08): an open string —
+     * Campay and Flutterwave are coming — and nothing here may branch on it.
+     */
     gateway: string;
+    /**
+     * What the customer paid WITH — `MTN` · `ORANGE` · `MOOV` · `CARD` (ADR-A08 layer 1). Null on
+     * every row written before payment routing; no backfill.
+     */
+    provider?: string | null;
     method: string;
     /** The gateway's own transaction reference — the string quoted in a dispute. */
     gatewayRef: string;
@@ -101,6 +110,7 @@ const PAYMENT_TRANSACTION_PROJECTION = {
     purpose: 1,
     userId: 1,
     gateway: 1,
+    provider: 1,
     method: 1,
     gatewayRef: 1,
     merchantRef: 1,
@@ -336,4 +346,208 @@ function toObjectIdOrNothing(value: string): ObjectId | { $in: [] } {
     return Types.ObjectId.isValid(value) && value.length === 24
         ? new ObjectId(value)
         : { $in: [] };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-aggregator outcomes — the evidence behind a manual payment-routing switch
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What an operator looks at before moving collections to another aggregator (jovi-mall ADR-A08,
+ * owner decision 6: failover is manual, and this is what "manual" decides on).
+ *
+ * ── Three collections, because the platform charges through three ─────────────
+ * Orders and bookings settle into `payment_transactions`; plan purchases and credit top-ups
+ * write their own rows and create **no** payment transaction. An aggregator failing only on
+ * billing would be invisible to a `payment_transactions`-only view, and the reverse.
+ *
+ * ── The two vocabularies are the database's, not this file's ──────────────────
+ * `payment_transactions` is camelCase with UPPERCASE statuses; the two billing collections are
+ * snake_case with lowercase ones. Each source therefore carries its own field names and its own
+ * status buckets rather than one pipeline pretending they agree.
+ *
+ * Bucketing, and the reasoning behind the two non-obvious rows:
+ *   - `REFUNDED` / `reversed` count as **succeeded**. The money arrived — the aggregator did its
+ *     job — and what happened afterwards is a business decision, not a gateway outcome.
+ *   - `CANCELLED` counts as **failed**. From the operator's chair a cancelled charge and a failed
+ *     one are the same symptom: the customer did not pay through this aggregator.
+ *
+ * ── Aggregates only ───────────────────────────────────────────────────────────
+ * Counts, durations and one timestamp per gateway. No row, no payer, no reference leaves the
+ * database, so no projection is at stake; the one each class passes is the base class's
+ * required argument and `aggregateBy` never applies it.
+ *
+ * ── Index cost ────────────────────────────────────────────────────────────────
+ * `payment_transactions` carries `{gateway, status, createdAt}` ("gateway analytics"), so its
+ * window is index-served. `plan_purchases` and `credit_topups` are indexed by owner only, so
+ * their window is a **collection scan**. Acceptable at today's volume and deliberately not
+ * fixed here: indexes are jovi-mall's (its migration ledger), and a read one tier-1 operator
+ * opens during an incident is not a reason to add one.
+ */
+export type GatewayStatsSource = 'payments' | 'plan_purchases' | 'credit_topups';
+
+export interface GatewayStatsSourceSpec {
+    source: GatewayStatsSource;
+    createdField: string;
+    paidField: string;
+    succeeded: readonly string[];
+    failed: readonly string[];
+    pending: readonly string[];
+}
+
+export const GATEWAY_STATS_SOURCES: Readonly<Record<GatewayStatsSource, GatewayStatsSourceSpec>> = Object.freeze({
+    payments: {
+        source: 'payments',
+        createdField: 'createdAt',
+        paidField: 'paidAt',
+        succeeded: ['SUCCEEDED', 'REFUNDED'],
+        failed: ['FAILED', 'CANCELLED'],
+        pending: ['INITIATED', 'PENDING'],
+    },
+    plan_purchases: {
+        source: 'plan_purchases',
+        createdField: 'created_at',
+        paidField: 'paid_at',
+        succeeded: ['paid', 'reversed'],
+        failed: ['failed'],
+        pending: ['pending'],
+    },
+    credit_topups: {
+        source: 'credit_topups',
+        createdField: 'created_at',
+        paidField: 'paid_at',
+        succeeded: ['paid', 'reversed'],
+        failed: ['failed'],
+        pending: ['pending'],
+    },
+});
+
+/** A pending row older than this is reported as stuck — a settlement that never arrived. */
+export const STUCK_PENDING_AFTER_MINUTES = 30;
+
+export interface GatewayStatsRow {
+    gateway: string;
+    source: GatewayStatsSource;
+    total: number;
+    succeeded: number;
+    failed: number;
+    pending: number;
+    /** Pending AND created more than `STUCK_PENDING_AFTER_MINUTES` ago. A subset of `pending`. */
+    stuckPending: number;
+    /**
+     * Median and 90th-percentile time from creation to settlement, over succeeded rows with a
+     * settlement stamp. `null` when there are none. Approximate (`$percentile`, MongoDB 7).
+     */
+    settleP50Seconds: number | null;
+    settleP90Seconds: number | null;
+    /** The latest settlement stamp IN THE WINDOW. `null` means none in the window, not "never". */
+    lastSuccessAt: Date | null;
+}
+
+/**
+ * Pure, and exported so the test can assert the pipeline without a database.
+ *
+ * `$match` → one `$group` per gateway. The pending/stuck split is computed in the group rather
+ * than by a second query, so one scan answers every column.
+ */
+export function buildGatewayStatsPipeline(spec: GatewayStatsSourceSpec, since: Date, now: Date): Document[] {
+    const created = `$${spec.createdField}`;
+    const paid = `$${spec.paidField}`;
+    const stuckBefore = new Date(now.getTime() - STUCK_PENDING_AFTER_MINUTES * 60_000);
+
+    const isIn = (values: readonly string[]): Document => ({ $in: ['$status', [...values]] });
+    const countIf = (condition: Document): Document => ({ $sum: { $cond: [condition, 1, 0] } });
+    const settled = { $and: [isIn(spec.succeeded), { $eq: [{ $type: paid }, 'date'] }] };
+
+    return [
+        // `gateway: {$type: 'string'}` drops billing rows still at `gateway: null` — a checkout
+        // abandoned before a gateway was chosen says nothing about any aggregator.
+        { $match: { [spec.createdField]: { $gte: since }, gateway: { $type: 'string' } } },
+        {
+            $group: {
+                _id: '$gateway',
+                total: { $sum: 1 },
+                succeeded: countIf(isIn(spec.succeeded)),
+                failed: countIf(isIn(spec.failed)),
+                pending: countIf(isIn(spec.pending)),
+                stuckPending: countIf({ $and: [isIn(spec.pending), { $lt: [created, stuckBefore] }] }),
+                // `$percentile` ignores non-numeric input, so an unsettled row contributes a null
+                // and is skipped rather than counted as zero seconds.
+                settle: {
+                    $percentile: {
+                        input: { $cond: [settled, { $subtract: [paid, created] }, null] },
+                        p: [0.5, 0.9],
+                        method: 'approximate',
+                    },
+                },
+                lastSuccessAt: { $max: { $cond: [settled, paid, null] } },
+            },
+        },
+    ];
+}
+
+export interface GatewayStatsGroup extends Document {
+    _id: string;
+    total: number;
+    succeeded: number;
+    failed: number;
+    pending: number;
+    stuckPending: number;
+    settle: Array<number | null> | null;
+    lastSuccessAt: Date | null;
+}
+
+function toSeconds(ms: number | null | undefined): number | null {
+    return typeof ms === 'number' && Number.isFinite(ms) ? Math.round(ms / 1000) : null;
+}
+
+/** Pure, exported for the test. */
+export function toGatewayStatsRow(source: GatewayStatsSource, group: GatewayStatsGroup): GatewayStatsRow {
+    return {
+        gateway: group._id,
+        source,
+        total: group.total,
+        succeeded: group.succeeded,
+        failed: group.failed,
+        pending: group.pending,
+        stuckPending: group.stuckPending,
+        settleP50Seconds: toSeconds(group.settle?.[0]),
+        settleP90Seconds: toSeconds(group.settle?.[1]),
+        lastSuccessAt: group.lastSuccessAt ?? null,
+    };
+}
+
+/** The base class's required projection. `aggregateBy` never applies it — see above. */
+const GATEWAY_STATS_PROJECTION = { _id: 1, gateway: 1, status: 1 } as const;
+
+abstract class GatewayStatsReadRepository extends PlatformReadRepository<Document> {
+    protected abstract readonly spec: GatewayStatsSourceSpec;
+
+    async gatewayStats(since: Date, now: Date = new Date()): Promise<GatewayStatsRow[]> {
+        const groups = await this.aggregateBy<GatewayStatsGroup>(
+            buildGatewayStatsPipeline(this.spec, since, now),
+        );
+        return groups.map((group) => toGatewayStatsRow(this.spec.source, group));
+    }
+}
+
+export class PaymentGatewayStatsReadRepository extends GatewayStatsReadRepository {
+    protected readonly spec = GATEWAY_STATS_SOURCES.payments;
+    constructor() {
+        super(COLLECTIONS.PAYMENT_TRANSACTION, GATEWAY_STATS_PROJECTION);
+    }
+}
+
+export class PlanPurchaseGatewayStatsReadRepository extends GatewayStatsReadRepository {
+    protected readonly spec = GATEWAY_STATS_SOURCES.plan_purchases;
+    constructor() {
+        super(COLLECTIONS.PLAN_PURCHASE, GATEWAY_STATS_PROJECTION);
+    }
+}
+
+export class CreditTopupGatewayStatsReadRepository extends GatewayStatsReadRepository {
+    protected readonly spec = GATEWAY_STATS_SOURCES.credit_topups;
+    constructor() {
+        super(COLLECTIONS.CREDIT_TOPUP, GATEWAY_STATS_PROJECTION);
+    }
 }

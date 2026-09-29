@@ -1420,6 +1420,36 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'developer_tools', action: 'write', phase: 15, destructive: true,
         summary: 'Permanently delete delivered outbound events past a retention age',
     },
+
+    // ═══ Payment routing (jovi-mall ADR-A08) ══════════════════════════════════
+    //
+    // Tier-1 confinement is the family again, exactly as for Phase 15's four: the boot
+    // assertion refuses any `developer_tools.*` to any tier but 1. `phase: 15` because this
+    // extends Phase 15's surface; the design record is jovi-mall's ADR-A08, not a wi-admin one.
+
+    /**
+     * The one surface that NAMES aggregators. `/api/payments/options` deliberately never does, so
+     * which company moves the platform's money is visible here and nowhere else. The stats read
+     * alongside it are aggregates over `payment_transactions` / `plan_purchases` /
+     * `credit_topups`, never rows.
+     */
+    'developer_tools.payments.read': {
+        family: 'developer_tools', action: 'read', phase: 15,
+        summary: 'View which payment aggregator collects and pays out, and per-aggregator outcomes',
+    },
+    /**
+     * Moves every NEW charge (or payout) to a different company. Charges already open stay on
+     * the gateway stored on their row, so a switch strands nothing — but a wrong one refuses
+     * every customer until it is switched back, which is why this is `destructive`.
+     *
+     * Like `developer_tools.maintenance.set`, this is **not behind `dev_tools.enabled`** (owner
+     * decision 5, ADR-014 D-7): the switch exists for an aggregator outage, which is precisely
+     * when nobody should first have to find and flip an unrelated flag.
+     */
+    'developer_tools.payments.set': {
+        family: 'developer_tools', action: 'write', phase: 15, destructive: true,
+        summary: 'Switch the payment aggregator for collections or payouts, Stripe, or the offered providers',
+    },
 } as const satisfies Record<string, PermissionSpec>);
 
 /**

@@ -4,7 +4,9 @@
 
 Base path: `/api/v1/dev-tools`
 
-Feature flags, worker triggers, outbox replay and prune, cache flush, and maintenance mode.
+**2026-09-30:** the two `/dev-tools/payments` rows and their section were added against source (jovi-mall ADR-A08). The stamp above covers the other nine.
+
+Feature flags, worker triggers, outbox replay and prune, cache flush, maintenance mode, and the payment-routing switch.
 
 **Almost everything here is Developer (tier 1) only**, and every write is audited.
 
@@ -22,6 +24,8 @@ Design records: [`../../docs/ADR-014-SYSTEM-OPERATIONS.md`](../../docs/ADR-014-S
 | `POST` | `/dev-tools/catalogue/vectorise` | `developer_tools.catalogue.vectorise` | ✅ | ✅ |
 | `PUT` | `/dev-tools/maintenance` | `developer_tools.maintenance.set` | ❌ | ✅ |
 | `POST` | `/dev-tools/cache/flush` | `developer_tools.cache.flush` | ✅ | ✅ |
+| `GET` | `/dev-tools/payments` | `developer_tools.payments.read` | ❌ | — |
+| `PUT` | `/dev-tools/payments` | `developer_tools.payments.set` | ❌ | ✅ |
 
 ---
 
@@ -54,15 +58,16 @@ When the flag is off:
 **409, not 403** — you *hold* the permission and the service is refusing right now. A 403 would
 send an administrator to look at their own grants, which is the wrong place.
 
-### The three carve-outs
+### The four carve-outs
 
 | Route | Why it is not behind the flag |
 |---|---|
 | `GET /feature-flags`, `PUT /feature-flags/:flag` | **This is how you turn the flag on.** A switch that turns off its own switch is a trap |
 | `PUT /maintenance` | Every other tool re-runs a side effect; this one **refuses traffic**, and it is the only one whose failure mode is losing the ability to undo it. With the flag applied, an operator could not enter maintenance during an incident without first flipping an unrelated switch — and if anybody turned `dev_tools.enabled` off mid-window, **the exit would be locked** |
 | `GET /workers` | A read. Knowing which workers exist is not running one |
+| `GET /payments`, `PUT /payments` | **The manual failover switch for an aggregator outage** (jovi-mall ADR-A08, owner decision 5). Maintenance's argument applied to money: during an outage nobody should first have to find and flip an unrelated flag, and a flag turned off would lock the platform onto a dead aggregator |
 
-The permission and the audit row still apply to all three. Only the flag is dropped.
+The permission and the audit row still apply to all four. Only the flag is dropped.
 
 ---
 
@@ -448,6 +453,167 @@ from. **A partial scan that read as "done" would be the worst possible outcome h
 `developer_tools.cache.flush`
 
 ---
+
+## `GET /dev-tools/payments`
+
+Which aggregator collects and which pays out, what each one can do, and how each has been doing.
+**The one administrator surface that names aggregators**. The public
+`/api/payments/options` never does.
+
+| | |
+|---|---|
+| **Permission** | `developer_tools.payments.read`, Developer only |
+| **Flag** | **Not behind `dev_tools.enabled`**. See the carve-outs above |
+| **Query** | `window`: `24h` (default) or `7d`. Any other value is a `400` |
+
+### Response (200)
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "platformSupported": true,
+    "settings": {
+      "collectionAggregator": "NOTCHPAY",
+      "payoutAggregator": "NOTCHPAY",
+      "stripeEnabled": false,
+      "providers": { "MTN": { "enabled": true }, "ORANGE": { "enabled": true }, "MOOV": { "enabled": false }, "CARD": { "enabled": false } },
+      "version": 3,
+      "updatedAt": "2026-09-30T10:00:00.000Z",
+      "updatedBy": { "id": "…", "name": "…" },
+      "reason": "…"
+    },
+    "aggregators": [
+      { "name": "NOTCHPAY", "configured": true, "capabilities": { "…": "…" }, "payoutImplemented": true,
+        "payoutAvailable": true, "refundAvailable": true, "activeForCollections": true, "activeForPayouts": true }
+    ],
+    "effectiveProviders": { "…": "jovi-mall's shape, passed through" },
+    "warnings": [ { "code": "PROVIDER_UNROUTABLE", "message": "…", "provider": "MOOV" } ],
+    "stats": {
+      "window": "24h",
+      "since": "2026-09-29T12:00:00.000Z",
+      "stuckPendingAfterMinutes": 30,
+      "gateways": [
+        {
+          "gateway": "NOTCHPAY",
+          "total": 412, "succeeded": 371, "failed": 22, "pending": 19, "stuckPending": 4,
+          "successRate": 0.944,
+          "lastSuccessAt": "2026-09-30T11:58:12.000Z",
+          "sources": [
+            { "source": "payments", "total": 380, "succeeded": 344, "failed": 20, "pending": 16, "stuckPending": 3,
+              "settleP50Seconds": 41, "settleP90Seconds": 118, "lastSuccessAt": "2026-09-30T11:58:12.000Z" },
+            { "source": "credit_topups", "…": "…" }
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+`settings`, `aggregators`, `effectiveProviders` and `warnings` come from jovi-mall
+(`jovi-mall/api-doc/payments/routing.md` § Administrator surface) and are passed through. `stats`
+is computed here, directly on `payment_transactions`, `plan_purchases` and `credit_topups`.
+
+| Field | Notes |
+|---|---|
+| **`platformSupported`** | **`false` when jovi-mall predates payment routing.** `settings` is then `null`, `aggregators` and `warnings` are empty, and `stats` is still filled in. **Render this as "deploy jovi-mall first", never as an empty configuration** |
+| `warnings[].code` | **An open list.** Show `code` and `message` as given and never switch on a fixed set. jovi-mall adds rules (`NO_MOBILE_PROVIDER_ENABLED` arrived during the build) |
+| `successRate` | `succeeded ÷ (succeeded + failed)`, over **decided** rows only. Pending rows are left out, because a burst of charges still waiting on customers' phones is not a failure yet. **`null` when nothing was decided**, which is different from `0` |
+| `stuckPending` | Pending **and** created more than 30 minutes ago: a settlement that never arrived. A subset of `pending` |
+| `sources[]` | One row per collection. Settle-time percentiles are **per source only**, because they cannot be merged, and because an aggregator failing only on billing is a real, separate fault |
+| `settleP50Seconds` / `settleP90Seconds` | From creation to settlement, over succeeded rows that have a settlement stamp. Approximate. `null` when there are none |
+| `lastSuccessAt` | The latest settlement **in the window**. `null` means none in the window, **not** "never" |
+
+How statuses are counted: `REFUNDED` and `reversed` count as **succeeded**, because the money
+arrived. `CANCELLED` counts as **failed**. `INITIATED` and `PENDING` count as **pending**. Billing
+rows that never chose a gateway are left out.
+
+⚠ The `plan_purchases` and `credit_topups` windows are **collection scans**, since those tables
+are indexed by owner only. That is fine at today's volume, and not fixed here because indexes
+belong to jovi-mall.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | `window` is not `24h` or `7d` |
+| 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | jovi-mall is unreachable or failed. **The whole read fails**, and no partial screen is shown: switching on the stats alone would mean deciding on half the picture |
+
+---
+
+## `PUT /dev-tools/payments`
+
+The manual failover switch: the collection aggregator, the payout aggregator, Stripe, and which
+providers are offered.
+
+| | |
+|---|---|
+| **Permission** | `developer_tools.payments.set`, Developer only, `destructive` |
+| **Flag** | **Not behind `dev_tools.enabled`**. See the carve-outs above |
+
+It changes only **new** charges and payouts. A charge that is already open, and a payout already
+attempted, keep the gateway stored on their row. So a switch strands nothing that is in flight.
+
+### Request body (`.strict()`)
+
+| Field | Type | Rules |
+|---|---|---|
+| `collectionAggregator` | string | Optional. An uppercase **name**, e.g. `MYCOOLPAY`. Not pinned to a list here, so a new aggregator works the day jovi-mall ships it. jovi-mall refuses unknown ones |
+| `payoutAggregator` | string | Optional. Same rules |
+| `stripeEnabled` | boolean | Optional. Stripe's own switch, independent of the collection aggregator |
+| `providers` | `{ [NAME]: { enabled: boolean } }` | Optional and **partial**, merged per provider |
+| `expectedVersion` | integer ≥ 0 | **Required.** The `settings.version` you read. Send `0` when no document exists yet. If it no longer matches, the answer is `409`: reload and decide again |
+| `reason` | string, 10–500 | **Required.** Recorded on the settings document and in the audit row |
+
+Any other key is a `400`, including an old client's `gateway`, and a misspelt field that a lax
+schema would drop, leaving a `200` that switched nothing.
+
+```json
+{ "collectionAggregator": "MYCOOLPAY", "expectedVersion": 3, "reason": "NotchPay refusing pushes since 14:02" }
+```
+
+### Response (200)
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "previous": { "collectionAggregator": "NOTCHPAY", "…": "the settings view before" },
+    "settings": { "collectionAggregator": "MYCOOLPAY", "version": 4, "…": "the settings view after" },
+    "changed": ["collectionAggregator"],
+    "warnings": [ { "code": "PAYOUT_UNAVAILABLE", "message": "…", "aggregator": "NOTCHPAY" } ],
+    "convergenceSeconds": 5
+  },
+  "message": "Payment routing updated (collectionAggregator). Collections: MYCOOLPAY, payouts: NOTCHPAY. Other jovi-mall instances converge within 5s. 1 warning(s) — read them before leaving this screen."
+}
+```
+
+- **`changed: []`** means nothing changed. The message then says so, and does not say "switched".
+- **`warnings`** are soft rules. The write **was accepted**. Show every one of them.
+- **Show `convergenceSeconds`.** Other instances follow within that window, so traffic in the first
+  few seconds may still go to the previous aggregator.
+
+### Errors
+
+| Status | Code | `details.platformCode` | When |
+|---|---|---|---|
+| 400 | `VALIDATION_ERROR` | — | An unknown key, a lowercase name, a missing `expectedVersion`, or a `reason` under 10 characters |
+| 409 | `PLATFORM_OPERATION_REJECTED` | `PAYMENT_SETTINGS_VERSION_CONFLICT` | Somebody else switched first. Reload, look again, then decide |
+| 422 | `PLATFORM_OPERATION_REJECTED` | `PAYMENT_SETTINGS_INVALID` | A hard rule was broken. **`details.errors[]`** lists them as `{code, message, provider?, aggregator?}`. Treat the codes as an **open list**. Nothing was written |
+| 422 | `PLATFORM_OPERATION_REJECTED` | `NOT_FOUND` (with `platformSupported: false`) | **jovi-mall predates payment routing. Deploy jovi-mall first.** Nothing was switched. It is `422` rather than `503` on purpose: a `503`'s message is replaced at the error boundary with "a dependency is unavailable", which would send an operator to check whether jovi-mall is up when it is only older |
+| 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | — | jovi-mall is unreachable |
+
+### Audit
+
+`developer_tools.payments.set`, target type `payment_settings`, **fail-closed**: if the intent row
+cannot be written, the switch does not happen. The row's `before` / `after` are jovi-mall's own
+`previous` / `settings` from the compare-and-set, never a separate read first, which would race a
+second operator. `after` also carries `changed`, `warnings` and `convergenceSeconds`. A refused
+switch leaves the row at `failed`, with the refusal as the outcome.
+
+---
+
 
 ## What is deliberately **not** here
 

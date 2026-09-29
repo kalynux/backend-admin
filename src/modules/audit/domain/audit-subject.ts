@@ -57,6 +57,9 @@ const SUBJECT_CLASS: Readonly<Record<AuditTargetType, AuditSubjectClass>> = Obje
     // Same class, same argument: a maintenance window is this service's machinery acting on the
     // platform's availability, not a fact about any platform actor or record.
     maintenance_window: 'internal',
+    // And again: payment routing is the platform's machinery, not a fact about any actor or
+    // record — and it names aggregators, which no surface below the Developer tier does.
+    payment_settings: 'internal',
 
     none: 'internal',
 });
