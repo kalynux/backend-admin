@@ -363,6 +363,19 @@ export interface PlatformUpload extends Omit<PlatformRequest, 'body' | 'method'>
 }
 
 /**
+ * The upload's own deadline, and why it cannot be `JOVI_MALL_TIMEOUT_MS`.
+ *
+ * Axios starts its clock when the request STARTS, and this request's body is the
+ * administrator's browser upload, still arriving. So the deadline covers their uplink, not
+ * just jovi-mall's work — a 3 MB cover over a 2 Mbps mobile connection is 12 s of transfer
+ * before jovi-mall has seen the last byte. Inheriting the 5 s JSON default failed every
+ * such upload as `503 jovi-mall is unreachable` (2026-09-29), which reads as an outage and
+ * sent the diagnosis toward the storage domain instead. Sized for `ADMIN_UPLOAD_MAX_BYTES`
+ * (32 MB) on a slow link; a caller may still pass `timeoutMs`.
+ */
+const UPLOAD_TIMEOUT_MS = 120_000;
+
+/**
  * Stream a request BODY at jovi-mall — the mirror of `platformStream` (BR-015 · L-2).
  *
  * ── The third transport on this client, and why it is a third function ────────
@@ -435,6 +448,7 @@ export async function platformUpload<T>(request: PlatformUpload): Promise<{ data
             maxRedirects: 0,
             maxBodyLength: Infinity,
             maxContentLength: Infinity,
+            timeout: request.timeoutMs ?? UPLOAD_TIMEOUT_MS,
         });
 
         const payload = response.data as { data?: T; meta?: unknown };
