@@ -246,7 +246,6 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
                 lineId: idOf(i._id),
                 unitPricePaid: i.price,
                 quantity: i.quantity,
-                negotiatedUnitPrice: i.negotiated_unit_price ?? null,
                 floorPriceSnapshot: i.floor_price_snapshot ?? null,
             })),
             bargainByOrder.get(idOf(o._id)) ?? 0,

@@ -1,5 +1,7 @@
 # Permissions and administrator levels
 
+⚠ **Re-measured against source 2026-09-27: 125 permissions across 21 families, tier totals 125 / 105 / 39.** One new name, `money.statements.send` (account statements — [the changelog](../FRONTEND-CHANGELOG-account-statements.md)), held by **every** tier, Support included (owner decision). It guards `POST /accounts/:ownerType/:ownerId/statements`, is not flagged — it moves nothing and never prints a payout account number — and every request is audited before anything is read. `npm run authz:matrix` prints this matrix.
+
 ⚠ **Re-measured against source 2026-09-22: 124 permissions across 21 families, tier totals 124 / 104 / 38.** This closes the gap the previous note flagged. ADR-024's `cod.triage` and `money.payouts.triage` now have rows, and four tier-3 grants that this document showed as withheld — `cod.overview.read`, `cod.remittances.read`, `cod.deposits.read`, `money.payouts.read` — are marked as granted, which is what the code has always said. **The matrix below now equals `npm run authz:matrix`**; the totals in the level table count it, so the two agree with the code rather than merely with each other.
 
 ⚠ **Two consequences of that correction are not arithmetic, and a client mirroring this file must pick them up.** *"Support holds nothing financial"* is **no longer true without qualification** — `money.payouts.triage` is `financial` and tier 3 holds it under a named exemption — and the `any`-mode guard count moved from three to **four**, because `POST /money/payouts/:payoutId/reject` accepts `money.payouts.reject` **or** `money.payouts.triage`. Both are detailed below. Re-derive rather than quoting.
@@ -23,9 +25,9 @@ Design records: [`../../docs/ADR-003-GRANULAR-PERMISSIONS.md`](../../docs/ADR-00
 
 | Level (`tier`) | Label | Holds | Shape of the job |
 |---|---|---|---|
-| **1** | Developer | 124 of 124 | Everything, including the developer tools and every escalation-flagged action |
-| **2** | Admin | 104 of 124 | The operational tier — runs the platform day to day, including the money |
-| **3** | Support | 38 of 124 | Ticket work, the lookups needed to answer a ticket, editorial write on articles and bylines, resetting the customer bot's memory of a chat, and **pre-screening** a declared COD handover or a payout request. Nothing destructive, publishing stays a level above, and the one `financial` permission it holds cannot send money anywhere |
+| **1** | Developer | 125 of 125 | Everything, including the developer tools and every escalation-flagged action |
+| **2** | Admin | 105 of 125 | The operational tier — runs the platform day to day, including the money |
+| **3** | Support | 39 of 125 | Ticket work, the lookups needed to answer a ticket, sending an account holder their statement, editorial write on articles and bylines, resetting the customer bot's memory of a chat, and **pre-screening** a declared COD handover or a payout request. Nothing destructive, publishing stays a level above, and the one `financial` permission it holds cannot send money anywhere |
 
 A level is an administrator's **entire** authorization state. `tier` appears on the profile
 returned by `GET /auth/me`.
@@ -178,7 +180,7 @@ record were one decision, not two. See [ADR-020](../../docs/ADR-020-ADMIN-DATA-D
 ## The matrix
 
 ● granted  ·  not granted  ·  **†** = catalogued policy with **no endpoint built yet**
-(**4** of 124 permissions — down from 27, and the four that remain each have a written reason
+(**4** of 125 permissions — down from 27, and the four that remain each have a written reason
 below. The policy is decided ahead of the surface, deliberately.)
 
 ### `agents`
@@ -256,6 +258,7 @@ Full contract in [cod.md](cod.md).
 | `money.payouts.triage` | write | ● | ● | ● | financial | Endorse a payout request as genuine, or reject it — never sends money |
 | `money.payouts.destination.read` | read | ● | ● | · | financial | Reveal the full payout destination (account or mobile number) on one payout request — every reveal is recorded in the audit trail |
 | `money.payments.read` | read | ● | ● | ● | — | View gateway payment and refund settlements |
+| `money.statements.send` | read | ● | ● | ● | — | Download or email an account holder's full statement of orders, fees, COD, payouts, credits and plans — every request is recorded in the audit trail |
 
 **Payout review is two stages and only one of them moves money** (ADR-024). `money.payouts.triage`
 opens `POST /money/payouts/:payoutId/triage`, the pre-screen: a reviewer endorses the request as
@@ -680,6 +683,9 @@ question arrives as a ticket, so refusing it to the tier that answers tickets es
 - `money.payments.read` (gateway settlements). *"Did my payment go through, and was I refunded"*
   is one of the commonest ticket questions, and the sharp fields — raw gateway payload, payload
   hash, idempotency key — are removed by **projection**, for everyone, rather than by permission.
+- `money.statements.send` (account statements). *"Send me my statement"* arrives as a ticket.
+  It is bounded by the audit row, committed before anything is read, and by jovi-mall choosing
+  the recipient (the account's verified email only); the file never carries a payout account number.
 - The three COD reads and `money.payouts.read`, so a reviewer can see the queue and the cash
   position they are being asked to pre-screen against.
 - `cod.triage` and `money.payouts.triage` — the pre-screens themselves, and the latter is the

@@ -126,7 +126,7 @@ export interface BargainLine {
     lineId: string;
     unitPricePaid: number;
     quantity: number;
-    negotiatedUnitPrice: number | null;
+    /** The vendor's minimum as snapshotted at checkout; null = not bargainable, no fee. */
     floorPriceSnapshot: number | null;
 }
 
@@ -138,13 +138,18 @@ export interface BargainLine {
  * value — this apportions the persisted total by each line's share of the uplift, with the
  * rounding remainder given to the largest line so the lines always sum to the total exactly.
  * For a one-line order (the common case) it IS the persisted figure.
+ *
+ * ⚠ The uplift is measured from the price PAID, on every line with a floor — haggled or not.
+ * Since 2026-09-28 jovi-mall charges the fee on an un-haggled sale of a bargainable variant too
+ * (`bargainLineOf` in its earnings split), so keying on `negotiated_unit_price` here would put the
+ * whole fee on the haggled lines of a mixed order and none on the un-haggled ones that also paid it.
  */
 export function apportionBargainFee(lines: BargainLine[], totalBargainFee: number): Map<string, number> {
     const uplifts = lines.map((line) => ({
         lineId: line.lineId,
         uplift:
-            line.negotiatedUnitPrice !== null && line.floorPriceSnapshot !== null
-                ? Math.max(0, (line.negotiatedUnitPrice - line.floorPriceSnapshot) * line.quantity)
+            line.floorPriceSnapshot !== null
+                ? Math.max(0, (line.unitPricePaid - line.floorPriceSnapshot) * line.quantity)
                 : 0,
     }));
     const totalUplift = uplifts.reduce((sum, u) => sum + u.uplift, 0);

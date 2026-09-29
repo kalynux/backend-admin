@@ -98,15 +98,21 @@ async function main(): Promise<number> {
 
     const shares = apportionBargainFee(
         [
-            { lineId: 'a', unitPricePaid: 1_200, quantity: 1, negotiatedUnitPrice: 1_200, floorPriceSnapshot: 1_000 },
-            { lineId: 'b', unitPricePaid: 700, quantity: 2, negotiatedUnitPrice: 700, floorPriceSnapshot: 600 },
-            { lineId: 'c', unitPricePaid: 500, quantity: 1, negotiatedUnitPrice: null, floorPriceSnapshot: null },
+            { lineId: 'a', unitPricePaid: 1_200, quantity: 1, floorPriceSnapshot: 1_000 },
+            { lineId: 'b', unitPricePaid: 700, quantity: 2, floorPriceSnapshot: 600 },
+            { lineId: 'c', unitPricePaid: 500, quantity: 1, floorPriceSnapshot: null },
+            // Sold at the ask WITHOUT haggling — still pays (owner decision 2026-09-28).
+            { lineId: 'd', unitPricePaid: 1_500, quantity: 1, floorPriceSnapshot: 1_000 },
+            // Sold at the minimum — no uplift, no fee.
+            { lineId: 'e', unitPricePaid: 1_000, quantity: 1, floorPriceSnapshot: 1_000 },
         ],
-        121,
+        270, // floor(.3×200) + floor(.3×200) + floor(.3×500) = 60 + 60 + 150
     );
     t.assert('bargain fee apportioned by uplift sums to the persisted total exactly', () =>
-        [...shares.values()].reduce((s, v) => s + v, 0) === 121);
-    t.assert('an un-bargained line carries no bargain fee', () => shares.get('c') === 0);
+        [...shares.values()].reduce((s, v) => s + v, 0) === 270);
+    t.assert('a line of a non-bargainable variant carries no bargain fee', () => shares.get('c') === 0);
+    t.assert('an UN-HAGGLED line sold at the ask carries its share (30% of 500)', () => shares.get('d') === 150);
+    t.assert('a line sold at the minimum carries no bargain fee', () => shares.get('e') === 0);
 
     // Which remittance settled a vendor's COD cash: no stored link, so matched on the instant
     // the FIFO settlement stamped inside the confirmation's own transaction.
