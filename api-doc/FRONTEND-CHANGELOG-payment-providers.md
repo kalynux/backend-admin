@@ -167,6 +167,18 @@ no dashboard release**. Anywhere the dashboard types `gateway` as
 widen it to `string` and render an unknown value as its raw name. Filters that list aggregators
 should take the list from the Payments screen's `aggregators[]`, not from a constant.
 
+**Update — `CAMPAY` is now a gateway value** (jovi-mall `76bc473`, ADR-A08 P2.1). It can appear as
+`gateway` on payments, top-ups and plan purchases, as `transferGateway` on payouts, and as a row in
+the Payments screen's `aggregators[]` (collects MTN and ORANGE by push; can pay out). **No dashboard
+change is needed** if the rule above is followed: it renders by its raw name, and the Payments
+screen lists it from `aggregators[]`. Like My-CoolPay, Campay has **no refund API**, so a refund on
+a Campay payment takes the manual path (`gatewayRefundSupported: false` on refund eligibility).
+
+Payouts stuck in `processing` are now re-checked by a reconciliation sweep (jovi-mall `9ab91fa`)
+against the aggregator stored on the payout, so fewer of them need an administrator. What the
+sweep cannot settle still does.
+<!-- W6-VERIFY: S4's manual "resolve unknown" payout action (payout-resolution.service.ts, uncommitted) — add the admin action, its route, permission and audit once it lands. -->
+
 ---
 
 ## Re-copy
