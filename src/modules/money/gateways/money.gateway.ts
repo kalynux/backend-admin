@@ -431,6 +431,62 @@ export async function sendPayout(
 }
 
 /**
+ * Decide a transfer whose outcome is UNKNOWN — the payout is `processing` and nobody can ask
+ * the gateway (the transfer POST timed out, so there is no provider transfer id).
+ *
+ * `paid` settles it exactly as a confirmed transfer does (balance debited, ticket resolved,
+ * `payout.paid`); `failed` parks it in `failed` with the hold KEPT (ADR-024 D-7), ready to
+ * retry or reject. jovi-mall refuses anything not `processing`, and anything quieter than its
+ * reconciliation sweep's MIN_AGE — a callback may still be on its way — with 409
+ * `EARNINGS_PAYOUT_TRANSFER_IN_FLIGHT` and a `settleAfter` time.
+ *
+ * Two audit actions, one per outcome, because they are governed by different permissions —
+ * see the catalog entry.
+ */
+export async function resolveUnknownPayout(
+    payoutId: string,
+    input: { outcome: 'paid' | 'failed'; reason: string; evidence: string | null },
+    audit: PayoutAuditContext,
+    context: ActorContext,
+    viaApprovalId: string | null = null,
+): Promise<PlatformPayoutRequest> {
+    return auditedDelegation(
+        input.outcome === 'paid'
+            ? 'money.payouts.resolve_unknown_paid'
+            : 'money.payouts.resolve_unknown_failed',
+        context,
+        { type: 'payout', id: payoutId, label: audit.label },
+        {
+            ownerType: audit.ownerType,
+            ownerId: audit.ownerId,
+            amount: audit.amount,
+            currency: audit.currency,
+            outcome: input.outcome,
+            reason: input.reason,
+            evidence: input.evidence,
+        },
+        audit.before,
+        payoutState,
+        async () => {
+            const result = await platformRequest<PlatformPayoutRequest>({
+                method: 'POST',
+                path: `/payout-requests/${payoutId}/resolve-unknown`,
+                // `evidence` omitted rather than null: jovi-mall declares it `.optional()`.
+                body: {
+                    outcome: input.outcome,
+                    reason: input.reason,
+                    ...(input.evidence === null ? {} : { evidence: input.evidence }),
+                },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return { result: result.data };
+        },
+        viaApprovalId,
+    );
+}
+
+/**
  * Reject a payout request — the money returns to the owner's available balance.
  *
  * Not dual-controlled at any amount, and the asymmetry with `mark-paid` is deliberate

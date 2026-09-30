@@ -26,6 +26,7 @@ Design record: [`../../docs/ADR-011-ACCOUNTS-AND-FINANCE.md`](../../docs/ADR-011
 | `POST` | `/money/payouts/:payoutId/send` | `money.payouts.mark_paid` | **delegated** | ✅ **dual-controlled** |
 | `POST` | `/money/payouts/:payoutId/mark-paid` | `money.payouts.mark_paid` | **delegated** | ✅ **dual-controlled** |
 | `POST` | `/money/payouts/:payoutId/reject` | `money.payouts.reject` | **delegated** | ✅ |
+| `POST` | `/money/payouts/:payoutId/resolve-unknown` | `paid`: `money.payouts.mark_paid` · `failed`: `money.payouts.triage` | **delegated** | ✅ `paid` **dual-controlled** |
 
 ### Payout review is two stages, and only one of them moves money
 
@@ -61,6 +62,12 @@ means the transfer was refused **and the funds are still held** — retry or rej
 
 ⛔ **`processing` cannot be rejected** (`409`). Releasing a hold while a transfer may still be
 in flight is how an owner gets paid twice.
+
+**A payout stuck in `processing` has one manual exit: `/resolve-unknown`.** When the transfer
+request timed out, nobody knows whether the money left, and the platform cannot ask the provider
+without its transfer id. Such a row shows `transferFailureReason` starting `"Outcome unknown: …"`
+and naming the reference to look up. An administrator checks the provider's own dashboard, then
+records what they found — `paid` or `failed` — with a reason. See the endpoint below.
 | `GET` | `/money/payments` | `money.payments.read` | direct read | — |
 | `GET` | `/money/payments/:transactionId` | `money.payments.read` | direct read | — |
 | `GET` | `/money/refunds` | `money.payments.read` | direct read | — |
@@ -663,6 +670,78 @@ The updated payout, message
 ### Audit
 
 `money.payouts.reject`
+
+---
+
+## `POST /money/payouts/:payoutId/resolve-unknown`
+
+Decide a transfer whose outcome is **unknown**. The payout is `processing`, the transfer request
+timed out or gave no readable answer, and there is no callback and no provider transfer id to ask
+about. An administrator checks the provider's dashboard for the reference in
+`transferFailureReason`, and records the result.
+
+| | |
+|---|---|
+| **Permission** | Depends on `outcome`. **`paid`** needs `money.payouts.mark_paid` (`financial` + `dual-control`). **`failed`** needs `money.payouts.triage`, so Support can record it |
+| **Dual control** | **`paid` only**, on the same 2 000 000 XAF threshold as `/mark-paid` → **`202`** with an approval. `failed` moves no money and is never queued |
+| **When** | `processing` only, **and** at least the reconciliation sweep's quiet period (default **15 min**) after the transfer was sent. Before that, a callback may still arrive |
+| **Transport** | Delegated |
+| **Body** | **Strict** |
+
+### Request body
+
+| Field | Type | Rules |
+|---|---|---|
+| `outcome` | `"paid"` \| `"failed"` | **Required** |
+| `reason` | string | **Required**, 10–500 characters. What you checked and what it showed. It goes on the ticket and in the audit row. For `failed`, it is also stored as `transferFailureReason` |
+| `evidence` | string, 1–500 | Optional. What the decision rests on: the provider's transaction id, a statement line, a support reply |
+
+```json
+{ "outcome": "paid", "reason": "MyCoolPay dashboard shows jm_po_8f2… SUCCESS at 14:02", "evidence": "MCP txn 77812" }
+```
+
+### What each outcome does
+
+| `outcome` | Result | Money |
+|---|---|---|
+| `paid` | `paid`, settled exactly as a gateway confirmation. `resolvedBy` is **the administrator** (source `admin`, with a name snapshot), not the platform. The ticket is resolved with a note naming them and the reason | Debited from the held balance |
+| `failed` | `failed`, the same state as a transfer the provider refused. Retry with `/send`, which reuses the same reference so the provider can deduplicate it, or `/reject` to release the funds | **Still held** — nothing is released |
+
+⚠ **Choose `failed` only when you have confirmed the money did NOT leave.** Choosing `failed`
+and then retrying a transfer that actually succeeded pays the owner twice. The stored reference
+makes a provider that deduplicates refuse the second transfer, but do not rely on it. If you
+cannot tell, wait.
+
+### Response — applied (200)
+
+The updated payout. Its message is `"Transfer confirmed as paid — the payout is settled"`, or
+`"Transfer recorded as failed — the funds remain held; retry the transfer or reject the request"`.
+
+### Response — `paid` at or above 2 000 000 XAF (202)
+
+An `Approval`, as for `/mark-paid`. **Nothing has been settled yet.** The approval's
+`description` ends `(transfer outcome was unknown; confirming it arrived: <reason>)`, so the
+second administrator can see it is a judgement on evidence. When they approve, the payout is
+checked **again** for `processing`.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Missing or short `reason`, an unknown `outcome`, or any unknown field (`amount` included) |
+| 403 | `AUTHZ_PERMISSION_DENIED` | `outcome: "paid"` without `money.payouts.mark_paid`, as a Support administrator has. `details.required` names the permission |
+| 404 | `NOT_FOUND` | |
+| **409** | **`PAYOUT_NOT_PROCESSING`** | The payout is not `processing` (`details.status`). Raised before anything is queued, and again when an approval is committed |
+| **409** | `PLATFORM_OPERATION_REJECTED` + `platformCode: "EARNINGS_PAYOUT_TRANSFER_IN_FLIGHT"` | **Too soon.** `details.settleAfter` (ISO time) says when to try again, and `details.minAgeMinutes` gives the quiet period |
+| 409 | `PLATFORM_OPERATION_REJECTED` + `platformCode: "EARNINGS_PAYOUT_NOT_PROCESSING"` | A callback or the reconciliation sweep settled it between your read and your write. **Reload the payout.** Nothing was written twice |
+| 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | |
+
+### Audit
+
+`money.payouts.resolve_unknown_paid` or `money.payouts.resolve_unknown_failed`. The payload
+carries `outcome`, `reason` and `evidence`. A queued `paid` is recorded at `status: "queued"`,
+and again when it is performed, like `/mark-paid`. Both appear on
+`GET /money/payouts/:payoutId/activity`, and the `action` filter accepts them.
 
 ---
 

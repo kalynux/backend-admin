@@ -162,6 +162,8 @@ export const DEFAULT_MESSAGES: Partial<Record<ErrorCode, string>> = {
         'Automation failure reporting is not configured on this deployment',
     [ERROR_CODES.ACCOUNT_OWNER_NOT_FOUND]: 'No vendor, agency or agent with this id',
     [ERROR_CODES.PAYOUT_NOT_PENDING]: 'This payout request has already been resolved',
+    [ERROR_CODES.PAYOUT_NOT_PROCESSING]:
+        'Only a payout whose transfer outcome is unknown (processing) can be resolved this way',
     [ERROR_CODES.CONTRACT_NOT_FOUND]: 'No agent–agency contract with this id',
     [ERROR_CODES.TICKET_NOT_FOUND]: 'No support ticket with this id',
     [ERROR_CODES.TICKET_ALREADY_ASSIGNED]: 'This ticket is already held by an administrator',

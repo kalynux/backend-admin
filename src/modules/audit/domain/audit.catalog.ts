@@ -1265,6 +1265,23 @@ export const AUDIT_CATALOG = Object.freeze({
         summary: 'Rejected a payout request and returned the funds to the available balance',
     },
     /**
+     * Deciding a transfer whose outcome was UNKNOWN (`processing`, the transfer POST timed
+     * out) — `POST /money/payouts/:payoutId/resolve-unknown`. TWO actions for one route,
+     * because the two outcomes are governed by different permissions and a catalog action
+     * names one: `paid` asserts money left the platform and is `money.payouts.mark_paid`
+     * (four-eyes at ≥ 2,000,000 XAF, like mark-paid); `failed` moves no money — the hold is
+     * kept (ADR-024 D-7) — and is `money.payouts.triage`. The payload carries the reason and
+     * the evidence the administrator decided on; that is the whole record of why.
+     */
+    'money.payouts.resolve_unknown_paid': {
+        permission: 'money.payouts.mark_paid', target: 'payout', transport: 'delegated',
+        summary: 'Confirmed a payout whose transfer outcome was unknown as PAID — money has left the platform',
+    },
+    'money.payouts.resolve_unknown_failed': {
+        permission: 'money.payouts.triage', target: 'payout', transport: 'delegated',
+        summary: 'Recorded a payout whose transfer outcome was unknown as FAILED — the funds stay held',
+    },
+    /**
      * The one audited READ in this catalog, and the exception is argued rather than assumed.
      *
      * "Reads are not actions" holds because a read leaves no state behind, so the

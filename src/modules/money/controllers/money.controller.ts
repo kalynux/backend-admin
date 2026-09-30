@@ -51,6 +51,7 @@ import {
     ListRefundsQuery,
     MarkPaidBody,
     RejectPayoutBody,
+    ResolveUnknownPayoutBody,
     TriagePayoutBody,
 } from '../validators/money.validator';
 
@@ -641,6 +642,43 @@ export class MoneyController {
 
         sendSuccess(res, result, {
             message: 'Payout request rejected — the funds returned to the owner’s available balance',
+        });
+    });
+
+    /**
+     * POST /api/v1/money/payouts/:payoutId/resolve-unknown — decide a transfer nobody can ask
+     * about.
+     *
+     * `failed` answers 200 with the payout in `failed` and the funds still held. `paid` answers
+     * 200 settled, or **202** with an approval at or above the four-eyes threshold, exactly as
+     * `/mark-paid` does. Every rule lives in `domain/payout-dual-control.ts`.
+     */
+    static resolveUnknownPayout = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as ResolveUnknownPayoutBody;
+        const identity = requireAdminIdentity(req);
+
+        const outcome = await payoutWrites.resolveUnknown(
+            identity,
+            req.params.payoutId,
+            { outcome: body.outcome, reason: body.reason, evidence: body.evidence ?? null },
+            actorContextOf(req),
+        );
+
+        if (outcome.kind === 'applied') {
+            sendSuccess(res, outcome.payout, {
+                message:
+                    outcome.payout.status === 'paid'
+                        ? 'Transfer confirmed as paid — the payout is settled'
+                        : 'Transfer recorded as failed — the funds remain held; retry the transfer or reject the request',
+            });
+            return;
+        }
+
+        sendSuccess(res, outcome.approval, {
+            status: 202,
+            message: outcome.created
+                ? 'This payout is above the four-eyes threshold — submitted for a second administrator’s approval'
+                : 'An identical request is already awaiting approval',
         });
     });
 

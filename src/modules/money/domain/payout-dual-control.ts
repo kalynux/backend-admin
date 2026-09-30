@@ -8,6 +8,9 @@ import { auditedQueue } from '../../audit/domain/audit.writer';
 import * as approvals from '../../dual-control/domain/approval.service';
 import { registerDualControlHandler } from '../../dual-control/domain/dual-control.registry';
 import { IApprovalRequest } from '../../dual-control/models/approval-request.model';
+import { recordAuthorizationDenial } from '../../authorization/domain/denial.recorder';
+import { PermissionName } from '../../authorization/domain/permission.catalog';
+import { hasPermission } from '../../authorization/domain/permission.resolver';
 import * as gateway from '../gateways/money.gateway';
 import {
     PayoutRequestReadModel,
@@ -247,6 +250,134 @@ export async function markPaid(
     return { kind: 'applied', payout };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Resolving a transfer whose outcome is UNKNOWN
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The dual-control `mode` of a queued "confirm this unknown transfer as paid".
+ *
+ * It rides `money.payouts.mark_paid`'s approval, not an action of its own, for the reason
+ * `/send` does: `LARGE_PAYOUT` hangs off that name, and confirming money left IS asserting
+ * money left — a second threshold would drift from the first. The mode is hashed into the
+ * approval key, so an approver who signed for this cannot have the signature spent on a
+ * manual mark-paid or a gateway send, nor the reverse.
+ */
+export const RESOLVE_PAID_MODE = 'resolve_paid';
+
+export interface ResolveUnknownInput {
+    outcome: 'paid' | 'failed';
+    reason: string;
+    evidence: string | null;
+}
+
+/**
+ * Only a `processing` payout has an unknown outcome to decide. Everything else already has an
+ * exit (`mark-paid`, `/send` to retry, `/reject`). jovi-mall enforces the same rule, plus the
+ * reconciliation sweep's quiet period (409 `EARNINGS_PAYOUT_TRANSFER_IN_FLIGHT`) which this
+ * service cannot see and does not guess — this is the pre-flight, not the control.
+ */
+function assertProcessing(row: PayoutRequestReadModel): void {
+    if (row.status !== 'processing') {
+        throw createAppError(ERROR_CODES.PAYOUT_NOT_PROCESSING, 409, undefined, {
+            status: row.status,
+        });
+    }
+}
+
+/**
+ * The permission each outcome needs. The route admits EITHER; this is where the choice of
+ * outcome narrows it.
+ *
+ *   paid   → `money.payouts.mark_paid` — it asserts money left, exactly as mark-paid does
+ *   failed → `money.payouts.triage`    — nothing moves: the hold is KEPT (ADR-024 D-7), and
+ *            the payout goes where a refused transfer goes, to be retried or rejected. Support
+ *            may already reject a payout outright, which releases the hold; recording that a
+ *            transfer did not happen is strictly weaker.
+ */
+export function permissionForOutcome(outcome: ResolveUnknownInput['outcome']): PermissionName {
+    return outcome === 'paid' ? 'money.payouts.mark_paid' : 'money.payouts.triage';
+}
+
+/** Hashed into the approval key — the reason and evidence are part of what was signed for. */
+function resolvePaidPayload(row: PayoutRequestReadModel, input: ResolveUnknownInput): Record<string, unknown> {
+    return {
+        payoutId: row._id.toString(),
+        ownerType: row.owner_type,
+        ownerId: row.owner_id.toString(),
+        amount: row.amount,
+        currency: row.currency,
+        reason: input.reason,
+        evidence: input.evidence,
+        mode: RESOLVE_PAID_MODE,
+    };
+}
+
+/**
+ * Resolve a transfer whose outcome is unknown — the entry point the controller calls.
+ *
+ *   1. the outcome's own permission (403, recorded as a denial)
+ *   2. read the payout (404) and refuse it now unless `processing` (409)
+ *   3. `failed`: delegate immediately — no money moves, so no quorum
+ *   4. `paid`: the mark-paid threshold, with the amount off the ROW; queue (202) or delegate
+ */
+export async function resolveUnknown(
+    actor: AdminIdentity,
+    payoutId: string,
+    input: ResolveUnknownInput,
+    context: ActorContext,
+): Promise<PayoutWriteOutcome> {
+    const required = permissionForOutcome(input.outcome);
+    if (!hasPermission(actor.tier, required)) {
+        recordAuthorizationDenial({
+            kind: 'permission',
+            adminId: actor.adminId,
+            tier: actor.tier,
+            sessionId: actor.sessionId,
+            required: [required],
+            reason: ERROR_CODES.AUTHZ_PERMISSION_DENIED,
+            targetId: payoutId,
+            method: context.method,
+            path: context.path,
+            requestId: context.requestId,
+            ip: context.ip,
+            userAgent: context.userAgent,
+        });
+        throw createAppError(ERROR_CODES.AUTHZ_PERMISSION_DENIED, 403, undefined, { required: [required] });
+    }
+
+    const row = await loadPayoutOr404(payoutId);
+    assertProcessing(row);
+
+    if (input.outcome === 'failed') {
+        const payout = await gateway.resolveUnknownPayout(payoutId, input, auditContextOfPayout(row), context);
+        return { kind: 'applied', payout };
+    }
+
+    const payload = resolvePaidPayload(row, input);
+
+    if (approvals.dualControlRequired('money.payouts.mark_paid', payload)) {
+        const outcome = await auditedQueue(
+            queuedIntent(actor, context, row, payload, 'money.payouts.resolve_unknown_paid'),
+            async (session) => {
+                const result = await approvals.requestApproval({
+                    action: 'money.payouts.mark_paid',
+                    requester: actor,
+                    targetType: 'payout',
+                    targetId: payoutId,
+                    payload,
+                    session,
+                });
+                return { result, approvalId: result.approval.id };
+            },
+        );
+        return { kind: 'queued', approval: outcome.approval, created: outcome.created };
+    }
+
+    const payout = await gateway.resolveUnknownPayout(payoutId, input, auditContextOfPayout(row), context);
+    return { kind: 'applied', payout };
+}
+
 /**
  * The intent behind a QUEUED mark-paid.
  *
@@ -267,9 +398,10 @@ function queuedIntent(
     context: AuditContext,
     row: PayoutRequestReadModel,
     payload: Record<string, unknown>,
+    action: 'money.payouts.mark_paid' | 'money.payouts.resolve_unknown_paid' = 'money.payouts.mark_paid',
 ): AuditIntent {
     return {
-        action: 'money.payouts.mark_paid',
+        action,
         actor: auditActorOf(actor),
         target: { type: 'payout', id: row._id.toString(), label: labelOfPayout(row) },
         relatedTarget: { type: 'payout', id: row._id.toString() },
@@ -314,9 +446,13 @@ registerDualControlHandler(
             : null;
 
         const mode: PayoutMode = approval.payload.mode === 'gateway' ? 'gateway' : 'manual';
+        // Confirming an UNKNOWN transfer as paid: its precondition is `processing`, the
+        // opposite of the other two modes', and it is re-checked just the same.
+        const resolving = approval.payload.mode === RESOLVE_PAID_MODE;
 
         const row = await loadPayoutOr404(payoutId);
-        assertPending(row, mode);
+        if (resolving) assertProcessing(row);
+        else assertPending(row, mode);
 
         /**
          * The payout must still be the one that was signed for.
@@ -353,6 +489,21 @@ registerDualControlHandler(
          * second administrator agreed to a specific act, and `approvalRequestKey` hashed the
          * mode, so an approval for one can never be spent on the other.
          */
+        if (resolving) {
+            await gateway.resolveUnknownPayout(
+                payoutId,
+                {
+                    outcome: 'paid',
+                    reason: String(approval.payload.reason),
+                    evidence: typeof approval.payload.evidence === 'string' ? approval.payload.evidence : null,
+                },
+                auditContextOfPayout(row),
+                { ...context, actor: approver },
+                approval._id.toString(),
+            );
+            return;
+        }
+
         if (mode === 'gateway') {
             await gateway.sendPayout(
                 payoutId,

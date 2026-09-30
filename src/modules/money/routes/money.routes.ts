@@ -28,6 +28,7 @@ import {
     MarkPaidSchema,
     PayoutIdParamSchema,
     RejectPayoutSchema,
+    ResolveUnknownPayoutSchema,
     TriagePayoutSchema,
     SendPayoutSchema,
     TransactionIdParamSchema,
@@ -296,6 +297,28 @@ defineRoute(router, {
     validate: { params: PayoutIdParamSchema, body: RejectPayoutSchema },
     audit: records('money.payouts.reject'),
     handler: MoneyController.rejectPayout,
+});
+
+/**
+ * Decide a transfer whose outcome is UNKNOWN — the payout is `processing`, the transfer POST
+ * timed out, and nothing can ask the gateway about it. Body `{ outcome, reason, evidence? }`.
+ *
+ * ⚠ **`anyPermission` at the door, narrowed by the OUTCOME in the domain** — the route cannot
+ * know which the caller chose until the body is read:
+ *   - `paid`   needs `money.payouts.mark_paid`, and inherits the ≥ 2,000,000 XAF four-eyes rule
+ *              (202 + an approval) — it asserts money left, like `/mark-paid` and `/send`
+ *   - `failed` needs `money.payouts.triage` — nothing moves, the hold is kept (ADR-024 D-7)
+ * A Support administrator choosing `paid` is a 403 naming `money.payouts.mark_paid`. See
+ * `permissionForOutcome` in `domain/payout-dual-control.ts`.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/payouts/:payoutId/resolve-unknown',
+    access: anyPermission('money.payouts.mark_paid', 'money.payouts.triage'),
+    validate: { params: PayoutIdParamSchema, body: ResolveUnknownPayoutSchema },
+    audit: records('money.payouts.resolve_unknown_paid', 'money.payouts.resolve_unknown_failed'),
+    handler: MoneyController.resolveUnknownPayout,
 });
 
 // ── Gateway settlements ──────────────────────────────────────────────────────

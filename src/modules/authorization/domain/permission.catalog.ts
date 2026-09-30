@@ -106,10 +106,15 @@ const ACT_ON_PEER_DEVELOPER: DualControlSpec = {
 const LARGE_PAYOUT: DualControlSpec = {
     when: (payload) => typeof payload.amount === 'number' && payload.amount >= 2_000_000,
     approverPermission: 'money.payouts.mark_paid',
+    // `resolve_paid` is a transfer whose outcome was unknown being confirmed as arrived — the
+    // approver must see that it is a judgement on evidence, not an ordinary payment.
     describe: (payload) =>
         `Mark payout request ${String(payload.payoutId)} PAID — `
         + `${String(payload.currency)} ${Number(payload.amount).toLocaleString()} `
-        + `to ${String(payload.ownerType)} ${String(payload.ownerId)}`,
+        + `to ${String(payload.ownerType)} ${String(payload.ownerId)}`
+        + (payload.mode === 'resolve_paid'
+            ? ` (transfer outcome was unknown; confirming it arrived: ${String(payload.reason)})`
+            : ''),
 };
 
 /**

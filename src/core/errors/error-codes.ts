@@ -338,6 +338,12 @@ export const ERROR_CODES = Object.freeze({
      *     and a payout resolved in the meantime must be refused rather than paid twice.
      */
     PAYOUT_NOT_PENDING: 'PAYOUT_NOT_PENDING',
+    /**
+     * The `resolve-unknown` pre-flight, and the dual-control handler's re-check of it: only a
+     * payout whose transfer is in flight (`processing`) has an unknown outcome to decide.
+     * Refused here rather than queued, for the reason `PAYOUT_NOT_PENDING` gives.
+     */
+    PAYOUT_NOT_PROCESSING: 'PAYOUT_NOT_PROCESSING',
 
     // ── ADMIN ACCOUNT ─────────────────────────────────────────────────────────
     ADMIN_ACCOUNT_NOT_FOUND: 'ADMIN_ACCOUNT_NOT_FOUND',

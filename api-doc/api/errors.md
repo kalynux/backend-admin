@@ -366,6 +366,7 @@ record, so every one of them reaches a client as **`details.platformCode` on a
 |---|---|---|---|
 | `PAYOUT_DESTINATION_ABSENT` | 422 | `business_rule` | The payout exists but carries no destination snapshot. **Distinct from `NOT_FOUND`** — this is a legacy row an operator resolves by asking the beneficiary, not a broken link, which is why it is a 422 rather than a 404. |
 | `PAYOUT_NOT_PENDING` | 409 | `conflict` | The payout is no longer `pending`. Raised on the `mark-paid` pre-flight (so a doomed action is never queued for approval) and again when an approval is committed. |
+| `PAYOUT_NOT_PROCESSING` | 409 | `conflict` | `resolve-unknown` on a payout that is not `processing` — only a transfer in flight has an unknown outcome to decide. `details.status` is the current status. Raised on the pre-flight and again when a queued `paid` approval is committed. |
 | `ACCOUNT_OWNER_NOT_FOUND` | 404 | `not_found` | `:ownerType/:ownerId` names no vendor, agency or agent. **An owner with no balances is not this** — that reports zeroes. |
 
 ### Delivery network

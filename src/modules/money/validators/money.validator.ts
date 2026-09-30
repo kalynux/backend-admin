@@ -221,6 +221,25 @@ export const RejectPayoutSchema = z
     })
     .strict();
 
+/**
+ * Deciding a transfer whose outcome is unknown (`processing`, no answer from the gateway).
+ *
+ * `.strict()` for the reason `MarkPaidSchema` gives — the amount is read off the row, and a
+ * body able to name one could slip under the four-eyes threshold. `reason` is required: it is
+ * the only record of why an administrator believed the money did or did not leave, and
+ * jovi-mall refuses fewer than 10 characters, so this refuses them first. `evidence` is what
+ * the decision rests on (a provider statement line, a support reply).
+ */
+export const ResolveUnknownPayoutSchema = z
+    .object({
+        outcome: z.enum(['paid', 'failed']),
+        reason: reasonText('Say why — at least 10 characters', { min: 10, max: 500 }),
+        evidence: z.string().trim().min(1).max(500).optional(),
+    })
+    .strict();
+
+export type ResolveUnknownPayoutBody = z.infer<typeof ResolveUnknownPayoutSchema>;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Gateway settlements — what a customer actually paid, and what came back
 // ─────────────────────────────────────────────────────────────────────────────

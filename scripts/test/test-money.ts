@@ -57,7 +57,9 @@ import {
     PAYOUT_SORT,
     REFUND_SORT,
     RejectPayoutSchema,
+    ResolveUnknownPayoutSchema,
 } from '../../src/modules/money/validators/money.validator';
+import * as payoutWrites from '../../src/modules/money/domain/payout-dual-control';
 import {
     buildAllocationFilter,
     buildLedgerFilter,
@@ -1223,7 +1225,7 @@ t.section('10. The route manifest');
 
 const moneyRoutes = routeManifest().filter((route) => route.fullPath.startsWith('/api/v1/money'));
 
-t.assert('sixteen routes are declared on /money', () => moneyRoutes.length === 16);
+t.assert('seventeen routes are declared on /money', () => moneyRoutes.length === 17);
 
 /**
  * The triage route is the ONE write on this surface a Support administrator can reach, and
@@ -1269,16 +1271,91 @@ t.assert('rejecting accepts EITHER the approver or the reviewer permission', () 
 /**
  * ...and the reviewer permission reaches NOTHING else that moves money. Asserted by name because
  * `anyPermission` is the one idiom here that could widen a route without looking like it.
+ *
+ * `resolve-unknown` is the third, and it moves no money for a reviewer: the route admits
+ * `money.payouts.triage` for the `failed` outcome only (hold kept), and the domain refuses
+ * `paid` without `money.payouts.mark_paid` — asserted in the next block.
  */
-t.assert('money.payouts.triage reaches only triage and reject', () => {
+t.assert('money.payouts.triage reaches only triage, reject and resolve-unknown', () => {
     const reachable = moneyRoutes.filter(
         (route) =>
             route.access.kind === 'permission'
             && route.access.permissions.includes('money.payouts.triage' as never),
     );
-    return reachable.length === 2
-        && reachable.every((r) => /\/(triage|reject)$/.test(r.fullPath));
+    return reachable.length === 3
+        && reachable.every((r) => /\/(triage|reject|resolve-unknown)$/.test(r.fullPath));
 });
+
+/**
+ * ⛔ The exit for a transfer whose outcome is UNKNOWN. The route admits either permission
+ * because it cannot see the outcome until the body is read; the OUTCOME then narrows it. If
+ * `permissionForOutcome` ever answered `triage` for `paid`, a Support administrator could
+ * assert money left the platform — the one act that tier is never given.
+ */
+t.assert('resolve-unknown: anyPermission(mark_paid, triage), audited per outcome', () => {
+    const route = moneyRoutes.find((r) => r.fullPath.endsWith('/payouts/:payoutId/resolve-unknown'));
+    return route !== undefined
+        && route.method === 'post'
+        && route.access.kind === 'permission'
+        && route.access.mode === 'any'
+        && route.access.permissions.length === 2
+        && route.access.permissions.includes('money.payouts.mark_paid')
+        && route.access.permissions.includes('money.payouts.triage')
+        && route.audit?.kind === 'records'
+        && route.audit.actions.includes('money.payouts.resolve_unknown_paid')
+        && route.audit.actions.includes('money.payouts.resolve_unknown_failed');
+});
+
+t.assert('resolve-unknown: paid needs mark_paid, failed needs triage', () =>
+    payoutWrites.permissionForOutcome('paid') === 'money.payouts.mark_paid'
+    && payoutWrites.permissionForOutcome('failed') === 'money.payouts.triage');
+
+t.assert('resolve-unknown: the audit actions are governed by those same permissions', () =>
+    auditSpec('money.payouts.resolve_unknown_paid').permission === 'money.payouts.mark_paid'
+    && auditSpec('money.payouts.resolve_unknown_failed').permission === 'money.payouts.triage'
+    && auditSpec('money.payouts.resolve_unknown_paid').transport === 'delegated'
+    && auditSpec('money.payouts.resolve_unknown_failed').transport === 'delegated');
+
+t.assert('resolve-unknown: the tier check runs BEFORE the read and the delegation', () => {
+    const source = readCode(...DUAL_CONTROL);
+    const body = source.slice(source.indexOf('export async function resolveUnknown'));
+    const check = body.indexOf('hasPermission(actor.tier, required)');
+    return check > 0
+        && check < body.indexOf('loadPayoutOr404(payoutId)')
+        && check < body.indexOf('gateway.resolveUnknownPayout(');
+});
+
+/**
+ * `paid` rides mark_paid's approval so the ≥ 2,000,000 XAF quorum applies with no second
+ * threshold. Its own `mode` is hashed into the approval key, so a signature for it cannot be
+ * spent on a manual mark-paid or a gateway send — and the handler re-checks `processing`.
+ */
+t.assert('resolve-unknown paid: four-eyes via mark_paid, its own mode, re-checked on approval', () => {
+    const source = readCode(...DUAL_CONTROL);
+    const body = source.slice(source.indexOf('export async function resolveUnknown'));
+    return body.includes("approvals.dualControlRequired('money.payouts.mark_paid', payload)")
+        && body.includes("action: 'money.payouts.mark_paid'")
+        && /function resolvePaidPayload\([\s\S]*?mode: RESOLVE_PAID_MODE[\s\S]*?\}/.test(source)
+        && source.includes('if (resolving) assertProcessing(row)')
+        && source.includes("approval.payload.mode === RESOLVE_PAID_MODE");
+});
+
+t.assert('resolve-unknown: the pre-flight accepts processing and nothing else', () => {
+    const source = readCode(...DUAL_CONTROL);
+    return /function assertProcessing\([\s\S]*?row\.status !== 'processing'[\s\S]*?PAYOUT_NOT_PROCESSING/.test(source);
+});
+
+t.assert('resolve-unknown: the body is strict and the reason is required', () =>
+    !ResolveUnknownPayoutSchema.safeParse({ outcome: 'paid' }).success
+    && !ResolveUnknownPayoutSchema.safeParse({ outcome: 'paid', reason: 'too short' }).success
+    && !ResolveUnknownPayoutSchema.safeParse({ outcome: 'paid', reason: 'checked the dashboard', amount: 1 }).success
+    && ResolveUnknownPayoutSchema.safeParse({ outcome: 'failed', reason: 'checked the dashboard' }).success);
+
+t.assert('the approver sees that a resolve_paid request is a judgement, not a payment', () =>
+    MARK_PAID.dualControl!.describe({
+        payoutId: OID, ownerType: 'agency', ownerId: OTHER_OID, amount: 2_500_000, currency: 'XAF',
+        mode: 'resolve_paid', reason: 'dashboard shows SUCCESS',
+    }).includes('transfer outcome was unknown'));
 
 t.assert('sending rides money.payouts.mark_paid, so it inherits the four-eyes threshold', () => {
     const send = moneyRoutes.find((route) => route.fullPath.endsWith('/send'));
