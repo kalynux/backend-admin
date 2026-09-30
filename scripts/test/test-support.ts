@@ -75,6 +75,13 @@ const t = suite('support tickets');
 
 const MODULE = join(__dirname, '..', '..', 'src', 'modules', 'support');
 
+/**
+ * CRLF → LF. A Windows checkout (`core.autocrlf`) hands this suite CRLF files, and the span
+ * scans below end at `'\n}\n'`, which never matches `'\r\n}\r\n'`, so a span silently runs to
+ * EOF and a negative check sees the rest of the file. Same helper as jovi-mall's `lf()`.
+ */
+const lf = (source: string): string => source.replace(/\r\n/g, '\n');
+
 /** Every .ts file in a directory, comments stripped, so a doc comment cannot fail a scan. */
 function readCode(dir: string): { file: string; code: string }[] {
     const out: { file: string; code: string }[] = [];
@@ -85,7 +92,7 @@ function readCode(dir: string): { file: string; code: string }[] {
             continue;
         }
         if (!entry.endsWith('.ts')) continue;
-        const raw = readFileSync(full, 'utf8');
+        const raw = lf(readFileSync(full, 'utf8'));
         const code = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
         out.push({ file: full, code });
     }
