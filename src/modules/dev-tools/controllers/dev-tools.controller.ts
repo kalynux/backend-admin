@@ -144,6 +144,9 @@ export class DevToolsController {
             settings: state?.settings ?? null,
             aggregators: state?.aggregators ?? [],
             effectiveProviders: state?.effectiveProviders ?? null,
+            // Two classes, kept apart end to end: `errors` means payments are broken NOW (the
+            // screen's red banner), `warnings` is a note on a working state.
+            errors: state?.errors ?? [],
             warnings: state?.warnings ?? [],
             stats,
         }, state === null

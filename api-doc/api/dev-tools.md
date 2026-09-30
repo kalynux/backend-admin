@@ -488,6 +488,7 @@ Which aggregator collects and which pays out, what each one can do, and how each
         "payoutAvailable": true, "refundAvailable": true, "activeForCollections": true, "activeForPayouts": true }
     ],
     "effectiveProviders": { "…": "jovi-mall's shape, passed through" },
+    "errors": [],
     "warnings": [ { "code": "PROVIDER_UNROUTABLE", "message": "…", "provider": "MOOV" } ],
     "stats": {
       "window": "24h",
@@ -518,8 +519,9 @@ is computed here, directly on `payment_transactions`, `plan_purchases` and `cred
 | Field | Notes |
 |---|---|
 | **`platformSupported`** | **`false` when jovi-mall predates payment routing.** `settings` is then `null`, `aggregators` and `warnings` are empty, and `stats` is still filled in. **Render this as "deploy jovi-mall first", never as an empty configuration** |
-| `warnings` | **The stored settings' STANDING problems**, computed by jovi-mall when you read, not the warnings from the last write. Credentials can disappear after a switch, and payout availability changes at runtime, so `PAYOUT_UNAVAILABLE` can appear on settings nobody touched. If the stored state now breaks a **hard** rule (for example `COLLECTION_AGGREGATOR_NOT_CONFIGURED` after a key was removed), those issues come **first**, because they mean new charges are being refused |
-| `warnings[].code` | **An open list.** Show `code` and `message` as given and never switch on a fixed set. jovi-mall adds rules (`NO_MOBILE_PROVIDER_ENABLED` arrived during the build) |
+| **`errors`** | **Payments are broken NOW.** The stored settings break a **hard** rule, for example `COLLECTION_AGGREGATOR_NOT_CONFIGURED` after the active aggregator's key was removed. New charges are being refused. **Show it as a red "payments are broken" banner, not as a note.** Computed by jovi-mall when you read. Always present, and `[]` when nothing is broken (also against a jovi-mall older than the split) |
+| `warnings` | Soft problems on a stored state that is otherwise valid, for example `PAYOUT_UNAVAILABLE` on settings nobody touched, since payout availability changes at runtime. These are the **standing** problems, not the warnings from the last write. `[]` while `errors` is non-empty: nothing soft matters until the hard problem is fixed |
+| `errors[].code`, `warnings[].code` | **An open list.** Show `code` and `message` as given and never switch on a fixed set. jovi-mall adds rules (`NO_MOBILE_PROVIDER_ENABLED` arrived during the build) |
 | `successRate` | `succeeded ÷ (succeeded + failed)`, over **decided** rows only. Pending rows are left out, because a burst of charges still waiting on customers' phones is not a failure yet. **`null` when nothing was decided**, which is different from `0` |
 | `stuckPending` | Pending **and** created more than 30 minutes ago: a settlement that never arrived. A subset of `pending` |
 | `sources[]` | One row per collection. Settle-time percentiles are **per source only**, because they cannot be merged, and because an aggregator failing only on billing is a real, separate fault |

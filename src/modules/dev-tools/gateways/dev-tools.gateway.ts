@@ -368,6 +368,15 @@ export interface PaymentRoutingState {
     settings: PaymentSettingsView;
     aggregators: PaymentAggregatorFacts[];
     effectiveProviders: unknown;
+    /**
+     * The STORED settings now break a hard rule — credentials removed after a switch, say. New
+     * charges are being refused right now. A different class from `warnings`, and shown as such.
+     *
+     * Optional in the type because a jovi-mall between cd9f7a3 and 0b58bb7 sent no such key;
+     * the controller defaults it to `[]`.
+     */
+    errors?: PaymentSettingsIssue[];
+    /** Soft problems on an otherwise valid stored state. Empty while `errors` is non-empty. */
     warnings: PaymentSettingsIssue[];
 }
 

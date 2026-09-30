@@ -881,6 +881,20 @@ t.assert('getPaymentSettings is NOT behind the flag either — you decide by rea
 });
 
 /** The diff comes from jovi-mall's compare-and-set, never from a racy GET first. */
+/**
+ * `errors` (payments broken NOW) and `warnings` (a note) are different screens, so the controller
+ * must pass them through as two keys and default each to `[]` rather than drop one.
+ */
+t.assert('GET passes errors and warnings through as separate keys, each defaulting to []', () => {
+    const source = readFileSync(join(__dirname, '..', '..', 'src', 'modules', 'dev-tools',
+        'controllers', 'dev-tools.controller.ts'), 'utf8');
+    const start = source.indexOf('static getPaymentRouting');
+    const body = start === -1 ? '' : source.slice(start, source.indexOf('static setPaymentRouting', start));
+    return body.length > 0
+        && body.includes('errors: state?.errors ?? []')
+        && body.includes('warnings: state?.warnings ?? []');
+});
+
 t.assert('the audit before/after come from the write result, and the write makes no GET', () => {
     const body = functionBody(devToolsGatewaySource(), 'setPaymentSettings') ?? '';
     return body.includes('before: { ...result.previous }')
