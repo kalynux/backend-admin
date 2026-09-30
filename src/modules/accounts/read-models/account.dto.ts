@@ -343,7 +343,16 @@ export interface AccountActivityDto {
     /** Credits granted or moved. `null` on a row that moves no credit. */
     credits: number | null;
     description: string;
+    /**
+     * Which aggregator carried a charge. Informational and an open string (jovi-mall ADR-A08):
+     * the active aggregator is switched at runtime, so never branch on it.
+     */
     gateway: string | null;
+    /**
+     * What the payer paid WITH — `MTN` · `ORANGE` · `MOOV` · `CARD`. `null` on a row that is not a
+     * charge, and on a charge written before payment routing.
+     */
+    provider: string | null;
     source: { type: string; id: string } | null;
     createdAt: string;
 }
@@ -656,6 +665,7 @@ export function toPlanPurchaseActivity(row: PlanPurchaseReadModel): AccountActiv
         credits: null,
         description: `Plan purchase — ${row.plan_code}`,
         gateway: row.gateway ?? null,
+        provider: row.provider ?? null,
         source: { type: 'plan', id: row.plan_code },
         createdAt: toIso(row.created_at) ?? '',
     };
@@ -681,6 +691,7 @@ export function toTopupActivity(row: CreditTopupReadModel): AccountActivityDto {
         credits: row.credits,
         description: `Credit top-up — ${row.credits} credits (${row.pack_code})`,
         gateway: row.gateway ?? null,
+        provider: row.provider ?? null,
         source: { type: 'pack', id: row.pack_code },
         createdAt: toIso(row.created_at) ?? '',
     };
@@ -701,6 +712,7 @@ export function toCreditActivity(row: CreditTransactionReadModel): AccountActivi
         credits: Math.abs(row.amount),
         description: CREDIT_DESCRIPTION_BY_REASON[row.reason_code] ?? 'Credit movement',
         gateway: null,
+        provider: null,
         source: row.ref ? { type: 'credit', id: row.ref } : null,
         createdAt: toIso(row.created_at) ?? '',
     };
@@ -744,6 +756,7 @@ export function toEarningActivity(
         credits: null,
         description,
         gateway: null,
+        provider: null,
         source: { type: row.source_type, id: row.source_id.toString() },
         createdAt: toIso(row.created_at) ?? '',
     };
@@ -776,6 +789,7 @@ export function toPayoutActivity(row: PayoutRequestReadModel): AccountActivityDt
             ? 'Automatic payout at the withdrawal threshold'
             : 'Payout requested',
         gateway: null,
+        provider: null,
         source: row.ticket_id ? { type: 'ticket', id: row.ticket_id.toString() } : null,
         createdAt: toIso(row.created_at) ?? '',
     };

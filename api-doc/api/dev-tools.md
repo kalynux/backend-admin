@@ -518,6 +518,7 @@ is computed here, directly on `payment_transactions`, `plan_purchases` and `cred
 | Field | Notes |
 |---|---|
 | **`platformSupported`** | **`false` when jovi-mall predates payment routing.** `settings` is then `null`, `aggregators` and `warnings` are empty, and `stats` is still filled in. **Render this as "deploy jovi-mall first", never as an empty configuration** |
+| `warnings` | **The stored settings' STANDING problems**, computed by jovi-mall when you read, not the warnings from the last write. Credentials can disappear after a switch, and payout availability changes at runtime, so `PAYOUT_UNAVAILABLE` can appear on settings nobody touched. If the stored state now breaks a **hard** rule (for example `COLLECTION_AGGREGATOR_NOT_CONFIGURED` after a key was removed), those issues come **first**, because they mean new charges are being refused |
 | `warnings[].code` | **An open list.** Show `code` and `message` as given and never switch on a fixed set. jovi-mall adds rules (`NO_MOBILE_PROVIDER_ENABLED` arrived during the build) |
 | `successRate` | `succeeded ÷ (succeeded + failed)`, over **decided** rows only. Pending rows are left out, because a burst of charges still waiting on customers' phones is not a failure yet. **`null` when nothing was decided**, which is different from `0` |
 | `stuckPending` | Pending **and** created more than 30 minutes ago: a settlement that never arrived. A subset of `pending` |

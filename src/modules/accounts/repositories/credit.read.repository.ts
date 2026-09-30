@@ -213,6 +213,11 @@ export interface CreditTopupReadModel extends Document {
     /** `pending` · `paid` · `failed` · `reversed`. */
     status: string;
     gateway?: string | null;
+    /**
+     * What the payer paid WITH — `MTN` · `ORANGE` · `MOOV` · `CARD` (jovi-mall ADR-A08). Null on
+     * rows written before payment routing; no backfill. An open string.
+     */
+    provider?: string | null;
     gateway_ref?: string | null;
     payment_transaction_id?: ObjectId | null;
     created_at: Date;
@@ -229,6 +234,7 @@ const CREDIT_TOPUP_PROJECTION = {
     currency: 1,
     status: 1,
     gateway: 1,
+    provider: 1,
     gateway_ref: 1,
     payment_transaction_id: 1,
     created_at: 1,

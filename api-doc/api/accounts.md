@@ -337,6 +337,7 @@ permission.
       "credits": null,
       "description": "Earnings released for order ORD-2026-008841",
       "gateway": null,
+      "provider": null,
       "source": { "type": "order", "id": "6670aabbccddeeff00112233" },
       "createdAt": "2026-08-13T00:05:00.000Z"
     },
@@ -351,7 +352,8 @@ permission.
       "currency": "XAF",
       "credits": 100,
       "description": "Standard plan — 30 days",
-      "gateway": "mtn_momo",
+      "gateway": "NOTCHPAY",
+      "provider": "MTN",
       "source": { "type": "subscriber_plan", "id": "6691aabbccddeeff00112240" },
       "createdAt": "2026-08-01T00:00:00.000Z"
     }
@@ -367,6 +369,8 @@ permission.
 | `direction` | **From the owner's perspective.** `in` means money arriving: an `earning_hold`, or credits granted. `out` means money leaving: an `earning_reversal`, a **paid** payout, or a purchase. `internal` means money moving between the owner's own balances: an `earning_release` (escrow → available), the two COD reserve entries, and a payout that is pending, rejected or failed. ⚠ **Changed 2026-09-27.** Before, a release was `in`, which counted every earning twice, and every payout was `out`. Now **Σ in − Σ out over earning and payout rows equals the change in the earnings balance.** |
 | `amount` | Magnitude in `unit`, **always positive**. The sign lives in `direction` |
 | `credits` | `null` on a row that moves no credit |
+| `gateway` | **Which aggregator carried the charge; informational.** An open uppercase string (`NOTCHPAY` · `MYCOOLPAY` · `STRIPE` today, more coming). **Never branch on it**: the active aggregator is switched at runtime. `null` on rows that are not charges. ⚠ This example read `"mtn_momo"` until 2026-09-30. That is a provider, never a gateway value |
+| `provider` | What the payer paid **with**: `MTN` · `ORANGE` · `MOOV` · `CARD`. **Always present.** `null` on rows that are not charges, and on charges written before payment routing (jovi-mall ADR-A08), with no backfill |
 | `meta.nextCursor` | Pass back as `?before=`. **`null` at the end of the feed** |
 | `meta.hasMore` | Derived from the cursor, carried explicitly so a client never has to infer one from the other |
 

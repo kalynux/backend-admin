@@ -33,6 +33,11 @@ export interface PlanPurchaseReadModel extends Document {
     /** `pending` · `paid` · `failed` · `reversed`. */
     status: string;
     gateway?: string | null;
+    /**
+     * What the payer paid WITH — `MTN` · `ORANGE` · `MOOV` · `CARD` (jovi-mall ADR-A08). Null on
+     * rows written before payment routing; no backfill. An open string.
+     */
+    provider?: string | null;
     gateway_ref?: string | null;
     /** The subscriber plan this purchase produced. `null` until it is applied. */
     subscriber_plan_id?: ObjectId | null;
@@ -50,6 +55,7 @@ const PLAN_PURCHASE_PROJECTION = {
     currency: 1,
     status: 1,
     gateway: 1,
+    provider: 1,
     gateway_ref: 1,
     subscriber_plan_id: 1,
     created_at: 1,
