@@ -1,5 +1,7 @@
 # Permissions and administrator levels
 
+⚠ **Re-measured against source 2026-09-30: 127 permissions across 21 families, tier totals 127 / 105 / 39.** Two new names, both in `developer_tools` and therefore **tier 1 only** (the family rule; tiers 2 and 3 are unchanged): `developer_tools.payments.read` and `developer_tools.payments.set` (**destructive**), for the payment-routing switch at `GET` / `PUT /dev-tools/payments` (jovi-mall ADR-A08; [dev-tools.md](dev-tools.md#put-dev-toolspayments)). Like `developer_tools.maintenance.set`, the switch is **not** behind `dev_tools.enabled`. The permission and a fail-closed audit row are its gates. `npm run authz:matrix` prints this matrix.
+
 ⚠ **Re-measured against source 2026-09-27: 125 permissions across 21 families, tier totals 125 / 105 / 39.** One new name, `money.statements.send` (account statements — [the changelog](../FRONTEND-CHANGELOG-account-statements.md)), held by **every** tier, Support included (owner decision). It guards `POST /accounts/:ownerType/:ownerId/statements`, is not flagged — it moves nothing and never prints a payout account number — and every request is audited before anything is read. `npm run authz:matrix` prints this matrix.
 
 ⚠ **Re-measured against source 2026-09-22: 124 permissions across 21 families, tier totals 124 / 104 / 38.** This closes the gap the previous note flagged. ADR-024's `cod.triage` and `money.payouts.triage` now have rows, and four tier-3 grants that this document showed as withheld — `cod.overview.read`, `cod.remittances.read`, `cod.deposits.read`, `money.payouts.read` — are marked as granted, which is what the code has always said. **The matrix below now equals `npm run authz:matrix`**; the totals in the level table count it, so the two agree with the code rather than merely with each other.
@@ -25,9 +27,9 @@ Design records: [`../../docs/ADR-003-GRANULAR-PERMISSIONS.md`](../../docs/ADR-00
 
 | Level (`tier`) | Label | Holds | Shape of the job |
 |---|---|---|---|
-| **1** | Developer | 125 of 125 | Everything, including the developer tools and every escalation-flagged action |
-| **2** | Admin | 105 of 125 | The operational tier — runs the platform day to day, including the money |
-| **3** | Support | 39 of 125 | Ticket work, the lookups needed to answer a ticket, sending an account holder their statement, editorial write on articles and bylines, resetting the customer bot's memory of a chat, and **pre-screening** a declared COD handover or a payout request. Nothing destructive, publishing stays a level above, and the one `financial` permission it holds cannot send money anywhere |
+| **1** | Developer | 127 of 127 | Everything, including the developer tools and every escalation-flagged action |
+| **2** | Admin | 105 of 127 | The operational tier — runs the platform day to day, including the money |
+| **3** | Support | 39 of 127 | Ticket work, the lookups needed to answer a ticket, sending an account holder their statement, editorial write on articles and bylines, resetting the customer bot's memory of a chat, and **pre-screening** a declared COD handover or a payout request. Nothing destructive, publishing stays a level above, and the one `financial` permission it holds cannot send money anywhere |
 
 A level is an administrator's **entire** authorization state. `tier` appears on the profile
 returned by `GET /auth/me`.
@@ -180,7 +182,7 @@ record were one decision, not two. See [ADR-020](../../docs/ADR-020-ADMIN-DATA-D
 ## The matrix
 
 ● granted  ·  not granted  ·  **†** = catalogued policy with **no endpoint built yet**
-(**4** of 125 permissions — down from 27, and the four that remain each have a written reason
+(**4** of 127 permissions — down from 27, and the four that remain each have a written reason
 below. The policy is decided ahead of the surface, deliberately.)
 
 ### `agents`
@@ -552,6 +554,8 @@ employee states their own facts; the company states its terms.
 | `developer_tools.database.inspect` | read | ● | · | · | — | Inspect the platform database's collections, sizes and index drift |
 | `developer_tools.cache.inspect` | read | ● | · | · | — | List cache key names, types and TTLs in a named Redis database — never their values |
 | `developer_tools.outbox.prune` | write | ● | · | · | destructive | Permanently delete delivered outbound events past a retention age |
+| `developer_tools.payments.read` | read | ● | · | · | — | View which payment aggregator collects and pays out, and per-aggregator outcomes |
+| `developer_tools.payments.set` | write | ● | · | · | destructive | Switch the payment aggregator for collections or payouts, Stripe, or the offered providers |
 ---
 
 ## The four `†` permissions, and why each is unbuilt
