@@ -455,14 +455,20 @@ async function main(): Promise<number> {
         /**
          * ⚠ **A count in an assertion is a date-stamped observation, and this one expired.**
          * ADR-024 added `POST /payouts/:payoutId/triage` and `POST /payouts/:payoutId/send`,
-         * taking this from fourteen to sixteen.
+         * taking this from fourteen to sixteen. Resolve-unknown (884bc90) added
+         * `POST /payouts/:payoutId/resolve-unknown`, taking it to seventeen — and CI's live job
+         * was the first thing to notice, because this suite needs jovi-mall served.
          *
          * It stays a hand-maintained count ON PURPOSE: every other assertion in this section
          * reads a route out of the manifest and would pass just as happily on an EMPTY one, so
          * a count is the only thing here that catches a mount which quietly stopped happening.
          * Update it deliberately when routes change; never derive it from the manifest it guards.
          */
-        t.assert('sixteen /money routes reached Express', () => money.length === 16);
+        t.assert('seventeen /money routes reached Express', () => money.length === 17);
+
+        /** The resolve-unknown route, by path, for the same reason as the ADR-024 pair below. */
+        t.assert('...including resolve-unknown, named rather than counted', () =>
+            money.some((r) => r.fullPath === '/api/v1/money/payouts/:payoutId/resolve-unknown'));
 
         /**
          * And the two ADR-024 added, by path — because a count alone cannot tell "two routes
