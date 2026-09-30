@@ -174,6 +174,10 @@ change is needed** if the rule above is followed: it renders by its raw name, an
 screen lists it from `aggregators[]`. Like My-CoolPay, Campay has **no refund API**, so a refund on
 a Campay payment takes the manual path (`gatewayRefundSupported: false` on refund eligibility).
 
+**My-CoolPay can now send payouts** (jovi-mall `83e8535`), so `MYCOOLPAY` can also appear as a
+payout's `transferGateway` and be chosen as the payout aggregator on the Payments screen, once its
+flag is on and its `payoutAvailable` says so. No dashboard change is needed.
+
 Payouts stuck in `processing` are now re-checked by a reconciliation sweep (jovi-mall `9ab91fa`)
 against the aggregator stored on the payout, so fewer of them need an administrator. What the
 sweep cannot settle still does.
