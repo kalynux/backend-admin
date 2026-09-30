@@ -181,7 +181,32 @@ flag is on and its `payoutAvailable` says so. No dashboard change is needed.
 Payouts stuck in `processing` are now re-checked by a reconciliation sweep (jovi-mall `9ab91fa`)
 against the aggregator stored on the payout, so fewer of them need an administrator. What the
 sweep cannot settle still does.
-<!-- W6-VERIFY: S4's manual "resolve unknown" payout action (payout-resolution.service.ts, uncommitted) — add the admin action, its route, permission and audit once it lands. -->
+
+**New action — resolve a payout whose outcome is unknown** (wi-admin `884bc90`, jovi-mall
+`d9f4dcf`). A payout whose transfer request timed out stays `processing` with a
+`transferFailureReason` beginning "Outcome unknown", naming the `jm_po_…` reference to look up. The
+sweep cannot ask about it (there is no provider transfer id), and mark-paid / reject refuse a
+`processing` row. So the payout detail needs one more button:
+
+- `POST /api/v1/money/payouts/:payoutId/resolve-unknown`, body `{ outcome: "paid" | "failed",
+  reason (10–500), evidence? }`. Full contract:
+  [`api/money.md`](./api/money.md#post-moneypayoutspayoutidresolve-unknown).
+- **Offer it only on a `processing` payout whose `transferFailureReason` says the outcome is
+  unknown**, and prompt the administrator to check the provider's dashboard for that reference
+  first. The reason says what they checked and what it showed.
+- **Permission depends on the outcome, and no new permission exists**: `paid` needs
+  `money.payouts.mark_paid` and rides its dual control (≥ 2 000 000 XAF answers `202` with an
+  approval, like `/mark-paid`); `failed` needs `money.payouts.triage`, so Support can record it.
+  Show the `paid` choice only to holders of `mark_paid`, and the `failed` choice to holders of
+  `triage`.
+- Audited as `money.payouts.resolve_unknown_paid` or `money.payouts.resolve_unknown_failed`,
+  fail-closed.
+- It is refused too early, until the sweep's quiet period (default 15 min) has passed since the
+  transfer was sent, because a callback may still arrive. Show the wait, not an error. And if the
+  callback or the sweep settles the payout first, the action is refused as no longer
+  `processing`: reload.
+- **`failed` keeps the owner's hold.** Retrying the transfer or rejecting the payout is a
+  separate, later action.
 
 ---
 
