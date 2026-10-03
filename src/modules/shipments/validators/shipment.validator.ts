@@ -105,6 +105,33 @@ export const ReassignShipmentSchema = z.object({
     agentId: objectId.optional(),
     reason: reasonText('A reason is required to reassign a shipment'),
     pickupLocation: ReassignPickupLocationSchema.optional(),
+    /** As on `assign-agent`. Meaningful only with an `agentId` — an auto-reassign never forces. */
+    force: z.boolean().optional(),
+}).strict();
+
+/**
+ * Offer an agent-less shipment to a named agent of its agency.
+ *
+ * `force: true` (owner decision 2026-10-02) bypasses every eligibility rule and contract
+ * gate jovi-mall has — availability, tracking, device location, capacity, the region the
+ * contract covers, the value ceiling, the whole COD verdict. The ONE rule that holds is an
+ * active contract between the agent and the shipment's agency. The agent still accepts.
+ */
+export const AssignShipmentAgentSchema = z.object({
+    agentId: objectId,
+    reason: reasonText('A reason is required to assign a shipment'),
+    force: z.boolean().optional(),
+}).strict();
+
+/**
+ * Move an agent-less shipment to another delivery agency.
+ *
+ * `force: true` bypasses the destination agency not being active, and the COD limits.
+ */
+export const MoveShipmentAgencySchema = z.object({
+    agencyId: objectId,
+    reason: reasonText('A reason is required to move a shipment to another agency'),
+    force: z.boolean().optional(),
 }).strict();
 
 export const CancelShipmentSchema = z.object({
@@ -131,6 +158,8 @@ export const CancelShipmentSchema = z.object({
 export type ShipmentSearchQuery = z.infer<typeof SearchShipmentsQuerySchema>;
 export type ListShipmentActivityQuery = z.infer<typeof ListShipmentActivityQuerySchema>;
 export type ReassignShipmentBody = z.infer<typeof ReassignShipmentSchema>;
+export type AssignShipmentAgentBody = z.infer<typeof AssignShipmentAgentSchema>;
+export type MoveShipmentAgencyBody = z.infer<typeof MoveShipmentAgencySchema>;
 export type CancelShipmentBody = z.infer<typeof CancelShipmentSchema>;
 
 /**

@@ -114,10 +114,10 @@ export interface AgentReadModel extends Document {
          * The pool's provenance (jovi-mall, 2026-09-21): the pool is plan × KYC verdict ×
          * administrator pin, and these record which rule produced it. Written only by
          * jovi-mall's `AgentCodPoolService` — this service reads them and never derives them,
-         * because re-deriving would mean a second copy of plan policy.
+         * because re-deriving would mean a second copy of the pool policy.
          */
         pool_ceiling?: number;
-        pool_source?: 'not_verified' | 'override' | 'plan';
+        pool_source?: 'not_verified' | 'override' | 'default' | 'plan'; // 'plan' = legacy, pre-2026-10-02
         pool_plan_code?: string | null;
         pool_synced_at?: Date | null;
         pool_override?: {

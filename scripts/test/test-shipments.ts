@@ -48,7 +48,11 @@ import { AUDIT_CATALOG } from '../../src/modules/audit/domain/audit.catalog';
 import { PERMISSION_CATALOG } from '../../src/modules/authorization/domain/permission.catalog';
 import { PLATFORM_COLLECTIONS } from '../../src/infra/platform/platform-collections';
 import { routeManifest } from '../../src/api/route-manifest';
+import { TIER_GRANTS } from '../../src/modules/authorization/domain/tier-grants';
 import '../../src/modules/shipments/routes/shipment.routes';
+import { ObjectId } from 'mongodb';
+import { toShipmentOfferDto } from '../../src/modules/shipments/read-models/shipment.dto';
+import type { ShipmentOfferReadModel } from '../../src/modules/shipments/repositories/shipment-context.read.repository';
 
 const t = suite('shipment management');
 
@@ -312,8 +316,11 @@ t.assert(
  */
 t.assert(
     'the activity filter is derived from the catalog',
-    () => SHIPMENT_AUDIT_ACTIONS.length === 3
-        && SHIPMENT_AUDIT_ACTIONS.includes('shipments.tracking.trail.read'),
+    () => SHIPMENT_AUDIT_ACTIONS.length === 5
+        && SHIPMENT_AUDIT_ACTIONS.includes('shipments.tracking.trail.read')
+        // The two pushes, 2026-10-02.
+        && SHIPMENT_AUDIT_ACTIONS.includes('shipments.agent.assign')
+        && SHIPMENT_AUDIT_ACTIONS.includes('shipments.agency.move'),
 );
 t.assert(
     'the activity feed refuses an action from another family',
@@ -332,8 +339,25 @@ t.section('7. Routes');
 
 const routes = routeManifest().filter((route) => route.fullPath.startsWith('/api/v1/shipments'));
 
-/** Six at Phase 6, plus the two geo-tracker data reads at Phase 6.I (ADR-020). */
-t.assert('eight shipment routes are registered', () => routes.length === 8);
+/**
+ * Six at Phase 6, plus the two geo-tracker data reads at Phase 6.I (ADR-020), plus the two
+ * pushes on 2026-10-02 (assign-agent, move-agency).
+ */
+t.assert('ten shipment routes are registered', () => routes.length === 10);
+
+/**
+ * Both pushes sit under `shipments.reassign`, and every tier holds it — the owner's
+ * decision was that a forced push is available at all three. If Support loses it, the
+ * dashboard's force button stops working for the tier that answers "my parcel is stuck".
+ */
+t.assert('the two pushes are POSTs gated on shipments.reassign', () => {
+    const push = routes.filter((r) => r.fullPath.endsWith('/assign-agent') || r.fullPath.endsWith('/move-agency'));
+    return push.length === 2
+        && push.every((r) => r.method === 'post' && JSON.stringify(r.access).includes('shipments.reassign'));
+});
+t.assert('every tier holds shipments.reassign', () =>
+    ([1, 2, 3] as const).every((tier) => TIER_GRANTS[tier].includes('shipments.reassign')),
+);
 
 /**
  * The scope model, asserted where it is actually enforced.
@@ -453,6 +477,41 @@ t.assert(
 t.assert(
     'trackability is NOT recomputed here — jovi-mall owns that policy',
     () => files.every((f) => !f.code.includes('TRACKABLE_SHIPMENT_STATUSES')),
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('10. The offer mapper carries an administrator\'s force');
+
+const offerRow = (extra: Partial<ShipmentOfferReadModel> = {}): ShipmentOfferReadModel => ({
+    _id: new ObjectId(),
+    shipment_id: new ObjectId(),
+    agent_id: new ObjectId(),
+    status: 'pending',
+    created_at: new Date('2026-10-02T10:00:00Z'),
+    ...extra,
+});
+const forced = toShipmentOfferDto(
+    offerRow({
+        admin_override: { by_name: 'Ada Admin', reason: 'customer escalation', at: new Date('2026-10-02T10:05:00Z') },
+    }),
+    new Map(),
+);
+t.assert('a forced row maps byName and reason', () =>
+    forced.adminOverride?.byName === 'Ada Admin' && forced.adminOverride?.reason === 'customer escalation');
+t.assert('a forced row maps `at` to ISO', () => forced.adminOverride?.at === '2026-10-02T10:05:00.000Z');
+t.assert('the override never carries a user id', () =>
+    forced.adminOverride !== null && Object.keys(forced.adminOverride).sort().join(',') === 'at,byName,reason');
+t.assert('a row without the field maps to adminOverride: null — the key is present', () => {
+    const dto = toShipmentOfferDto(offerRow(), new Map());
+    return 'adminOverride' in dto && dto.adminOverride === null;
+});
+t.assert('a row with admin_override: null maps to null', () =>
+    toShipmentOfferDto(offerRow({ admin_override: null }), new Map()).adminOverride === null);
+t.assert(
+    'the offer projection names admin_override DOTTED and never by_user_id',
+    () => codRepo.code.includes("'admin_override.by_name': 1")
+        && !codRepo.code.includes('admin_override.by_user_id')
+        && !/\badmin_override:\s*1/.test(codRepo.code),
 );
 
 process.exit(t.finish());

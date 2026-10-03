@@ -21,6 +21,9 @@ Design record: [`../../docs/ADR-009-DELIVERY-NETWORK.md`](../../docs/ADR-009-DEL
 | `POST` | `/agencies/:agencyId/reject` | `agencies.verify` | **delegated** | ✅ |
 | `POST` | `/agencies/:agencyId/deactivate` | `agencies.deactivate` | **delegated** | ✅ |
 | `POST` | `/agencies/:agencyId/reactivate` | `agencies.reactivate` | **delegated** | ✅ |
+| `GET` | `/agencies/:agencyId/cod-limit` | `agencies.read` | **delegated** | — |
+| `PUT` | `/agencies/:agencyId/cod-limit` | `agencies.cod_limit.set` (financial) | **delegated** | ✅ |
+| `POST` | `/agencies/:agencyId/cod-limit/release` | `agencies.cod_limit.set` (financial) | **delegated** | ✅ |
 
 `agencies.read` is a Support-level lookup — answering a ticket about a stalled delivery needs
 it. The three writes are Admin and above; `agencies.deactivate` is `destructive` and had to be
@@ -279,7 +282,8 @@ most of what the screen is for.
         "remittance": { "cadence": "weekly", "dayOfWeek": 1,
                         "dayOfMonth": null, "graceHours": 24 },
         "feeSplit":   { "model": "percentage", "agentSharePercent": 70,
-                        "agentFlatFee": null, "currency": "XAF" },
+                        "agentFlatFee": null, "agentMonthlySalary": null,
+                        "currency": "XAF" },
         "coverageRegions": [],
         "shipmentValueCeiling": 500000,
         "proposedBy": "agency",
@@ -669,3 +673,67 @@ imposing one does.
 ### Audit
 
 `agencies.reactivate`
+
+## `GET /agencies/:agencyId/cod-limit`
+
+**(2026-10-02)** The agency's COD cash limit — the most cash on delivery it may hold that has not
+reached the platform — with its source, the pin, and its live exposure. **Delegated** to
+`GET /api/internal/admin/agencies/:id/cod-limit`: exposure counts in-flight COD shipments and
+collected-unremitted cash, a verdict jovi-mall computes and this service never re-derives.
+
+```json
+{
+  "success": true,
+  "data": {
+    "agencyId": "66a1…",
+    "limit": 1500000,
+    "source": "override",
+    "defaultLimit": 1000000,
+    "exposure": { "inFlight": 420000, "inFlightCount": 6, "collectedUnremitted": 310000, "collectedCount": 4, "total": 730000 },
+    "headroom": 770000,
+    "overLimit": false,
+    "override": { "amount": 1500000, "reason": "Long-standing partner, remits daily", "setAt": "2026-10-02T09:00:00.000Z", "setByUserId": "…", "setBySource": "admin", "setByName": "Ada Admin" }
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `limit` / `source` | `default` = the platform's 1 000 000; `override` = an administrator's pin |
+| `exposure.inFlight` | COD shipments the agency holds (`assigned` → `agent_delivered`) whose cash is not collected |
+| `exposure.collectedUnremitted` | Collected cash not yet settled by a confirmed remittance or a direct-to-platform deposit |
+| `overLimit` | `exposure.total > limit` — after a vendor's forced dispatch, or a pin lowered below holdings |
+| `override` | The pin with its reason and author, or `null` |
+
+`agencies.read` (Support holds it). Not audited. `404 NOT_FOUND` for an unknown agency.
+
+## `PUT /agencies/:agencyId/cod-limit`
+
+**(2026-10-02)** PIN the agency's cash limit, replacing the 1 000 000 default until released.
+
+```json
+{ "maxAmount": 1500000, "reason": "Long-standing partner, remits daily" }
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `maxAmount` | integer ≥ 0 | jovi-mall owns the sanity maximum (100 000 000). Above **or** below the default; `0` stops the agency taking COD |
+| `reason` | string | Required. Stored on the pin (jovi-mall) **and** in the audit payload |
+
+`.strict()`. Answers the same body as the GET. A pin below what the agency already holds is
+accepted: the next dispatch is refused and the read shows `overLimit: true`.
+
+| | |
+|---|---|
+| **Permission** | `agencies.cod_limit.set` — flagged `financial`, so never granted to Support and named into the Admin grant by hand (the twin of `agents.cod_threshold.set`) |
+| **Audit** | `agencies.cod_limit.set`, payload `{ maxAmount, reason }`; `before`/`after` carry `{ codLimit, codLimitSource }` |
+
+## `POST /agencies/:agencyId/cod-limit/release`
+
+```json
+{ "reason": "Partnership review closed" }
+```
+
+Back to the 1 000 000 default. Same jovi-mall endpoint (`maxAmount: null`), **its own audit
+action** `agencies.cod_limit.release` — jovi-mall clears the pin entirely, so this row is the
+only surviving record it existed. Permission `agencies.cod_limit.set`.

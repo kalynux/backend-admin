@@ -1,5 +1,7 @@
 # Permissions and administrator levels
 
+⚠ **Re-measured against source 2026-10-02: 128 permissions across 21 families, tier totals 128 / 106 / 40.** One new name, `agencies.cod_limit.set` (`financial`), granted by name in the tier-2 money block and therefore **not** to Support — it guards `PUT /agencies/:agencyId/cod-limit` and `POST …/cod-limit/release` ([the changelog](../FRONTEND-CHANGELOG-cod-limits.md)). Measured with `TIER_GRANTS` from `src/modules/authorization/domain/tier-grants.ts`.
+
 ⚠ **Re-measured against source 2026-09-30: 127 permissions across 21 families, tier totals 127 / 105 / 39.** Two new names, both in `developer_tools` and therefore **tier 1 only** (the family rule; tiers 2 and 3 are unchanged): `developer_tools.payments.read` and `developer_tools.payments.set` (**destructive**), for the payment-routing switch at `GET` / `PUT /dev-tools/payments` (jovi-mall ADR-A08; [dev-tools.md](dev-tools.md#put-dev-toolspayments)). Like `developer_tools.maintenance.set`, the switch is **not** behind `dev_tools.enabled`. The permission and a fail-closed audit row are its gates. `npm run authz:matrix` prints this matrix.
 
 ⚠ **Re-measured against source 2026-09-27: 125 permissions across 21 families, tier totals 125 / 105 / 39.** One new name, `money.statements.send` (account statements — [the changelog](../FRONTEND-CHANGELOG-account-statements.md)), held by **every** tier, Support included (owner decision). It guards `POST /accounts/:ownerType/:ownerId/statements`, is not flagged — it moves nothing and never prints a payout account number — and every request is audited before anything is read. `npm run authz:matrix` prints this matrix.
@@ -27,9 +29,9 @@ Design records: [`../../docs/ADR-003-GRANULAR-PERMISSIONS.md`](../../docs/ADR-00
 
 | Level (`tier`) | Label | Holds | Shape of the job |
 |---|---|---|---|
-| **1** | Developer | 127 of 127 | Everything, including the developer tools and every escalation-flagged action |
-| **2** | Admin | 105 of 127 | The operational tier — runs the platform day to day, including the money |
-| **3** | Support | 39 of 127 | Ticket work, the lookups needed to answer a ticket, sending an account holder their statement, editorial write on articles and bylines, resetting the customer bot's memory of a chat, and **pre-screening** a declared COD handover or a payout request. Nothing destructive, publishing stays a level above, and the one `financial` permission it holds cannot send money anywhere |
+| **1** | Developer | 128 of 128 | Everything, including the developer tools and every escalation-flagged action |
+| **2** | Admin | 106 of 128 | The operational tier — runs the platform day to day, including the money |
+| **3** | Support | 40 of 128 | Ticket work, the lookups needed to answer a ticket, sending an account holder their statement, editorial write on articles and bylines, resetting the customer bot's memory of a chat, and **pre-screening** a declared COD handover or a payout request. Nothing destructive, publishing stays a level above, and the one `financial` permission it holds cannot send money anywhere |
 
 A level is an administrator's **entire** authorization state. `tier` appears on the profile
 returned by `GET /auth/me`.
@@ -182,7 +184,7 @@ record were one decision, not two. See [ADR-020](../../docs/ADR-020-ADMIN-DATA-D
 ## The matrix
 
 ● granted  ·  not granted  ·  **†** = catalogued policy with **no endpoint built yet**
-(**4** of 127 permissions — down from 27, and the four that remain each have a written reason
+(**4** of 128 permissions — down from 27, and the four that remain each have a written reason
 below. The policy is decided ahead of the surface, deliberately.)
 
 ### `agents`
@@ -195,7 +197,7 @@ below. The policy is decided ahead of the surface, deliberately.)
 | `agents.kyc.review` | write | ● | ● | · | — | Approve or reject an agent’s identity documents — this is what lets an agent work |
 | `agents.tracking.set` | write | ● | ● | · | — | Override an agent’s live-location tracking permission |
 | `agents.tracking.read` | read | ● | ● | ● | — | Read an agent’s live tracking state and live position from geo-tracker — every position read is recorded in the audit trail |
-| `agents.cod_threshold.set` | write | ● | ● | · | financial | Pin (or release) how much cash on delivery an agent may hold, overriding their plan |
+| `agents.cod_threshold.set` | write | ● | ● | · | financial | Pin (or release) how much cash on delivery an agent may hold, overriding the 500 000 default |
 | `agents.transfer` | write | ● | ● | · | — | Move an agent from one delivery agency to another |
 | `agents.contracts.manage` | write | ● | ● | · | — | Suspend, reinstate or terminate one agent↔agency contract (never its terms) |
 
@@ -207,6 +209,7 @@ below. The policy is decided ahead of the surface, deliberately.)
 | `agencies.verify` | write | ● | ● | · | — | Approve a delivery agency’s business verification — this is what lets a pending agency operate |
 | `agencies.deactivate` | write | ● | ● | · | destructive | Deactivate a delivery agency — cascades a suspension across every vendor product that defaults to it |
 | `agencies.reactivate` | write | ● | ● | · | — | Reactivate a previously deactivated delivery agency |
+| `agencies.cod_limit.set` | write | ● | ● | · | financial | Pin (or release) how much cash on delivery an agency may hold, overriding the 1 000 000 default (2026-10-02) |
 
 ### `billing`
 
@@ -446,7 +449,7 @@ it. It carries no flag: `destructive` would make the boot check refuse it to Sup
 |---|---|:-:|:-:|:-:|---|---|
 | `shipments.read` | read | ● | ● | ● | — | Search shipments and view their detail and assignment state |
 | `shipments.tracking.read` | read | ● | ● | ● | — | Read a delivery’s GPS trail and tracking events from geo-tracker — every trail read is recorded in the audit trail |
-| `shipments.reassign` | write | ● | ● | · | — | Manually move a shipment to a different agent or agency |
+| `shipments.reassign` | write | ● | ● | ● | — | Manually move a shipment to a different agent or agency — incl. `force: true` (Support since 2026-10-02) |
 | `shipments.cancel` | write | ● | ● | · | destructive | Cancel a shipment already in progress |
 
 ### `administrators`

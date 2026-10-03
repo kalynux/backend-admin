@@ -120,13 +120,15 @@ export interface CodAllocationDto {
      */
     overAllocatedBy: number;
     /**
-     * Where `maxThreshold` comes from (2026-09-21) — the pool is the agent's plan value once
-     * KYC is `verified`, 0 while it is not, or an administrator's pin. `selfLimited` is the
+     * Where `maxThreshold` comes from (2026-09-21) — the pool is the platform default
+     * (500 000; the agent's plan value before 2026-10-02) once KYC is `verified`, 0 while it
+     * is not, or an administrator's pin. `selfLimited` is the
      * agent choosing to carry less than `ceiling`. `source` is for display, never a branch.
      */
     pool: {
         ceiling: number;
-        source: 'not_verified' | 'override' | 'plan';
+        source: 'not_verified' | 'override' | 'default' | 'plan';
+        /** Always `null` since 2026-10-02 (the plan no longer sets the pool). Deprecated. */
         planCode: string | null;
         selfLimited: boolean;
         syncedAt: string | null;
@@ -150,9 +152,14 @@ export interface CodAllocationDto {
     contracts: CodAllocationSliceDto[];
 }
 
-type PoolSource = 'not_verified' | 'override' | 'plan';
+/**
+ * `default` replaced `plan` in jovi-mall on 2026-10-02 (the pool is now the platform default,
+ * 500 000, for every verified agent, whatever their plan). `plan` stays readable until that
+ * agent's next sync rewrites it — a document is not migrated, it converges.
+ */
+type PoolSource = 'not_verified' | 'override' | 'default' | 'plan';
 /** An unknown value reads as the fail-closed one — a pool of unknown origin is not assumed to be the plan. */
-const POOL_SOURCES: readonly PoolSource[] = ['not_verified', 'override', 'plan'];
+const POOL_SOURCES: readonly PoolSource[] = ['not_verified', 'override', 'default', 'plan'];
 
 function num(value: unknown): number {
     return typeof value === 'number' && Number.isFinite(value) ? value : 0;

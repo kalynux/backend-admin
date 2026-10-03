@@ -185,7 +185,7 @@ export const PERMISSION_CATALOG = Object.freeze({
     },
     'agents.cod_threshold.set': {
         family: 'agents', action: 'write', phase: 5, financial: true,
-        summary: 'Pin (or release) how much cash on delivery an agent may hold, overriding their plan',
+        summary: 'Pin (or release) how much cash on delivery an agent may hold, overriding the 500 000 default',
     },
     'agents.transfer': {
         family: 'agents', action: 'write', phase: 5,
@@ -250,6 +250,18 @@ export const PERMISSION_CATALOG = Object.freeze({
     'agencies.reactivate': {
         family: 'agencies', action: 'write', phase: 5,
         summary: 'Reactivate a previously deactivated delivery agency',
+    },
+    /**
+     * Pin (or release) how much cash on delivery an agency may hold un-remitted — owner
+     * decision 2026-10-02, the agency twin of `agents.cod_threshold.set` and flagged
+     * `financial` for the same reason: it moves how much of the platform's cash sits with
+     * a third party. `financial` keeps it OUT of `allInFamily('agencies')`, so it is granted
+     * by name in the tier-2 money block exactly as its agent twin is, and Support does not
+     * hold it.
+     */
+    'agencies.cod_limit.set': {
+        family: 'agencies', action: 'write', phase: 9, financial: true,
+        summary: 'Pin (or release) how much cash on delivery an agency may hold, overriding the 1 000 000 default',
     },
 
     // ═══ BILLING ═══ 7 legacy endpoints ═══════════════════════════════════════

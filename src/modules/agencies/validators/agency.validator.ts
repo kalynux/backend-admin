@@ -185,6 +185,26 @@ export const ReactivateAgencySchema = z.object({
     reason: reasonText('Give a reason or omit it').optional(),
 });
 
+/**
+ * PIN the agency's COD cash limit (2026-10-02). Bounds are NOT copied from jovi-mall beyond
+ * "a non-negative integer" — jovi-mall owns the sanity maximum, for the reason
+ * `SetThresholdSchema` gives on the agent side. Reason required, as on every write that
+ * outranks a platform rule.
+ */
+export const SetAgencyCodLimitSchema = z
+    .object({
+        maxAmount: z.number().int().nonnegative(),
+        reason: reasonText('A reason is required to pin an agency’s COD limit'),
+    })
+    .strict();
+
+/** Release the pin — the agency returns to the 1 000 000 default. */
+export const ReleaseAgencyCodLimitSchema = z
+    .object({
+        reason: reasonText('A reason is required to release an agency’s COD limit pin'),
+    })
+    .strict();
+
 /*
  * `DelegatedPageQuerySchema` — a `.strict()` page schema for the delegated lists — was
  * declared here and **bound to no route**, verified by scan and removed 2026-09-12 (BR-022).
@@ -201,3 +221,5 @@ export type ListAgencyActivityQuery = z.infer<typeof ListAgencyActivityQuerySche
 export type RejectAgencyBody = z.infer<typeof RejectAgencySchema>;
 export type DeactivateAgencyBody = z.infer<typeof DeactivateAgencySchema>;
 export type ReactivateAgencyBody = z.infer<typeof ReactivateAgencySchema>;
+export type SetAgencyCodLimitBody = z.infer<typeof SetAgencyCodLimitSchema>;
+export type ReleaseAgencyCodLimitBody = z.infer<typeof ReleaseAgencyCodLimitSchema>;

@@ -31,6 +31,8 @@ export interface ShipmentOfferReadModel extends Document {
     expires_at?: Date | null;
     responded_at?: Date | null;
     rejection_reason?: string | null;
+    /** Projected DOTTED — `by_user_id` (a wi-admin id) is never read. */
+    admin_override?: { by_name?: string | null; reason?: string | null; at?: Date | null } | null;
     created_at: Date;
 }
 
@@ -60,6 +62,9 @@ export class ShipmentOfferReadRepository extends PlatformReadRepository<Shipment
             expires_at: 1,
             responded_at: 1,
             rejection_reason: 1,
+            'admin_override.by_name': 1,
+            'admin_override.reason': 1,
+            'admin_override.at': 1,
             created_at: 1,
         });
     }
@@ -71,7 +76,8 @@ export class ShipmentOfferReadRepository extends PlatformReadRepository<Shipment
                 _id: 1, shipment_id: 1, agent_id: 1, status: 1, origin: 1, round: 1,
                 session_id: 1, 'created_by.role': 1, 'created_by.user_id': 1,
                 'created_by.name': 1, expires_at: 1, responded_at: 1,
-                rejection_reason: 1, created_at: 1,
+                rejection_reason: 1, 'admin_override.by_name': 1,
+                'admin_override.reason': 1, 'admin_override.at': 1, created_at: 1,
             },
             sort: { created_at: -1 },
             limit,

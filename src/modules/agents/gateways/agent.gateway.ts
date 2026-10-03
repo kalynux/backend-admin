@@ -334,12 +334,12 @@ export async function setTracking(
 }
 
 /**
- * PIN the agent's whole COD pool, replacing their plan's value as the ceiling until an
+ * PIN the agent's whole COD pool, replacing the platform default as the ceiling until an
  * administrator releases it (jovi-mall, 2026-09-21).
  *
  * ── What changed underneath this call ────────────────────────────────────────
  * Until 2026-09-21 this SET the pool, and a pool nobody set was 0. The pool is now derived
- * in jovi-mall — the agent's plan value once their KYC is `verified`, 0 while it is not —
+ * in jovi-mall — the platform default (500 000) once their KYC is `verified`, 0 while it is not —
  * so an administrator no longer sets it; they pin a value that outranks the plan in either
  * direction. The pin does NOT outrank KYC: on an unverified agent it is stored and waits
  * for the verdict, and the pool stays 0. Same endpoint, two new body rules: `reason` is
@@ -383,14 +383,14 @@ export async function setCodThreshold(
 }
 
 /**
- * RELEASE the pin — the agent goes back to their plan's value (or 0 while unverified).
+ * RELEASE the pin — the agent goes back to the 500 000 default (or 0 while unverified).
  *
  * The same jovi-mall endpoint with `maxThreshold: null`, under its OWN audit action for the
  * reason `agents.unban` is separate from `agents.ban`: jovi-mall clears the pin off the agent
  * entirely, so this row is the only surviving record that it existed, and two opposite acts
  * under one label would make the agent's history unreadable.
  *
- * Refused (by jovi-mall) when the plan's value is below what contracts already hold — the
+ * Refused (by jovi-mall) when the default is below what contracts already hold — the
  * release would leave the pool over-committed, and a person choosing to do that can be told
  * which contracts are in the way.
  */
@@ -436,7 +436,7 @@ export interface PlatformCodAllocation {
     pool?: {
         maxThreshold: number;
         ceiling: number;
-        source: 'not_verified' | 'override' | 'plan';
+        source: 'not_verified' | 'override' | 'default' | 'plan';
         planCode: string | null;
         selfLimited: boolean;
         syncedAt: string | null;

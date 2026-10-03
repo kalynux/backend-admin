@@ -385,9 +385,9 @@ function toAgentDetailDto(agent: AgentReadModel) {
             maxThreshold: agent.cod?.max_threshold ?? null,
             /**
              * Where `maxThreshold` comes from (jovi-mall, 2026-09-21). The pool is no longer a
-             * number an administrator types in: it is the agent's plan value once their KYC
+             * number an administrator types in: it is the platform default (500 000) once their KYC
              * is `verified` (Free 500 000), `0` while it is not, or an administrator's PIN,
-             * which replaces the plan's value until released. The agent may carry LESS than
+             * which replaces the default until released. The agent may carry LESS than
              * `ceiling` — `selfLimited` says they chose to.
              *
              * `source` is for display, never a branch: `not_verified` · `override` · `plan`.
@@ -897,7 +897,7 @@ export class AgentController {
 
     /**
      * PUT /api/v1/agents/:agentId/cod-threshold — PIN the whole pool every contract slices.
-     * Replaces the agent's plan value until released; does not outrank KYC.
+     * Replaces the 500 000 default until released; does not outrank KYC.
      */
     static setCodThreshold = asyncHandler(async (req: Request, res: Response) => {
         const body = req.body as SetThresholdBody;
@@ -915,7 +915,7 @@ export class AgentController {
     });
 
     /**
-     * POST /api/v1/agents/:agentId/cod-threshold/release — back to the plan's value (0 while
+     * POST /api/v1/agents/:agentId/cod-threshold/release — back to the 500 000 default (0 while
      * unverified). Its own route and audit action, for the `unban` reason.
      */
     static releaseCodThreshold = asyncHandler(async (req: Request, res: Response) => {

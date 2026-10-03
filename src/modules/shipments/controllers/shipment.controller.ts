@@ -55,6 +55,8 @@ import {
     CancelShipmentBody,
     ListShipmentActivityQuery,
     ReassignShipmentBody,
+    AssignShipmentAgentBody,
+    MoveShipmentAgencyBody,
     ShipmentSearchQuery,
     TrackingEventsQuery,
     TrackingTrailQuery,
@@ -327,12 +329,58 @@ export class ShipmentController {
 
         const result = await gateway.reassign(
             req.params.shipmentId,
-            { agentId: body.agentId, reason: body.reason, pickupLocation: body.pickupLocation },
+            { agentId: body.agentId, reason: body.reason, pickupLocation: body.pickupLocation, force: body.force },
             toAuditState(shipment),
             actorContextOf(req),
         );
 
         sendSuccess(res, result, { message: 'Shipment reassigned' });
+    });
+
+    /**
+     * POST /api/v1/shipments/:shipmentId/assign-agent
+     *
+     * Offer an agent-less shipment to a named agent. `force: true` skips every eligibility
+     * check but an active contract with the shipment's agency.
+     */
+    static assignAgent = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as AssignShipmentAgentBody;
+        const shipment = await loadOr404(req.params.shipmentId);
+
+        const result = await gateway.assignAgent(
+            req.params.shipmentId,
+            { agentId: body.agentId, reason: body.reason, force: body.force },
+            toAuditState(shipment),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, result, {
+            message: result.autoAccepted ? 'Agent assigned (auto-accepted)' : 'Offer sent to agent',
+        });
+    });
+
+    /**
+     * POST /api/v1/shipments/:shipmentId/move-agency
+     *
+     * Push a shipment to a different delivery agency. `force: true` skips an inactive
+     * destination and the COD limits.
+     */
+    static moveAgency = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as MoveShipmentAgencyBody;
+        const shipment = await loadOr404(req.params.shipmentId);
+
+        const result = await gateway.moveAgency(
+            req.params.shipmentId,
+            { agencyId: body.agencyId, reason: body.reason, force: body.force },
+            toAuditState(shipment),
+            actorContextOf(req),
+        );
+
+        sendSuccess(res, result, {
+            message: result.dispatched
+                ? 'Shipment moved and dispatched to the new agency'
+                : 'Shipment moved to the new agency',
+        });
     });
 
     /**

@@ -46,6 +46,7 @@ function auditedDelegation<T>(
     payload: Record<string, unknown> | null,
     before: AgencySnapshot,
     perform: () => Promise<T>,
+    toAfter: (result: unknown) => Record<string, unknown> | null = asState,
 ): Promise<T> {
     return auditedAttempt(
         {
@@ -70,7 +71,7 @@ function auditedDelegation<T>(
         },
         async () => {
             const result = await perform();
-            return { result, before, after: asState(result) };
+            return { result, before, after: toAfter(result) };
         },
     );
 }
@@ -260,6 +261,108 @@ export async function reactivate(
             return { agency: result.data, counts: countsOf(result.meta) };
         },
     ) as Promise<CascadeResult>;
+}
+
+// ─── The agency's COD cash limit (owner decision 2026-10-02) ──────────────────
+
+/**
+ * jovi-mall's `AdminAgencyCodLimitReport` — the limit, its source, the pin, and the live
+ * exposure. Passed through as the response body; only the fields below are named here.
+ */
+export interface PlatformAgencyCodLimit {
+    agencyId: string;
+    limit: number;
+    source: 'default' | 'override';
+    defaultLimit: number;
+    exposure: { inFlight: number; collectedUnremitted: number; total: number; [key: string]: unknown };
+    headroom: number;
+    overLimit: boolean;
+    override: Record<string, unknown> | null;
+    [key: string]: unknown;
+}
+
+/** The audit row's view of a COD-limit answer: what the pin changed. */
+export function codLimitAuditState(result: unknown): Record<string, unknown> | null {
+    const r = result as PlatformAgencyCodLimit | null;
+    if (!r || typeof r !== 'object') return null;
+    return { codLimit: r.limit ?? null, codLimitSource: r.source ?? null };
+}
+
+/**
+ * A DELEGATED read — the verdict, not a column: exposure counts in-flight COD shipments
+ * and collected-unremitted cash, and the pure rule lives in jovi-mall. Recomputing it here
+ * would be a second copy of a cash rule that could only drift (the ADR-009 D-1 posture).
+ */
+export async function codLimit(agencyId: string, context: ActorContext): Promise<PlatformAgencyCodLimit> {
+    const result = await platformRequest<PlatformAgencyCodLimit>({
+        method: 'GET',
+        path: `/agencies/${agencyId}/cod-limit`,
+        actor: context.actor,
+        requestId: context.requestId,
+    });
+    return result.data;
+}
+
+/**
+ * PIN the agency's COD cash limit, replacing the 1 000 000 default until released. The
+ * reason is FORWARDED (jovi-mall stores it on the pin) and is in the audit payload too.
+ */
+export async function setCodLimit(
+    agencyId: string,
+    maxAmount: number,
+    reason: string,
+    before: AgencySnapshot,
+    context: ActorContext,
+): Promise<PlatformAgencyCodLimit> {
+    return auditedDelegation(
+        'agencies.cod_limit.set',
+        context,
+        { id: agencyId, label: labelOf(before) },
+        { maxAmount, reason },
+        before,
+        async () => {
+            const result = await platformRequest<PlatformAgencyCodLimit>({
+                method: 'PUT',
+                path: `/agencies/${agencyId}/cod-limit`,
+                body: { maxAmount, reason },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return result.data;
+        },
+        codLimitAuditState,
+    );
+}
+
+/**
+ * RELEASE the pin — back to the default. The same jovi-mall endpoint with
+ * `maxAmount: null`, under its OWN audit action: jovi-mall clears the pin entirely, so this
+ * row is the only surviving record it existed (the `agents.cod_threshold.release` reason).
+ */
+export async function releaseCodLimit(
+    agencyId: string,
+    reason: string,
+    before: AgencySnapshot,
+    context: ActorContext,
+): Promise<PlatformAgencyCodLimit> {
+    return auditedDelegation(
+        'agencies.cod_limit.release',
+        context,
+        { id: agencyId, label: labelOf(before) },
+        { reason },
+        before,
+        async () => {
+            const result = await platformRequest<PlatformAgencyCodLimit>({
+                method: 'PUT',
+                path: `/agencies/${agencyId}/cod-limit`,
+                body: { maxAmount: null, reason },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return result.data;
+        },
+        codLimitAuditState,
+    );
 }
 
 /**

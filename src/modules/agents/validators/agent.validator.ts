@@ -213,7 +213,8 @@ export const SetTrackingSchema = z
 /**
  * PIN the agent's whole COD pool, which every contract sub-allocates from.
  *
- * Since 2026-09-21 the pool is derived in jovi-mall (plan value once KYC is `verified`, 0
+ * Since 2026-09-21 the pool is derived in jovi-mall (the 500 000 default since 2026-10-02; the
+ * plan value before that, once KYC is `verified`, 0
  * otherwise), so this no longer SETS it — it pins a value that replaces the plan's until
  * released (`POST …/cod-threshold/release`). `reason` is required, as on every other write
  * here that outranks a rule.
@@ -231,7 +232,7 @@ export const SetThresholdSchema = z
     })
     .strict();
 
-/** Release the pin — the agent returns to their plan's value (0 while unverified). */
+/** Release the pin — the agent returns to the 500 000 default (0 while unverified; it was their plan's value before 2026-10-02). */
 export const ReleaseThresholdSchema = z
     .object({
         reason: reasonText('A reason is required to release an agent’s COD pool pin'),

@@ -52,7 +52,7 @@ decorations.
   "terms": {
     "employment":  { "type": "contractor", "employeeRef": "AG-114", "startedAt": "…", "endsAt": null },
     "remittance":  { "cadence": "weekly", "dayOfWeek": 1, "dayOfMonth": null, "graceHours": 24 },
-    "feeSplit":    { "model": "percentage", "agentSharePercent": 70, "agentFlatFee": null, "currency": "XAF" },
+    "feeSplit":    { "model": "percentage", "agentSharePercent": 70, "agentFlatFee": null, "agentMonthlySalary": null, "currency": "XAF" },
     "coverageRegions": [],
     "shipmentValueCeiling": 500000,
     "proposedBy": "agency",
@@ -113,9 +113,10 @@ unilaterally.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `model` | string | `percentage` · `flat`. Decides which amount below is meaningful |
-| `agentSharePercent` | number \| null | |
-| `agentFlatFee` | number \| null | |
+| `model` | string | `percentage` · `flat` · `monthly_salary` (2026-10-02). Decides which amount below is meaningful; a value under another model may be stale and must be ignored |
+| `agentSharePercent` | number \| null | 0–100, `percentage` only |
+| `agentFlatFee` | number \| null | Minor units per delivery, `flat` only |
+| `agentMonthlySalary` | number \| null | Minor units per MONTH, `monthly_salary` only. **The agency pays it off-platform**: jovi-mall pays the agent 0 per delivery (no agent allocation row is written) and the agency keeps the whole delivery fee. Nothing on the platform schedules, tracks or pays the salary — it is stored only so both parties see what they agreed. Render it as "salaried — X / month, paid by the agency", never as a platform earning |
 | `currency` | string \| null | |
 
 ---

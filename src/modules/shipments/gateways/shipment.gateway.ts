@@ -130,7 +130,7 @@ export interface PlatformReassignResult extends PlatformShipment {
  */
 export async function reassign(
     shipmentId: string,
-    input: { agentId?: string; reason: string; pickupLocation?: Record<string, unknown> },
+    input: { agentId?: string; reason: string; pickupLocation?: Record<string, unknown>; force?: boolean },
     before: ShipmentSnapshot,
     context: ActorContext,
 ): Promise<PlatformReassignResult> {
@@ -142,12 +142,100 @@ export async function reassign(
             agentId: input.agentId ?? null,
             reason: input.reason,
             pickupOverridden: Boolean(input.pickupLocation),
+            force: input.force === true,
         },
         before,
         async () => {
             const result = await platformRequest<PlatformReassignResult>({
                 method: 'POST',
                 path: `/shipments/${shipmentId}/reassign`,
+                body: input,
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return result.data;
+        },
+    );
+}
+
+/**
+ * Offer an agent-less shipment to a named agent of its agency.
+ *
+ * jovi-mall resolves the agency from the shipment and runs the agency's manual pick. Without
+ * `force` every rule applies (422 `AGENT_NOT_ELIGIBLE_FOR_ASSIGNMENT`,
+ * `CONTRACT_COVERAGE_REGION_NOT_COVERED`, the COD codes, …). With `force: true` only one
+ * refusal remains: 422 `AGENT_MEMBERSHIP_NOT_APPROVED`, no active contract with that
+ * agency. The agent still accepts the offer.
+ */
+export async function assignAgent(
+    shipmentId: string,
+    input: { agentId: string; reason: string; force?: boolean },
+    before: ShipmentSnapshot,
+    context: ActorContext,
+): Promise<PlatformReassignResult> {
+    return auditedDelegation(
+        'shipments.agent.assign',
+        context,
+        { id: shipmentId, label: labelOf(before) },
+        { agentId: input.agentId, reason: input.reason, force: input.force === true },
+        before,
+        async () => {
+            const result = await platformRequest<PlatformReassignResult>({
+                method: 'POST',
+                path: `/shipments/${shipmentId}/assign-agent`,
+                body: input,
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return result.data;
+        },
+    );
+}
+
+export interface PlatformMoveAgencyResult {
+    shipmentId: string;
+    previousAgencyId: string;
+    agencyId: string;
+    /** The shipment the items landed on — a new one, or the agency's open one for the order. */
+    destinationShipmentId: string;
+    itemsMoved: number;
+    dispatched: boolean;
+    forced: boolean;
+}
+
+/**
+ * Move an agent-less shipment to another delivery agency.
+ *
+ * Refused while an agent holds it (409 `SHIPMENT_ALREADY_HAS_AGENT`) and outside
+ * `pending` / `assigned` / `rejected` (422 `SHIPMENT_REASSIGNMENT_NOT_ALLOWED`). Without
+ * `force`, an inactive destination (422 `DELIVERY_AGENCY_NOT_ACTIVE`) and the COD limits
+ * (422 `COD_AGENCY_LIMIT_EXCEEDED`) refuse too.
+ *
+ * ⚠ The shipment id can change: items join the destination agency's open shipment for the
+ * order when it has one, and the emptied source is deleted. `destinationShipmentId` is the
+ * one to show afterwards.
+ */
+export async function moveAgency(
+    shipmentId: string,
+    input: { agencyId: string; reason: string; force?: boolean },
+    before: ShipmentSnapshot,
+    context: ActorContext,
+): Promise<PlatformMoveAgencyResult> {
+    return auditedDelegation(
+        'shipments.agency.move',
+        context,
+        { id: shipmentId, label: labelOf(before) },
+        {
+            fromAgencyId: typeof before?.agencyId === 'string' ? before.agencyId : null,
+            agencyId: input.agencyId,
+            reason: input.reason,
+            force: input.force === true,
+        },
+        before,
+        async () => {
+            const result = await platformRequest<PlatformMoveAgencyResult>({
+                method: 'POST',
+                path: `/shipments/${shipmentId}/move-agency`,
                 body: input,
                 actor: context.actor,
                 requestId: context.requestId,

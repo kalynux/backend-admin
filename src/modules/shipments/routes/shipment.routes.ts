@@ -2,7 +2,9 @@ import { Router } from 'express';
 import { defineRoute, permission, records } from '../../../api/route-manifest';
 import { ShipmentController } from '../controllers/shipment.controller';
 import {
+    AssignShipmentAgentSchema,
     CancelShipmentSchema,
+    MoveShipmentAgencySchema,
     ListShipmentActivityQuerySchema,
     ReassignShipmentSchema,
     SearchShipmentsQuerySchema,
@@ -146,6 +148,31 @@ defineRoute(router, {
     validate: { params: ShipmentIdParamSchema, body: ReassignShipmentSchema },
     audit: records('shipments.reassign'),
     handler: ShipmentController.reassign,
+});
+
+/**
+ * The two pushes (2026-10-02), under the same permission as `reassign` and held at every
+ * tier. `force: true` on either skips the eligibility checks; see the validators for
+ * exactly which, and for the one that never moves (an active agent contract).
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/:shipmentId/assign-agent',
+    access: permission('shipments.reassign'),
+    validate: { params: ShipmentIdParamSchema, body: AssignShipmentAgentSchema },
+    audit: records('shipments.agent.assign'),
+    handler: ShipmentController.assignAgent,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/:shipmentId/move-agency',
+    access: permission('shipments.reassign'),
+    validate: { params: ShipmentIdParamSchema, body: MoveShipmentAgencySchema },
+    audit: records('shipments.agency.move'),
+    handler: ShipmentController.moveAgency,
 });
 
 defineRoute(router, {

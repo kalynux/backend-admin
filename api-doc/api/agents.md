@@ -243,8 +243,8 @@ Every list field, plus:
       "maxThreshold": 500000,
       "pool": {
         "ceiling": 500000,
-        "source": "plan",
-        "planCode": "agent_free",
+        "source": "default",
+        "planCode": null,
         "selfLimited": false,
         "syncedAt": "2026-09-21T09:30:00.000Z"
       },
@@ -324,14 +324,14 @@ derives it:
 |---|---|---|
 | `not_verified` | `0` | The agent's KYC is not `verified`. Always wins, even over a pin |
 | `override` | the pin's `amount` | An administrator pinned a value (`PUT …/cod-threshold`) |
-| `plan` | the plan's `max_cod_pool` | Otherwise. Free 500 000 · Plus 1 000 000 · Pro 2 000 000 |
+| `default` | **500 000** | Otherwise — the same for every agent, whatever their plan (**since 2026-10-02**). Replaced `plan` (the plan's `max_cod_pool`); a not-yet-resynced agent may still read `plan` — treat it as `default` |
 
 | Field | Meaning |
 |---|---|
 | `cod.maxThreshold` | **What every gate acts on.** At most `pool.ceiling`; lower when the agent chose to carry less |
 | `cod.pool.ceiling` | The most `maxThreshold` can be right now |
 | `cod.pool.source` | Which row of the table above produced it. **Display only, never branch on it** |
-| `cod.pool.planCode` | The plan read, when `source` is `plan`; else `null` |
+| `cod.pool.planCode` | **Deprecated, always `null` since 2026-10-02** (the plan no longer sets the pool); a stale value may survive until the agent's next sync |
 | `cod.pool.selfLimited` | `true` → the agent chose to carry less than the ceiling (`PUT /api/agent/cod/pool`) |
 | `cod.pool.syncedAt` | When jovi-mall last wrote the pool. `null` = an agent from before 2026-09-21 that has not been synced yet: its `maxThreshold` is the OLD number until the `agent-cod-pool-reconcile` worker runs |
 | `cod.poolOverride` | The pin, `{ amount, reason, setAt, setByName, setBySource }`, or `null`. A pin survives plan changes and an unverified spell, and applies again on re-verification |
@@ -609,8 +609,8 @@ endpoint's subject there has no reason to join.
     "overAllocatedBy": 0,
     "pool": {
       "ceiling": 500000,
-      "source": "plan",
-      "planCode": "agent_free",
+      "source": "default",
+      "planCode": null,
       "selfLimited": false,
       "syncedAt": "2026-09-21T09:30:00.000Z"
     },
@@ -1217,7 +1217,7 @@ and therefore recorded `null` on every row of the one write on this surface flag
 
 ### Response (200)
 
-The same `CodAllocation` as the pin, with `override: null`, `pool.source` back to `"plan"` (or
+The same `CodAllocation` as the pin, with `override: null`, `pool.source` back to `"default"` (or
 `"not_verified"`) and `message: "COD pool pin released"`.
 
 ### Errors

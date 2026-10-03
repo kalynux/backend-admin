@@ -295,7 +295,9 @@ t.assert('every delegated path exists in jovi-mall’s admin agency router', () 
         .map((m) => m[1].replace('/agencies', '').replace(/\$\{agencyId\}/g, ':id'))
         .filter((p) => p.length > 0);
 
-    return paths.length === 4 && paths.every((p) => router.includes(`'${p}'`));
+    // 4 cascade/verdict writes + the COD-limit read, pin and release (2026-10-02), which
+    // share one jovi-mall path.
+    return paths.length === 7 && new Set(paths).size === 5 && paths.every((p) => router.includes(`'${p}'`));
 });
 
 t.assert('jovi-mall mounts the agency router internally', () => {
@@ -338,7 +340,29 @@ t.section('5. Routes, permissions and the audit catalog');
 const agencyRoutes = routeManifest().filter((r) => r.fullPath.startsWith('/api/v1/agencies'));
 
 // Nine through Phase 6; ten since the KYC evidence read (2026-09-14).
-t.assert('ten agency routes are registered', () => agencyRoutes.length === 10);
+// Ten until 2026-10-02, when the COD-limit read, pin and release made thirteen.
+t.assert('thirteen agency routes are registered', () => agencyRoutes.length === 13);
+
+/**
+ * The agency COD cash limit (owner decision 2026-10-02). Read under `agencies.read`, written
+ * under `agencies.cod_limit.set` — FINANCIAL, so `allInFamily('agencies')` cannot sweep it
+ * in, Support never holds it, and Admin holds it only because it is named in the money block,
+ * exactly like its agent twin `agents.cod_threshold.set`. Two audit actions, one permission.
+ */
+t.assert('the COD-limit read is agencies.read and unaudited; pin and release are agencies.cod_limit.set, audited apart', () => {
+    const read = agencyRoutes.find((r) => r.fullPath === '/api/v1/agencies/:agencyId/cod-limit' && r.method === 'get');
+    const pin = agencyRoutes.find((r) => r.fullPath === '/api/v1/agencies/:agencyId/cod-limit' && r.method === 'put');
+    const release = agencyRoutes.find((r) => r.fullPath === '/api/v1/agencies/:agencyId/cod-limit/release');
+    const perms = (r: typeof read) => (r && r.access.kind === 'permission' ? r.access.permissions : []);
+    return !!read && !read.audit && perms(read).includes('agencies.read')
+        && !!pin && perms(pin).includes('agencies.cod_limit.set') && !!pin.audit
+        && !!release && release.method === 'post' && perms(release).includes('agencies.cod_limit.set') && !!release.audit
+        && isAuditAction('agencies.cod_limit.set') && isAuditAction('agencies.cod_limit.release')
+        && auditSpec('agencies.cod_limit.release').permission === 'agencies.cod_limit.set';
+});
+
+t.assert('agencies.cod_limit.set is FINANCIAL — so allInFamily cannot grant it', () =>
+    isSensitive(permissionSpec('agencies.cod_limit.set')));
 
 /**
  * ⚠ The KYC evidence read is `agencies.read`, the Support-tier lookup, and is not audited.
@@ -396,18 +420,20 @@ t.assert('Support reads agencies and writes none of them', () => {
     return support.includes('agencies.read')
         && !support.includes('agencies.verify')
         && !support.includes('agencies.deactivate')
-        && !support.includes('agencies.reactivate');
+        && !support.includes('agencies.reactivate')
+        && !support.includes('agencies.cod_limit.set');
 });
 
-t.assert('Admin holds all three writes', () => {
+t.assert('Admin holds all four writes (incl. the COD-limit pin, named in the money block)', () => {
     const admin = TIER_GRANTS[2] ?? [];
-    return ['agencies.verify', 'agencies.deactivate', 'agencies.reactivate']
+    return ['agencies.verify', 'agencies.deactivate', 'agencies.reactivate', 'agencies.cod_limit.set']
         .every((p) => admin.includes(p as never));
 });
 
-t.assert('four agencies.* audit actions exist, all delegated, all targeting an agency', () => {
+// Four until 2026-10-02; the COD-limit pin and release made six.
+t.assert('six agencies.* audit actions exist, all delegated, all targeting an agency', () => {
     const rows = Object.entries(AUDIT_CATALOG).filter(([name]) => name.startsWith('agencies.'));
-    return rows.length === 4
+    return rows.length === 6
         && rows.every(([, spec]) => spec.transport === 'delegated' && spec.target === 'agency');
 });
 

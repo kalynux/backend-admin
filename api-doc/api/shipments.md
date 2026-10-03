@@ -19,6 +19,8 @@ Design record: [`../../docs/ADR-010-ORDERS-AND-SHIPMENTS.md`](../../docs/ADR-010
 | `GET` | `/shipments/:shipmentId/tracking-trail` | `shipments.tracking.read` | **geo-tracker** | ✅ |
 | `GET` | `/shipments/:shipmentId/tracking-events` | `shipments.tracking.read` | **geo-tracker** | — |
 | `POST` | `/shipments/:shipmentId/reassign` | `shipments.reassign` | **delegated** | ✅ |
+| `POST` | `/shipments/:shipmentId/assign-agent` | `shipments.reassign` | **delegated** | ✅ |
+| `POST` | `/shipments/:shipmentId/move-agency` | `shipments.reassign` | **delegated** | ✅ |
 | `POST` | `/shipments/:shipmentId/cancel` | `shipments.cancel` | **delegated** | ✅ |
 
 ## Two things this surface deliberately does not do
@@ -295,6 +297,7 @@ answered.
       "expiresAt": "2026-08-12T11:05:00.000Z",
       "respondedAt": "2026-08-12T11:02:00.000Z",
       "rejectionReason": null,
+      "adminOverride": null,
       "createdAt": "2026-08-12T11:00:00.000Z"
     },
     {
@@ -309,6 +312,7 @@ answered.
       "expiresAt": "2026-08-12T10:35:00.000Z",
       "respondedAt": "2026-08-12T10:33:00.000Z",
       "rejectionReason": "too_far",
+      "adminOverride": null,
       "createdAt": "2026-08-12T10:30:00.000Z"
     }
   ]
@@ -321,6 +325,7 @@ answered.
 | `sessionId` | **`null` for a manual offer**; set when it came from an auto-assignment session |
 | `createdBy` | `{ role, userId, name }` on a manually created offer; `null` otherwise |
 | `expiresAt` | Offers time out |
+| `adminOverride` | `{ byName, reason, at }` — set when an administrator pushed this offer with `force: true`; recorded even if no rule was waived. `null` otherwise. Also on the embedded `offers` of `GET /shipments/:shipmentId` |
 
 ---
 
@@ -507,6 +512,7 @@ Move a shipment to a different agent.
 | `agentId` | 24-hex | **Optional.** Omitted **pre-pickup** means auto-assign down a fresh ranking. **Past pickup it is required** — the platform refuses with `SHIPMENT_REASSIGN_REQUIRES_MANUAL_AGENT` |
 | `reason` | string | **Required.** 3–500 characters |
 | `pickupLocation` | object | Optional. Where the replacement agent collects, when overriding the derived point |
+| `force` | boolean | Optional (2026-10-02). With an `agentId`: bypass the replacement's eligibility checks — see [Forcing](#forcing). Ignored on an auto-reassign |
 
 `pickupLocation` (strict):
 
@@ -550,7 +556,124 @@ agent's tracking session opens only when they accept**, so two agents are never 
 
 ### Audit
 
-`shipments.reassign`
+`shipments.reassign` — the payload records `force`.
+
+---
+
+<a name="forcing"></a>
+## Forcing a push — `force: true` (2026-10-02)
+
+Owner decision: **every tier** (Developer, Admin, Support) can push a shipment past the
+eligibility checks. All three hold `shipments.reassign`, which gates `reassign`,
+`assign-agent` and `move-agency`.
+
+| On | `force: true` skips | Never skipped |
+|---|---|---|
+| `reassign` (with `agentId`), `assign-agent` | The agent being offline / at capacity / tracking off / device location off / banned / inactive account; the contract's coverage regions; its value ceiling; the whole COD verdict (amount limit, KYC, trust, open shortfall) | An **active contract** between the agent and the shipment's agency — `details.platformCode: AGENT_MEMBERSHIP_NOT_APPROVED`. The agent still **accepts** the offer |
+| `move-agency` | The destination agency not being `active`; the agency COD limit and the vendor's per-agency cash cap | An agent holding the shipment (`SHIPMENT_ALREADY_HAS_AGENT`); a status outside `pending` / `assigned` / `rejected` |
+
+UI pattern: send without `force`; on a 422 `PLATFORM_OPERATION_REJECTED`, show
+`details.platformCode` and offer **"Push anyway"**, which resends with `force: true`. Every push is
+audited and the payload records `force`, so a forced push is findable on the activity feed.
+
+---
+
+## `POST /shipments/:shipmentId/assign-agent`
+
+Offer a shipment **with no agent** (`assigned` or `handing_over`) to a named agent of its agency.
+Use `reassign` when an agent already holds it.
+
+| | |
+|---|---|
+| **Permission** | `shipments.reassign` (all tiers) |
+| **Transport** | Delegated |
+| **Body** | **Strict** |
+
+| Field | Type | Rules |
+|---|---|---|
+| `agentId` | 24-hex | **Required** |
+| `reason` | string | **Required.** 3–500 characters |
+| `force` | boolean | Optional. See [Forcing](#forcing) |
+
+```json
+{ "agentId": "6660112233445566778899cc", "reason": "Customer waiting 3 days, only agent nearby", "force": true }
+```
+
+### Response (200)
+
+`{ offer, shipment, autoAccepted }` — message `"Offer sent to agent"` or
+`"Agent assigned (auto-accepted)"`. A forced offer carries
+`offer.adminOverride: { byName, reason, at }`.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Missing reason, malformed id, unknown field |
+| 404 | `NOT_FOUND` | |
+| 409 / 422 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode`: `SHIPMENT_ALREADY_HAS_AGENT`, `SHIPMENT_NOT_OFFERABLE`, `SHIPMENT_ALREADY_HAS_PENDING_OFFER`, `AGENT_MEMBERSHIP_NOT_APPROVED`, and — without `force` — every eligibility / contract code |
+| 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | |
+
+### Audit
+
+`shipments.agent.assign` — payload `{ agentId, reason, force }`.
+
+---
+
+## `POST /shipments/:shipmentId/move-agency`
+
+Push a shipment **with no agent** to a different delivery agency.
+
+| | |
+|---|---|
+| **Permission** | `shipments.reassign` (all tiers) |
+| **Transport** | Delegated |
+| **Body** | **Strict** |
+
+| Field | Type | Rules |
+|---|---|---|
+| `agencyId` | 24-hex | **Required.** The destination |
+| `reason` | string | **Required.** 3–500 characters |
+| `force` | boolean | Optional. See [Forcing](#forcing) |
+
+### What actually happens
+
+Every item moves to the destination agency (the platform's own item-move, attributed to the
+administrator on the order timeline). Pending offers at the old agency are withdrawn first. If the
+shipment had already been dispatched (`assigned`, or `rejected` back by an agency) it is dispatched
+to the new agency and appears on its board; a `pending` one (the vendor never dispatched it) stays
+`pending` — dispatch the order separately if that is the intent.
+
+### Response (200)
+
+```json
+{
+  "shipmentId": "6660aa…",
+  "previousAgencyId": "6650bb…",
+  "agencyId": "6650cc…",
+  "destinationShipmentId": "6660dd…",
+  "itemsMoved": 2,
+  "dispatched": true,
+  "forced": false
+}
+```
+
+⚠ **`destinationShipmentId` can differ from `shipmentId`**: items join the destination agency's
+open shipment for that order when it has one, and the emptied source shipment is deleted. Navigate
+to `destinationShipmentId` afterwards.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Missing reason, malformed id, unknown field |
+| 404 | `NOT_FOUND` | |
+| 409 / 422 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode`: `SHIPMENT_ALREADY_HAS_AGENT` (409), `SHIPMENT_REASSIGNMENT_NOT_ALLOWED` (wrong status, or already with that agency), `DELIVERY_AGENCY_NOT_FOUND`, and — without `force` — `DELIVERY_AGENCY_NOT_ACTIVE`, `COD_AGENCY_LIMIT_EXCEEDED` |
+| 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | |
+
+### Audit
+
+`shipments.agency.move` — payload `{ fromAgencyId, agencyId, reason, force }`.
 
 ---
 

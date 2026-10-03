@@ -8,8 +8,10 @@ import {
     ListContractEventsQuerySchema,
     ListRosterQuerySchema,
     ReactivateAgencySchema,
+    ReleaseAgencyCodLimitSchema,
     SearchAgenciesQuerySchema,
     RejectAgencySchema,
+    SetAgencyCodLimitSchema,
     VerifyAgencySchema,
 } from '../validators/agency.validator';
 
@@ -185,6 +187,41 @@ defineRoute(router, {
     validate: { params: AgencyIdParamSchema, body: ReactivateAgencySchema },
     audit: records('agencies.reactivate'),
     handler: AgencyController.reactivate,
+});
+
+/**
+ * The agency's COD cash limit (owner decision 2026-10-02) — the agency twin of the agent's
+ * `/cod-threshold` pair. READ under `agencies.read` (Support answers "why can't my order be
+ * dispatched"); PIN (PUT) and RELEASE (POST …/release) under `agencies.cod_limit.set`,
+ * `financial`, two audit actions for the `ban`/`unban` reason.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/:agencyId/cod-limit',
+    access: permission('agencies.read'),
+    validate: { params: AgencyIdParamSchema },
+    handler: AgencyController.codLimit,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'put',
+    path: '/:agencyId/cod-limit',
+    access: permission('agencies.cod_limit.set'),
+    validate: { params: AgencyIdParamSchema, body: SetAgencyCodLimitSchema },
+    audit: records('agencies.cod_limit.set'),
+    handler: AgencyController.setCodLimit,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/:agencyId/cod-limit/release',
+    access: permission('agencies.cod_limit.set'),
+    validate: { params: AgencyIdParamSchema, body: ReleaseAgencyCodLimitSchema },
+    audit: records('agencies.cod_limit.release'),
+    handler: AgencyController.releaseCodLimit,
 });
 
 export const agencyRoutes = router;

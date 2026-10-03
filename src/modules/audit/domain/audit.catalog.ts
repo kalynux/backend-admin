@@ -444,7 +444,7 @@ export const AUDIT_CATALOG = Object.freeze({
         permission: 'agents.cod_threshold.set',
         target: 'agent',
         transport: 'delegated',
-        summary: 'Pinned how much cash on delivery an agent may hold, overriding their plan',
+        summary: 'Pinned how much cash on delivery an agent may hold, overriding the 500 000 default',
     },
     /**
      * Its own name for the `agents.unban` reason: jovi-mall clears the pin off the agent
@@ -454,7 +454,7 @@ export const AUDIT_CATALOG = Object.freeze({
         permission: 'agents.cod_threshold.set',
         target: 'agent',
         transport: 'delegated',
-        summary: 'Released an agent’s COD pool pin — back to their plan’s value',
+        summary: 'Released an agent’s COD pool pin — back to the 500 000 default',
     },
     'agents.ban': {
         permission: 'agents.ban',
@@ -984,6 +984,24 @@ export const AUDIT_CATALOG = Object.freeze({
         transport: 'delegated',
         summary: 'Reactivated a delivery agency and put its dependent products back on sale',
     },
+    /**
+     * The agency's COD cash limit pin (2026-10-02) — same pair-of-actions shape as
+     * `agents.cod_threshold.set` / `.release`: one permission, two audit actions, because
+     * jovi-mall clears the pin entirely on release and this row is then the only record it
+     * existed.
+     */
+    'agencies.cod_limit.set': {
+        permission: 'agencies.cod_limit.set',
+        target: 'agency',
+        transport: 'delegated',
+        summary: 'Pinned how much cash on delivery an agency may hold, overriding the default',
+    },
+    'agencies.cod_limit.release': {
+        permission: 'agencies.cod_limit.set',
+        target: 'agency',
+        transport: 'delegated',
+        summary: 'Released an agency’s COD limit pin — back to the 1 000 000 default',
+    },
 
     // ═══ USERS — delegated to jovi-mall ═══════════════════════════════════════
     // The reads are not here: a list and a detail are not actions. Three mutations,
@@ -1191,6 +1209,25 @@ export const AUDIT_CATALOG = Object.freeze({
         target: 'shipment',
         transport: 'delegated',
         summary: 'Moved a shipment to a different delivery agent',
+    },
+    /**
+     * Two more pushes under the same permission (2026-10-02). Separate actions rather than
+     * a flag on `shipments.reassign`, because they answer different questions on the feed:
+     * "who was taken off" (reassign) is not "who was offered an unassigned delivery" nor
+     * "which agency it went to". A FORCED push carries `force: true` in its payload — the
+     * row an operator looks for when asking why an ineligible agent got a delivery.
+     */
+    'shipments.agent.assign': {
+        permission: 'shipments.reassign',
+        target: 'shipment',
+        transport: 'delegated',
+        summary: 'Offered an unassigned shipment to a named delivery agent',
+    },
+    'shipments.agency.move': {
+        permission: 'shipments.reassign',
+        target: 'shipment',
+        transport: 'delegated',
+        summary: 'Moved a shipment to a different delivery agency',
     },
     /**
      * `before`/`after` on this row is the only record of which agent was taken off a

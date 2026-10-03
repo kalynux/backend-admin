@@ -191,6 +191,12 @@ export interface ShipmentOfferDto {
     expiresAt: string | null;
     respondedAt: string | null;
     rejectionReason: string | null;
+    /**
+     * Set when an administrator pushed this offer with `force: true` — recorded even if no
+     * rule was waived. Null otherwise. `by_user_id` is deliberately not carried: it is a
+     * wi-admin id and resolves in no jovi-mall collection, so the name snapshot is the fact.
+     */
+    adminOverride: { byName: string | null; reason: string | null; at: string | null } | null;
     createdAt: string | null;
 }
 
@@ -419,6 +425,13 @@ export function toShipmentOfferDto(
         expiresAt: toIso(offer.expires_at),
         respondedAt: toIso(offer.responded_at),
         rejectionReason: offer.rejection_reason ?? null,
+        adminOverride: offer.admin_override
+            ? {
+                byName: offer.admin_override.by_name ?? null,
+                reason: offer.admin_override.reason ?? null,
+                at: toIso(offer.admin_override.at),
+            }
+            : null,
         createdAt: toIso(offer.created_at),
     };
 }

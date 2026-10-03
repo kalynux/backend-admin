@@ -117,6 +117,14 @@ const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
     'orders.read',
     'orders.disputes.read',
     'shipments.read',
+    /**
+     * Push a stuck delivery to an agent or an agency — including `force: true`, which skips
+     * every eligibility check but an active agent contract (owner decision 2026-10-02:
+     * "this should be available to all admin tier levels"). Support is who hears "my
+     * parcel has not moved", so Support is who unsticks it. Not destructive: the shipment
+     * survives, only who carries it changes, and every push is an audit row.
+     */
+    'shipments.reassign',
     'notifications.read',
 
     /**
@@ -310,6 +318,7 @@ const ADMIN: readonly PermissionName[] = union(
     // additionally queue for a second approver via their `dualControl` spec.
     [
         'agents.cod_threshold.set',
+        'agencies.cod_limit.set',
         'agents.ban',
         'agencies.deactivate',
         'billing.subscriptions.assign',

@@ -301,7 +301,8 @@ defineRoute(router, {
  * PIN (PUT) and RELEASE (POST …/release) the agent's COD pool — two routes over one
  * jovi-mall endpoint, one permission, two audit actions, for the `ban`/`unban` reason below.
  *
- * Since 2026-09-21 the pool is derived in jovi-mall — the agent's plan value once KYC is
+ * Since 2026-09-21 the pool is derived in jovi-mall (since 2026-10-02 the platform default of
+ * 500 000 rather than the plan) — the agent's plan value once KYC is
  * `verified`, 0 otherwise — and this is no longer "set the pool" but "pin one that outranks
  * the plan until released". Both still carry `agents.cod_threshold.set`, `financial`.
  */

@@ -34,7 +34,9 @@ import {
     ListRosterQuery,
     ReactivateAgencyBody,
     RejectAgencyBody,
+    ReleaseAgencyCodLimitBody,
     SearchAgenciesQuery,
+    SetAgencyCodLimitBody,
 } from '../validators/agency.validator';
 
 /**
@@ -441,6 +443,54 @@ export class AgencyController {
      * jovi-mall performs it as a compare-and-set and answers 409 on a miss, so two
      * administrators on one screen cannot overwrite each other's stamp.
      */
+    /**
+     * GET /api/v1/agencies/:agencyId/cod-limit — the agency's COD cash limit (2026-10-02):
+     * `limit`, `source` (`default` | `override`), the pin with its reason and author, and
+     * the live exposure (in-flight COD + collected-unremitted). Delegated: exposure is a
+     * verdict jovi-mall computes, never re-derived here.
+     */
+    static codLimit = asyncHandler(async (req: Request, res: Response) => {
+        await loadOr404(req.params.agencyId);
+        const report = await gateway.codLimit(req.params.agencyId, actorContextOf(req));
+        sendSuccess(res, report);
+    });
+
+    /**
+     * PUT /api/v1/agencies/:agencyId/cod-limit — PIN the agency's cash limit. The audit
+     * `before` is the limit as jovi-mall reports it, so the row shows what the pin replaced.
+     */
+    static setCodLimit = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as SetAgencyCodLimitBody;
+        const agency = await loadOr404(req.params.agencyId);
+        const context = actorContextOf(req);
+        const current = await gateway.codLimit(req.params.agencyId, context);
+
+        const updated = await gateway.setCodLimit(
+            req.params.agencyId,
+            body.maxAmount,
+            body.reason,
+            { ...toAuditState(agency), ...gateway.codLimitAuditState(current) },
+            context,
+        );
+        sendSuccess(res, updated, { message: 'Agency COD limit pinned' });
+    });
+
+    /** POST /api/v1/agencies/:agencyId/cod-limit/release — back to the 1 000 000 default. */
+    static releaseCodLimit = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as ReleaseAgencyCodLimitBody;
+        const agency = await loadOr404(req.params.agencyId);
+        const context = actorContextOf(req);
+        const current = await gateway.codLimit(req.params.agencyId, context);
+
+        const updated = await gateway.releaseCodLimit(
+            req.params.agencyId,
+            body.reason,
+            { ...toAuditState(agency), ...gateway.codLimitAuditState(current) },
+            context,
+        );
+        sendSuccess(res, updated, { message: 'Agency COD limit pin released' });
+    });
+
     static verify = asyncHandler(async (req: Request, res: Response) => {
         const before = await loadOr404(req.params.agencyId);
 

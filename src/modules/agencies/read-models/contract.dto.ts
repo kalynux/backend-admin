@@ -54,10 +54,18 @@ export interface RemittanceTermsDto {
  * not, so a client rendering those has no symbol to print from the contract alone.
  */
 export interface FeeSplitTermsDto {
-    /** `percentage` · `flat`. Decides which of the two amounts below is meaningful. */
+    /**
+     * `percentage` · `flat` · `monthly_salary`. Decides which of the three amounts
+     * below is meaningful (a value under another model may be stale — ignore it).
+     */
     model: string | null;
     agentSharePercent: number | null;
     agentFlatFee: number | null;
+    /**
+     * Minor units per month, meaningful under `monthly_salary` only. The AGENCY pays it
+     * off-platform; jovi-mall pays the agent 0 per delivery and nothing tracks the salary.
+     */
+    agentMonthlySalary: number | null;
     currency: string | null;
 }
 
@@ -100,6 +108,7 @@ function toFeeSplitTerms(raw: Record<string, unknown> | undefined): FeeSplitTerm
         model: str(raw.model),
         agentSharePercent: num(raw.agent_share_percent),
         agentFlatFee: num(raw.agent_flat_fee),
+        agentMonthlySalary: num(raw.agent_monthly_salary),
         currency: str(raw.currency),
     };
 }
