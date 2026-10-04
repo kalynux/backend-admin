@@ -1669,7 +1669,7 @@ t.section('12. Delivery-fee refunds owed to customers (jovi-mall ADR-A11 W-G2)')
     t.assert("refund DTO: every key jovi-mall's admin DTO declares is present", () => {
         const joviDto = read(JOVI, 'modules', 'delivery-fee-proposals', 'dto', 'delivery-fee-proposal.dto.ts');
         const block = /export interface AdminDeliveryFeeRefundDto \{([\s\S]*?)\n\}/.exec(joviDto)?.[1] ?? '';
-        const keys = [...block.matchAll(/^  ([a-zA-Z]+)\??:/gm)].map((m) => m[1]);
+        const keys = [...block.matchAll(/^ {2}([a-zA-Z]+)\??:/gm)].map((m) => m[1]);
         return keys.length >= 10 && keys.every((k) => k in dto);
     });
     const settled = toDeliveryFeeRefundDto({
