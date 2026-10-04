@@ -50,6 +50,7 @@ import {
 import { buildFilter } from '../../src/modules/orders/repositories/order.read.repository';
 import type { OrderReadModel } from '../../src/modules/orders/repositories/order.read.repository';
 import { toOrderDetailDto, toOrderListItemDto } from '../../src/modules/orders/read-models/order.dto';
+import { toOrderDeliveryFeeDto } from '../../src/modules/money/read-models/delivery-fee.dto';
 import { ObjectId } from 'mongodb';
 import { AUDIT_CATALOG } from '../../src/modules/audit/domain/audit.catalog';
 import { PERMISSION_CATALOG } from '../../src/modules/authorization/domain/permission.catalog';
@@ -337,7 +338,9 @@ t.assert(
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('6. The audit catalog wiring');
 
-const ORDER_ACTIONS = ['orders.cancel', 'orders.dispatch', 'orders.refund', 'orders.disputes.resolve'];
+// `orders.delivery_fee_refund.settle` (ADR-A11 W-G2) is routed on /money but governed by `orders.refund` and filed
+// against the order, so it belongs to this family and appears on `/orders/:orderId/activity`.
+const ORDER_ACTIONS = ['orders.cancel', 'orders.dispatch', 'orders.refund', 'orders.disputes.resolve', 'orders.delivery_fee_refund.settle'];
 
 for (const action of ORDER_ACTIONS) {
     t.assert(`${action} is in the catalog`, () => auditCatalog[action] !== undefined);
@@ -597,6 +600,39 @@ t.section('12. Customer-paid delivery (jovi-mall ADR-A11)');
         legacyDto.priceBreakdown?.delivery === 0 && legacyDto.deliveryPayer === null
         && legacyDto.deliveryPayerReason === null && legacyDto.freeDeliveryShortfall === null);
     t.assert('the list row says whose money the total includes', () => toOrderListItemDto(paid, names).deliveryPayer === 'customer');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('13. Delivery-fee changes on the order detail (jovi-mall ADR-A11 W-G2)');
+
+{
+    const controller = readFileSync(join(MODULE, 'controllers', 'order.controller.ts'), 'utf8');
+    const detail = controller.slice(controller.indexOf('async function readOrderDetail'));
+    t.assert('the detail reads payments, proposals and refunds by order, alongside the other hydration', () =>
+        ['orderPayments.forOrder(orderId)', 'feeProposals.forOrder(orderId)', 'feeRefunds.forOrder(orderId)', 'toOrderDeliveryFeeDto(']
+            .every((needle) => detail.includes(needle)));
+    t.assert('...and writes none of them — the block is read-only (D-11; settling lives on /money)', () =>
+        !/delivery-fee-refunds|settleDeliveryFeeRefund/.test(readFileSync(join(MODULE, 'gateways', 'order.gateway.ts'), 'utf8')));
+
+    for (const name of ['delivery_fee_proposals', 'delivery_fee_refunds']) {
+        t.assert(`${name} is declared read-only, written over the internal API`, () =>
+            collections[name]?.access === 'read' && collections[name]?.writes === 'internal-api');
+    }
+
+    const names = { vendor: new Map<string, string | null>(), customer: new Map<string, string | null>() };
+    const order = {
+        _id: new ObjectId(), order_number: 'WM-1', vendor_id: new ObjectId(), customer_id: new ObjectId(),
+        currency: 'XAF', payment_method: 'online', payment_status: 'paid', fulfillment_status: 'processing',
+        total_amount: 12_200, items: [], created_at: new Date(), updated_at: new Date(),
+    } as unknown as OrderReadModel;
+    const block = toOrderDeliveryFeeDto('WM-1', [], [], []);
+    t.assert('the detail carries the deliveryFee block it is given', () =>
+        toOrderDetailDto(order, names, undefined, block).deliveryFee === block);
+    t.assert('...and null when it was not read (the list never reads it)', () =>
+        toOrderDetailDto(order, names).deliveryFee === null && !('deliveryFee' in toOrderListItemDto(order, names)));
+    t.assert('an order with no delivery-fee history reads an empty block, not an error', () =>
+        block.payments.checkout === null && block.payments.deliveryTopUps.length === 0
+        && block.proposals.length === 0 && block.refunds.length === 0 && block.owedManually === 0 && block.returned === 0);
 }
 
 process.exit(t.finish());

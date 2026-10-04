@@ -27,6 +27,12 @@ import {
 } from '../../vendors/repositories/product-media.read.repository';
 import { StoreReadRepository } from '../../vendors/repositories/store.read.repository';
 import {
+    DeliveryFeeProposalReadRepository,
+    DeliveryFeeRefundReadRepository,
+} from '../../money/repositories/delivery-fee.read.repository';
+import { PaymentTransactionReadRepository } from '../../money/repositories/payment-transaction.read.repository';
+import { toOrderDeliveryFeeDto } from '../../money/read-models/delivery-fee.dto';
+import {
     OrderDetailDto,
     OrderItemContext,
     TimelineActorNames,
@@ -67,6 +73,10 @@ const shipments = new ShipmentReadRepository();
 const stores = new StoreReadRepository();
 const productMedia = new ProductMediaReadRepository();
 const admins = new AdminAccountRepository();
+/** ADR-A11 W-G2 — the read-only `deliveryFee` block; each an indexed by-order read, bounded. */
+const orderPayments = new PaymentTransactionReadRepository();
+const feeProposals = new DeliveryFeeProposalReadRepository();
+const feeRefunds = new DeliveryFeeRefundReadRepository();
 
 /**
  * Load the order or 404.
@@ -129,11 +139,19 @@ async function readOrderDetail(orderId: string): Promise<OrderDetailDto | null> 
     const order = await orders.findDetailById(orderId);
     if (!order) return null;
 
-    const [names, itemContext] = await Promise.all([
+    const [names, itemContext, payments, proposals, refunds] = await Promise.all([
         hydrateNames([order]),
         hydrateItemContext(order),
+        orderPayments.forOrder(orderId),
+        feeProposals.forOrder(orderId),
+        feeRefunds.forOrder(orderId),
     ]);
-    return toOrderDetailDto(order, names, itemContext);
+    return toOrderDetailDto(
+        order,
+        names,
+        itemContext,
+        toOrderDeliveryFeeDto(order.order_number ?? null, payments, proposals, refunds),
+    );
 }
 
 /** Vendor and customer display names for a page of orders, in two batched reads. */

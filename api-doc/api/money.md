@@ -765,7 +765,7 @@ What a customer actually paid.
 | `status` | string, 1–40 | |
 | `gateway` | string, 1–40 | |
 | `method` | string, 1–40 | |
-| `purpose` | string, 1–40 | `primary` or `booking_balance` — a booking can be paid twice |
+| `purpose` | string, 1–40 | `primary` · `booking_balance` (a booking can be paid twice) · `order_delivery_topup` (a higher delivery fee the customer approved after checkout — jovi-mall ADR-A11). **`?orderId=` returns an order's top-ups too**, deliberately: this list answers "what was paid for this order" — tell the halves apart by `settles.purpose`. ⚠ `?purpose=primary` is an exact match and misses any older row stored with no `purpose` at all |
 | `orderId` | 24-hex | |
 | `bookingId` | 24-hex | |
 | `userId` | 24-hex | **The payer — not one kind of id.** An order payment stores a *customer* id and a booking payment a *user* id. The filter matches whichever is stored, which is the only thing it can honestly do |
@@ -785,7 +785,8 @@ What a customer actually paid.
         "orderIds": ["6670aabbccddeeff00112233", "6670aabbccddeeff00112240"],
         "bookingId": null,
         "cartId": "6670aabbccddeeff00112200",
-        "purpose": "primary"
+        "purpose": "primary",
+        "deliveryTopup": null
       },
       "payer": { "id": "665f1c2a9b3e4a91c7d2e5f0", "kind": "customer_or_user" },
       "gateway": "NOTCHPAY",
@@ -808,6 +809,7 @@ What a customer actually paid.
 | Field | Notes |
 |---|---|
 | **`settles`** | Exactly one of the three is set. **`cartId` with `orderIds` is the common case and the one that surprises people**: a multi-vendor checkout is *one* payment settling *N* orders, so a row whose `orderId` is `null` is not an incomplete record |
+| `settles.purpose` / `settles.deliveryTopup` | `order_delivery_topup` rows carry `deliveryTopup: { shipmentId, proposalId, appliedAt }` — the shipment and the fee proposal the top-up settles (`appliedAt` null = paid, not yet applied). **`null` on every other row.** A top-up links by `orderId` like a single-order payment, so it is **not the order's checkout charge** — see [`GET /orders/:orderId`](orders.md) → `deliveryFee.payments` for the two halves split |
 | `payer.kind` | Always `"customer_or_user"` — **a deliberate `unknown` rather than a guess.** Nothing on the row says which |
 | `gateway` | **Which aggregator carried it; informational.** An open, uppercase string — today `NOTCHPAY` · `MYCOOLPAY` · `STRIPE`, with `CAMPAY` and `FLUTTERWAVE` coming. **Never branch on it** and never validate it against a closed list: the active aggregator is switched at runtime ([`PUT /dev-tools/payments`](dev-tools.md#put-dev-toolspayments)), and a row keeps the one that actually carried it. `?gateway=` filters by exact value |
 | `provider` | What the customer paid **with** — `MTN` · `ORANGE` · `MOOV` · `CARD`. **`null` on every row written before payment routing** (jovi-mall ADR-A08); there is no backfill. Also an open string |
@@ -897,3 +899,149 @@ would silently drop exactly the `pending` and `failed` rows somebody opens this 
 |---|---|
 | `initiatedBy.role` | **Who *asked* — `vendor`, `admin` or `customer`. Not who approved it** |
 | `completedAt` | **When the money actually went back.** `null` on a `pending` or `failed` refund |
+
+---
+
+# Delivery-fee refunds — delivery money owed back to a customer
+
+**Added 2026-10-04 (jovi-mall ADR-A11 W-E2 / wi-admin W-G2, owner decision D-12).**
+
+When delivery money is owed back to a customer — a customer-paid fee lowered after they paid it,
+the unspent fee of a returned parcel — jovi-mall refunds it through the payment gateway on its own.
+When the gateway **cannot or will not** (a cash-on-delivery order, mobile money, an account with
+refunds disabled) the ledger row becomes **`manual_required`**: a HIGH support ticket is opened and
+the customer is told a person is sending it. **A person sends the money, then records it here.**
+
+| Route | Permission | Transport | Audited |
+|---|---|---|---|
+| `GET /money/delivery-fee-refunds` | `money.payments.read` (all three levels) | direct read of `delivery_fee_refunds` | — |
+| `GET /money/delivery-fee-refunds/:refundId` | `money.payments.read` | direct | — |
+| `POST /money/delivery-fee-refunds/:refundId/settle` | **`orders.refund`** (Developer + Admin; **never Support**) | **delegated** to jovi-mall | ✅ `orders.delivery_fee_refund.settle`, fail-closed |
+
+**Why `orders.refund`.** Settling is a **customer refund** — money leaving the platform to the
+person who paid for the order — which is exactly what `orders.refund` governs (`financial`). The
+payout permissions govern money owed to vendors, agencies and agents. Support can **see** the queue
+(to answer "where is my delivery refund") and cannot settle it.
+
+## `GET /money/delivery-fee-refunds`
+
+| | |
+|---|---|
+| **Pagination** | `page`, `limit` |
+| **Sorting** | `createdAt`, `amount`. Default **`-createdAt`** |
+
+| Parameter | Type | Notes |
+|---|---|---|
+| `status` | `manual_required` (default) · `settled` · `all` | **The queue, not the row status.** `manual_required` = still owed; `settled` = settled by an administrator; `all` = both. Automatic refunds (the gateway returned the money) are not the queue's — they appear on the order detail. An unknown value is a `400` |
+| `orderId` · `vendorId` · `customerId` | 24-hex | |
+
+### Response (200)
+
+```jsonc
+{
+  "success": true,
+  "data": [
+    {
+      "id": "6700aabbccddeeff00112233",
+      "orderId": "66f0aabbccddeeff00112233",
+      "orderNumber": "WM-2026-000123",
+      "shipmentId": "66f1aabbccddeeff00112233",
+      "customerId": "66a0aabbccddeeff00112233",
+      "vendorId": "66b0aabbccddeeff00112233",
+      "amount": 1500,
+      "currency": "XAF",
+      "status": "manual_required",
+      "cause": "fee_decrease",
+      "note": "The order was paid in cash at delivery — there is no charge to refund",
+      "ticketId": "6701aabbccddeeff00112233",
+      "settleable": true,
+      "refundTransactionIds": [],
+      "settledAt": null,
+      "settlement": null,
+      "createdAt": "2026-10-04T10:00:00.000Z",
+      "updatedAt": "2026-10-04T10:00:00.000Z"
+    }
+  ],
+  "meta": { "total": 1, "page": 1, "limit": 20, "pages": 1 }
+}
+```
+
+| Field | Notes |
+|---|---|
+| `status` | `manual_required` (owed) · `completed` · `processing` · `failed` (the last two only on automatic rows, via the detail or the order) |
+| **`settleable`** | **The one flag the settle button needs** (`status === 'manual_required'`) |
+| `cause` | `fee_decrease` · `rto_leftover` (a returned parcel's unspent fee) · `sweep` |
+| `note` | Why it is manual. **Operator-facing — never show it to the customer** |
+| `ticketId` | The HIGH ticket the manual row opened; settling resolves it |
+| `settlement` | Once settled: `{ method, reference, note, settledBy: { id, source, name }, settledAt }`. `settledBy.id` is a wi-admin administrator id when `source` is `admin` |
+
+## `GET /money/delivery-fee-refunds/:refundId`
+
+One row, same shape — **any** row, automatic ones included (`settleable: false`). `404 NOT_FOUND`
+for an unknown id.
+
+## `POST /money/delivery-fee-refunds/:refundId/settle`
+
+```json
+{ "method": "mobile_money", "reference": "MP241004.1234.A56789", "note": "Sent to the order's MTN number" }
+```
+
+| Field | | |
+|---|---|---|
+| `method` | **required** | `mobile_money` · `cash` · `bank` · `other` — the money was **sent by hand**. `covered_by_order_refund` — **no money moved**: a refund of the whole order already returned it |
+| `reference` | optional, ≤ 200, nullable | the transfer's own reference |
+| `note` | optional, ≤ 1000, nullable | lands on the ticket |
+
+**`.strict()`** — any other key is a `400`. There is **no `amount`** (the row's amount is what is
+settled) and **no `settledBy`** (the caller is the administrator).
+
+**Rules — all jovi-mall's**, refused as **`409 PLATFORM_OPERATION_REJECTED`** with
+`details.platformCode`:
+
+| `details.platformCode` | When | What to do |
+|---|---|---|
+| `DELIVERY_FEE_REFUND_NOT_SETTLEABLE` | not `manual_required` — settled already, automatic, or another administrator won the race | reload the row |
+| `DELIVERY_FEE_REFUND_ALREADY_COVERED` | online order: a refund of the whole order already returned this money, so paying again would pay it twice (`details` may carry `amount`, `stillReturnable`) | settle it `covered_by_order_refund` instead |
+| `DELIVERY_FEE_REFUND_NOT_COVERED` | `covered_by_order_refund` on money the order still covers — or on a COD order, where nothing else can have returned it | send the money and use a paying method |
+
+If the order could still return **part** of the money, `covered_by_order_refund` settles the covered
+part and jovi-mall opens a **new `manual_required` row for the rest** on the same ticket — returned
+as `remainder` (message: *"Partly covered by a refund of the whole order — the rest is still
+owed"*). Pay that one by hand.
+
+### Response (200)
+
+```jsonc
+{
+  "success": true,
+  "message": "Delivery-fee refund marked settled",
+  "data": {
+    "refund": { "id": "6700…", "status": "completed", "settleable": false, "amount": 1500,
+                "settlement": { "method": "mobile_money", "reference": "MP241004.1234.A56789",
+                                "note": "Sent to the order's MTN number",
+                                "settledBy": { "id": "ad01…", "source": "admin", "name": "Awa N." },
+                                "settledAt": "2026-10-04T12:00:00.000Z" }, "…": "…" },
+    "remainder": null
+  }
+}
+```
+
+Both halves are this service's own read of the rows after the write — the same shape as the GET.
+
+### Errors
+
+| Code | Status | When |
+|---|---|---|
+| `VALIDATION_ERROR` | 400 | bad id, bad body, unknown key |
+| `NOT_FOUND` | 404 | unknown refund |
+| `PLATFORM_OPERATION_REJECTED` | jovi-mall's own 4xx (409; 404 with `platformCode: ORDER_NOT_FOUND` if the order is gone) | jovi-mall refused — see the table above |
+| `SERVICE_DEPENDENCY_UNAVAILABLE` | 502 / 503 | jovi-mall unreachable or 5xx |
+
+### Audit
+
+`orders.delivery_fee_refund.settle` — `target: order` (so it appears on
+`GET /orders/:orderId/activity`), payload `{ refundId, amount, currency, method, reference, note }`,
+before/after `{ status, amount, settlementMethod, remainderRefundId, remainderOwed }`. **Fail-closed**: if the audit store is down the request fails and nothing reaches jovi-mall —
+the intent row commits **before** the call. jovi-mall writes its own `admin_action_log` row
+(`DELIVERY_FEE_REFUND_SETTLED`) in the settling transaction, then resolves the ticket and sends the
+customer `order.delivery_fee.refund_settled` (not for `covered_by_order_refund`).

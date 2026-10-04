@@ -34,6 +34,9 @@ const SUBJECT_CLASS: Readonly<Record<AuditTargetType, AuditSubjectClass>> = Obje
     ticket: 'platform_record',
     article: 'platform_record',
     plan: 'platform_record',
+    // A shared category is platform catalogue data, and Support can read the list itself
+    // (`catalog.categories.read`) — so it may read what was done to it.
+    category: 'platform_record',
     // An uploaded file belongs to a vendor, agency, agent or customer — platform data,
     // not this service's machinery, so it classifies with the records rather than with
     // `internal`. Note this governs who may READ the audit row, which is a separate

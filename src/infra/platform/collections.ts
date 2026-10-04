@@ -42,6 +42,8 @@ export const COLLECTIONS = Object.freeze({
 
   // Catalog
   PRODUCT: 'products',
+  // The ONE marketplace-wide category list; products hold 1–5 by id (`categoryIds`).
+  PRODUCT_CATEGORY: 'product_categories',
   PRODUCT_VARIANT: 'product_variants',
   PRODUCT_OPTION: 'product_options',
   PRODUCT_OPTION_VALUE: 'product_option_values',
@@ -90,6 +92,11 @@ export const COLLECTIONS = Object.freeze({
   PAYMENT_TRANSACTION: 'payment_transactions',
   REFUND_TRANSACTION: 'refund_transactions',
   USER_PAYMENT_METHOD: 'user_payment_methods',
+
+  // Delivery-fee changes after checkout (jovi-mall ADR-A11 W-E/W-E2): the proposals that move a
+  // shipment's fee, and the ledger of delivery money owed back to a customer.
+  DELIVERY_FEE_PROPOSAL: 'delivery_fee_proposals',
+  DELIVERY_FEE_REFUND: 'delivery_fee_refunds',
 
   // Booking
   BOOKING: 'bookings',

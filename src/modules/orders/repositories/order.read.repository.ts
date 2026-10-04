@@ -270,6 +270,20 @@ export class OrderReadRepository extends PlatformReadRepository<OrderReadModel> 
         return this.findOneBy({ _id: new ObjectId(orderId) } as Filter<OrderReadModel>);
     }
 
+    /**
+     * Order numbers for a page of rows that name orders by id (the delivery-fee refund queue).
+     * One `$in` on `_id`, projected to the number alone.
+     */
+    async findNumbersByIds(orderIds: string[]): Promise<Map<string, string | null>> {
+        const ids = [...new Set(orderIds)].filter((id) => Types.ObjectId.isValid(id) && id.length === 24);
+        if (ids.length === 0) return new Map();
+        const rows = await this.findBy(
+            { _id: { $in: ids.map((id) => new ObjectId(id)) } } as Filter<OrderReadModel>,
+            { projection: { _id: 1, order_number: 1 } },
+        );
+        return new Map(rows.map((o) => [o._id.toString(), o.order_number ?? null]));
+    }
+
     async findDetailById(orderId: string): Promise<OrderReadModel | null> {
         if (!Types.ObjectId.isValid(orderId)) return null;
         const [order] = await this.findBy(

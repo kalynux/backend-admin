@@ -10,6 +10,7 @@ import { requireAdminIdentity } from '../../admin-identity/domain/admin-identity
 import { toAuditEntryDto } from '../../audit/domain/audit.dto';
 import { AuditRepository } from '../../audit/repositories/audit.repository';
 import { AgencyReadRepository } from '../../agencies/repositories/agency.read.repository';
+import { CategoryReadRepository } from '../../categories/repositories/category.read.repository';
 import { ListAuditQuery } from '../../audit/validators/audit.validator';
 import { UserReadRepository } from '../../users/repositories/user.read.repository';
 import * as gateway from '../gateways/vendor.gateway';
@@ -83,6 +84,8 @@ const audit = new AuditRepository();
  * problem the field exists to remove.
  */
 const agencies = new AgencyReadRepository();
+/** Names a catalogue row's `categoryIds` — the second cross-module read, for the same reason. */
+const categoryReads = new CategoryReadRepository();
 
 interface VendorListItemDto {
     id: string;
@@ -172,14 +175,22 @@ function toProductDto(
     product: VendorProductReadModel,
     vendorDefaultAgencyId: string | null,
     agencyNames: Map<string, string | null>,
+    categoryRefs: Map<string, { id: string; name: string; slug: string }>,
 ) {
     const agencyId = effectiveAgencyId(product, vendorDefaultAgencyId);
+    // In the product's own order; an id the list no longer holds is dropped, not blanked.
+    const categories = (product.categoryIds ?? [])
+        .map((id) => categoryRefs.get(id.toString()))
+        .filter((c): c is { id: string; name: string; slug: string } => c !== undefined);
 
     return {
         id: product._id.toString(),
         title: product.title ?? null,
         slug: product.slug ?? null,
-        category: product.category ?? null,
+        /** The shared-list categories (2026-10-04), vendor's order — the first is the primary. */
+        categories,
+        /** ⚠ DEPRECATED — `categories[0].name`, or null. Kept for screens not yet moved. */
+        category: categories[0]?.name ?? null,
         type: product.type ?? null,
         status: product.status,
         // Documents predating the field have no key at all — jovi-mall's readers coerce
@@ -551,9 +562,15 @@ export class VendorController {
         ].map((id) => new ObjectId(id));
         const agencyNames = await agencies.findBusinessNamesByIds(agencyIds);
 
+        // Category names, batched the same way — one lookup for the page's distinct ids.
+        const categoryIds = [
+            ...new Set(page.items.flatMap((product) => (product.categoryIds ?? []).map((id) => id.toString()))),
+        ].map((id) => new ObjectId(id));
+        const categoryRefs = await categoryReads.findRefsByIds(categoryIds);
+
         sendPaginated(
             res,
-            page.items.map((product) => toProductDto(product, vendorDefaultAgencyId, agencyNames)),
+            page.items.map((product) => toProductDto(product, vendorDefaultAgencyId, agencyNames, categoryRefs)),
             toPageMeta(page.total, page.page, page.limit),
         );
     });

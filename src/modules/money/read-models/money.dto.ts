@@ -398,8 +398,13 @@ export interface PaymentDto {
         orderIds: string[];
         bookingId: string | null;
         cartId: string | null;
-        /** `primary` or `booking_balance` — a booking can be paid twice. */
+        /** `primary` · `booking_balance` (a booking can be paid twice) · `order_delivery_topup` (ADR-A11). */
         purpose: string;
+        /**
+         * `order_delivery_topup` only — the shipment and the fee proposal the top-up settles, and
+         * when jovi-mall applied it (`null` = paid but not yet applied). `null` on every other row.
+         */
+        deliveryTopup: { shipmentId: string | null; proposalId: string | null; appliedAt: string | null } | null;
     };
     /**
      * The payer. **Not one kind of id**: an order or cart payment stores a CUSTOMER id and
@@ -447,6 +452,13 @@ export function toPaymentDto(row: PaymentTransactionReadModel): PaymentDto {
             bookingId: toId(row.bookingId),
             cartId: toId(row.cartId),
             purpose: row.purpose ?? 'primary',
+            deliveryTopup: row.deliveryTopup
+                ? {
+                      shipmentId: toId(row.deliveryTopup.shipmentId),
+                      proposalId: toId(row.deliveryTopup.proposalId),
+                      appliedAt: toIso(row.deliveryTopup.appliedAt),
+                  }
+                : null,
         },
         payer: { id: row.userId.toString(), kind: 'customer_or_user' },
         gateway: row.gateway,

@@ -527,3 +527,98 @@ export async function rejectPayout(
         },
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Delivery-fee refunds — delivery money owed back to a customer (jovi-mall ADR-A11 W-E2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** What the audit row needs about the refund, read by the controller before delegating. */
+export interface DeliveryFeeRefundAuditContext {
+    orderId: string;
+    /** The order number — the row is filed against the ORDER, so it lands on its activity feed. */
+    label: string | null;
+    amount: number;
+    currency: string;
+    before: Record<string, unknown>;
+}
+
+/** jovi-mall's `AdminDeliveryFeeRefundDto`, as much of it as this gateway names. */
+export interface PlatformDeliveryFeeRefund {
+    id: string;
+    orderId?: string;
+    status?: string;
+    amount?: number;
+    currency?: string;
+    settlement?: { method?: string; reference?: string | null } | null;
+}
+
+export interface PlatformDeliveryFeeRefundSettlement {
+    refund: PlatformDeliveryFeeRefund;
+    /** A new `manual_required` row for the part still owed after a partial cover; else null. */
+    remainder: PlatformDeliveryFeeRefund | null;
+}
+
+function deliveryFeeRefundState(result: PlatformDeliveryFeeRefundSettlement | null): Record<string, unknown> | null {
+    if (!result || typeof result !== 'object' || !result.refund) return null;
+    return {
+        status: result.refund.status ?? null,
+        amount: result.refund.amount ?? null,
+        settlementMethod: result.refund.settlement?.method ?? null,
+        remainderRefundId: result.remainder?.id ?? null,
+        remainderOwed: result.remainder?.amount ?? null,
+    };
+}
+
+/**
+ * Settle a MANUAL delivery-fee refund — record that a person returned delivery money owed to a
+ * customer (`mobile_money` · `cash` · `bank` · `other`), or that a refund of the whole order
+ * already had (`covered_by_order_refund`). Owner decision D-12: COD money owed back stays manual.
+ *
+ * Delegated because jovi-mall pairs the write with effects a second writer would miss: a
+ * compare-and-set on `{status: manual_required, amount}`, a remainder row on a partial cover,
+ * its own `admin_action_log` row, then the ticket resolution and the customer's
+ * `order.delivery_fee.refund_settled` notice. Every refusal (`DELIVERY_FEE_REFUND_NOT_SETTLEABLE`
+ * / `_ALREADY_COVERED` / `_NOT_COVERED`) is jovi-mall's rule and reaches the caller as
+ * `PLATFORM_OPERATION_REJECTED` with `details.platformCode` — `platformRequest` relays it.
+ *
+ * Audited FAIL-CLOSED (`auditedAttempt`): the intent row commits before the call, and with the
+ * audit store down the call is never made. Filed against the ORDER (`target.type: 'order'`) so
+ * it appears on `/orders/:orderId/activity` beside the order's other refunds.
+ */
+export async function settleDeliveryFeeRefund(
+    refundId: string,
+    input: { method: string; reference: string | null; note: string | null },
+    audit: DeliveryFeeRefundAuditContext,
+    context: ActorContext,
+): Promise<PlatformDeliveryFeeRefundSettlement> {
+    return auditedDelegation(
+        'orders.delivery_fee_refund.settle',
+        context,
+        { type: 'order', id: audit.orderId, label: audit.label },
+        {
+            refundId,
+            amount: audit.amount,
+            currency: audit.currency,
+            method: input.method,
+            reference: input.reference,
+            note: input.note,
+        },
+        audit.before,
+        deliveryFeeRefundState,
+        async () => {
+            const result = await platformRequest<PlatformDeliveryFeeRefundSettlement>({
+                method: 'POST',
+                path: `/delivery-fee-refunds/${refundId}/settle`,
+                // Absent rather than null: smaller on the wire, and jovi-mall treats both alike.
+                body: {
+                    method: input.method,
+                    ...(input.reference !== null && { reference: input.reference }),
+                    ...(input.note !== null && { note: input.note }),
+                },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return { result: result.data };
+        },
+    );
+}

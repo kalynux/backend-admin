@@ -28,6 +28,9 @@ import {
     RefundTransactionReadRepository,
 } from '../repositories/payment-transaction.read.repository';
 import { PayoutRequestReadModel, PayoutRequestReadRepository } from '../repositories/payout-request.read.repository';
+import { DeliveryFeeRefundReadModel, DeliveryFeeRefundReadRepository } from '../repositories/delivery-fee.read.repository';
+import { toDeliveryFeeRefundDto } from '../read-models/delivery-fee.dto';
+import { OrderReadRepository } from '../../orders/repositories/order.read.repository';
 import {
     MoneyOwnerNames,
     MoneyOwnerVerifications,
@@ -43,6 +46,8 @@ import {
 } from '../read-models/money.dto';
 import {
     ListAllocationsQuery,
+    ListDeliveryFeeRefundsQuery,
+    SettleDeliveryFeeRefundBody,
     ListEarningsAccountsQuery,
     ListPaymentsQuery,
     ListPayoutActivityQuery,
@@ -93,6 +98,8 @@ const allocations = new EarningsAllocationReadRepository();
 const payouts = new PayoutRequestReadRepository();
 const payments = new PaymentTransactionReadRepository();
 const refunds = new RefundTransactionReadRepository();
+const deliveryFeeRefunds = new DeliveryFeeRefundReadRepository();
+const orderNumbers = new OrderReadRepository();
 const auditEntries = new AuditRepository();
 
 // The owner directories, for the display names a money row cannot carry. Owned by the
@@ -765,10 +772,94 @@ export class MoneyController {
 
         sendPaginated(res, page.items.map(toRefundDto), toPageMeta(page.total, page.page, page.limit));
     });
+
+    // ── Delivery-fee refunds (jovi-mall ADR-A11 W-E2, owner decision D-12) ─────────
+
+    /**
+     * GET /api/v1/money/delivery-fee-refunds — the queue of delivery money owed back to a
+     * customer that a PERSON must send (COD cash, mobile money, a gateway with refunds off).
+     *
+     * A direct read of `delivery_fee_refunds` — the record, not a verdict. `money.payments.read`,
+     * like `/refunds`: reading what is owed is not settling it, and Support answering "where is
+     * my delivery refund" needs exactly this.
+     */
+    static listDeliveryFeeRefunds = asyncHandler(async (req: Request, res: Response) => {
+        const query = req.query as unknown as ListDeliveryFeeRefundsQuery;
+        const page = await deliveryFeeRefunds.search(query);
+        const numbers = await orderNumbers.findNumbersByIds(page.items.map((r) => r.order_id.toString()));
+
+        sendPaginated(
+            res,
+            page.items.map((r) => toDeliveryFeeRefundDto(r, numbers.get(r.order_id.toString()) ?? null)),
+            toPageMeta(page.total, page.page, page.limit),
+        );
+    });
+
+    /** GET /api/v1/money/delivery-fee-refunds/:refundId — one row, automatic ones included. */
+    static getDeliveryFeeRefund = asyncHandler(async (req: Request, res: Response) => {
+        const row = await loadDeliveryFeeRefundOr404(req.params.refundId);
+        const numbers = await orderNumbers.findNumbersByIds([row.order_id.toString()]);
+        sendSuccess(res, toDeliveryFeeRefundDto(row, numbers.get(row.order_id.toString()) ?? null));
+    });
+
+    /**
+     * POST /api/v1/money/delivery-fee-refunds/:refundId/settle — record that the money was
+     * returned by hand, or was already covered by a refund of the whole order.
+     *
+     * Read first for the 404 and the audit `before`; whether the row may be settled is NOT
+     * pre-checked here — that rule (and the never-paid-twice ceiling) is jovi-mall's, and its
+     * refusals arrive as `PLATFORM_OPERATION_REJECTED` + `details.platformCode`. Answers through
+     * this service's own read of the row(s) afterwards, so the write and the GET cannot disagree
+     * in shape.
+     */
+    static settleDeliveryFeeRefund = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as SettleDeliveryFeeRefundBody;
+        const row = await loadDeliveryFeeRefundOr404(req.params.refundId);
+        const orderId = row.order_id.toString();
+        const numbers = await orderNumbers.findNumbersByIds([orderId]);
+        const orderNumber = numbers.get(orderId) ?? null;
+
+        const result = await gateway.settleDeliveryFeeRefund(
+            req.params.refundId,
+            { method: body.method, reference: body.reference ?? null, note: body.note ?? null },
+            {
+                orderId,
+                label: orderNumber,
+                amount: row.amount,
+                currency: row.currency,
+                before: { refundId: row._id.toString(), status: row.status, amount: row.amount, settlementMethod: null },
+            },
+            actorContextOf(req),
+        );
+
+        const [settled, remainder] = await Promise.all([
+            deliveryFeeRefunds.findById(req.params.refundId),
+            result.remainder?.id ? deliveryFeeRefunds.findById(result.remainder.id) : Promise.resolve(null),
+        ]);
+
+        sendSuccess(
+            res,
+            {
+                refund: settled ? toDeliveryFeeRefundDto(settled, orderNumber) : null,
+                remainder: remainder ? toDeliveryFeeRefundDto(remainder, orderNumber) : null,
+            },
+            {
+                message: result.remainder
+                    ? 'Partly covered by a refund of the whole order — the rest is still owed'
+                    : 'Delivery-fee refund marked settled',
+            },
+        );
+    });
 }
 
 async function loadAllocationOr404(allocationId: string): Promise<EarningsAllocationReadModel> {
     const row = await allocations.findById(allocationId);
     if (!row) throw createAppError(ERROR_CODES.NOT_FOUND, 404, 'Earnings allocation not found');
+    return row;
+}
+
+async function loadDeliveryFeeRefundOr404(refundId: string): Promise<DeliveryFeeRefundReadModel> {
+    const row = await deliveryFeeRefunds.findById(refundId);
+    if (!row) throw createAppError(ERROR_CODES.NOT_FOUND, 404, 'Delivery-fee refund not found');
     return row;
 }

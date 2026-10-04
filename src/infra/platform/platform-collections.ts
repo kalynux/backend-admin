@@ -147,6 +147,10 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'Product oversight suspends listings the agency cascade also touches',
     },
+    [COLLECTIONS.PRODUCT_CATEGORY]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'A merge rewrites every product holding the category and records aliases the duplicate check reads; a second writer would do neither',
+    },
     [COLLECTIONS.PRODUCT_VARIANT]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'The line an order item actually names; its media and price are what a dispute screen has to show (BR-017)',
@@ -167,6 +171,14 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
     [COLLECTIONS.REFUND_TRANSACTION]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'Created `pending` BEFORE the gateway call and finalised atomically — never written from here',
+    },
+    [COLLECTIONS.DELIVERY_FEE_PROPOSAL]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'Read-only on the order detail (ADR-A11). Every transition is a compare-and-set paired with a fee move and a customer notice; administrators write none (D-11)',
+    },
+    [COLLECTIONS.DELIVERY_FEE_REFUND]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'Delivery money owed back to a customer (ADR-A11 W-E2). Settling a manual row is delegated: a CAS + admin_action_log row + ticket resolution + customer notice in jovi-mall',
     },
     [COLLECTIONS.BOOKING]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',

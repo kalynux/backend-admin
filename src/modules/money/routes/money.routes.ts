@@ -18,6 +18,9 @@ import { MoneyController } from '../controllers/money.controller';
 import '../domain/payout-dual-control';
 import {
     AllocationIdParamSchema,
+    DeliveryFeeRefundIdParamSchema,
+    ListDeliveryFeeRefundsQuerySchema,
+    SettleDeliveryFeeRefundSchema,
     ListAllocationsQuerySchema,
     ListEarningsAccountsQuerySchema,
     ListPaymentsQuerySchema,
@@ -365,6 +368,56 @@ defineRoute(router, {
     access: permission('money.payments.read'),
     validate: { query: ListRefundsQuerySchema },
     handler: MoneyController.listRefunds,
+});
+
+// ── Delivery-fee refunds: delivery money owed back to a customer (jovi-mall ADR-A11 W-E2) ──
+
+/**
+ * The queue a person works from — refunds the gateway could not make (COD cash, mobile money,
+ * refunds disabled), owner decision D-12. A DIRECT read of `delivery_fee_refunds`, under
+ * `money.payments.read` for the reason `/refunds` is: this is the record, and "where is my
+ * delivery refund" is a Support question. `/delivery-fee-refunds` and `/refunds` are
+ * different literals at the same depth, so neither shadows the other.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/delivery-fee-refunds',
+    access: permission('money.payments.read'),
+    validate: { query: ListDeliveryFeeRefundsQuerySchema },
+    handler: MoneyController.listDeliveryFeeRefunds,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/delivery-fee-refunds/:refundId',
+    access: permission('money.payments.read'),
+    validate: { params: DeliveryFeeRefundIdParamSchema },
+    handler: MoneyController.getDeliveryFeeRefund,
+});
+
+/**
+ * Record that the money was returned by hand — or was already covered by a refund of the
+ * whole order. DELEGATED to jovi-mall (`POST /api/internal/admin/delivery-fee-refunds/:id/settle`).
+ *
+ * ⚠ **`orders.refund`, not a money/payout permission**, and the choice is the point: this is a
+ * CUSTOMER refund — money leaving the platform to the person who paid for the order — which is
+ * exactly what `orders.refund` governs (financial, tiers 1 + 2, never Support). The payout
+ * permissions govern money owed to vendors, agencies and agents, and carry a 2,000,000 XAF
+ * four-eyes rule sized for payouts that a delivery fee never approaches. Support can READ the
+ * queue (`money.payments.read`) and cannot settle it.
+ *
+ * Audited fail-closed (intent before the call), filed against the ORDER.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/delivery-fee-refunds/:refundId/settle',
+    access: permission('orders.refund'),
+    validate: { params: DeliveryFeeRefundIdParamSchema, body: SettleDeliveryFeeRefundSchema },
+    audit: records('orders.delivery_fee_refund.settle'),
+    handler: MoneyController.settleDeliveryFeeRefund,
 });
 
 export const moneyRoutes = router;

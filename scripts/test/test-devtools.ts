@@ -558,6 +558,13 @@ t.assert('LogQuerySchema bounds q at 100 chars and limit at 500', () =>
     && !LogQuerySchema.safeParse({ limit: 501 }).success
     && LogQuerySchema.safeParse({ q: 'payment', limit: 500 }).success);
 
+t.assert('LogQuerySchema forwards actorId — a 24-hex id, never stripped and never free text', () => {
+    const parsed = LogQuerySchema.safeParse({ actorId: 'a'.repeat(24) });
+    return parsed.success && parsed.data.actorId === 'a'.repeat(24)
+        && !LogQuerySchema.safeParse({ actorId: 'Ama Mensah' }).success
+        && !LogQuerySchema.safeParse({ actorId: 'a'.repeat(23) }).success;
+});
+
 t.assert('CacheKeysQuerySchema takes a NAME, never an index, and needs no confirm', () =>
     CacheKeysQuerySchema.safeParse({ db: 'SLOT_LOCK_DB' }).success
     && !CacheKeysQuerySchema.safeParse({ db: '7' }).success);

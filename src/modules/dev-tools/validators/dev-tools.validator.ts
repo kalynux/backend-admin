@@ -110,6 +110,13 @@ export const LogQuerySchema = z.object({
     until: z.string().datetime({ offset: true }).optional(),
     requestId: z.string().trim().min(1).max(200).optional(),
     q: z.string().trim().min(1).max(100).optional(),
+    /**
+     * Every line one actor's requests produced. jovi-mall matches it against the user id OR
+     * the role-profile id (vendor / agency / agent / customer), so either id from a party's
+     * page works. Declared here because this object is not `.strict()` — an undeclared key
+     * would be stripped silently and the search would come back unfiltered.
+     */
+    actorId: z.string().trim().regex(/^[a-f0-9]{24}$/i, 'Must be a 24-character id').optional(),
     source: z.enum(['ring', 'persisted']).optional(),
     limit: z.coerce.number().int().min(1).max(500).optional(),
     /** A cursor, never an offset — the capped collection evicts from the front as it is written. */

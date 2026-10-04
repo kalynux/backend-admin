@@ -1221,6 +1221,9 @@ Assignment is refused by the platform for `BILLING_PLAN_INACTIVE` and `BILLING_P
 | GET | `/money/payments` | `money.payments.read` | direct | — |
 | GET | `/money/payments/:transactionId` | `money.payments.read` | direct | — |
 | GET | `/money/refunds` | `money.payments.read` | direct | — |
+| GET | `/money/delivery-fee-refunds` | `money.payments.read` | direct | — |
+| GET | `/money/delivery-fee-refunds/:refundId` | `money.payments.read` | direct | — |
+| POST | `/money/delivery-fee-refunds/:refundId/settle` | **`orders.refund`** | **delegated** | ✅ `orders.delivery_fee_refund.settle` |
 
 **Support holds exactly one permission here — `money.payments.read`** (gateway payments and refunds).
 The sharp fields (raw gateway payload, payload hash, idempotency key) are removed by **projection,

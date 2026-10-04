@@ -56,8 +56,15 @@ export interface PaymentTransactionReadModel extends Document {
     bookingId?: ObjectId | null;
     cartId?: ObjectId | null;
     orderIds?: ObjectId[] | null;
-    /** `primary` or `booking_balance` — a booking can be paid twice. */
+    /**
+     * `primary` · `booking_balance` (a booking can be paid twice) · `order_delivery_topup`
+     * (jovi-mall ADR-A11 W-E: the customer paying a HIGHER delivery fee they approved after
+     * checkout — it carries `orderId` like a single-order payment, so every per-order reader
+     * has to decide whether it means "the checkout charge" or "what was paid for this order").
+     */
     purpose?: string;
+    /** Set only on `order_delivery_topup` — the shipment and the fee proposal it settles. */
+    deliveryTopup?: { shipmentId?: ObjectId | null; proposalId?: ObjectId | null; appliedAt?: Date | null } | null;
     /**
      * The payer — but NOT one kind of id. An order or cart payment stores a CUSTOMER id;
      * a booking payment stores a USER id. Which one a row carries depends on how it was
@@ -108,6 +115,7 @@ const PAYMENT_TRANSACTION_PROJECTION = {
     cartId: 1,
     orderIds: 1,
     purpose: 1,
+    deliveryTopup: 1,
     userId: 1,
     gateway: 1,
     provider: 1,
@@ -147,6 +155,21 @@ export class PaymentTransactionReadRepository extends PlatformReadRepository<Pay
             page: query.page,
             limit: query.limit,
             sort: toMongoSort(query.sort, PAYMENT_SORT),
+        });
+    }
+
+    /**
+     * Every payment linked to one order — BOTH linkages (`orderId`, and a cart's `orderIds`),
+     * oldest first. The order detail splits it into the checkout charge and the delivery
+     * top-ups (`splitOrderPayments`). Bounded: an order has one checkout charge plus a top-up
+     * per approved increase, never a feed.
+     */
+    async forOrder(orderId: string): Promise<PaymentTransactionReadModel[]> {
+        if (!Types.ObjectId.isValid(orderId) || orderId.length !== 24) return [];
+        const id = new ObjectId(orderId);
+        return this.findBy({ $or: [{ orderId: id }, { orderIds: id }] } as Filter<PaymentTransactionReadModel>, {
+            sort: { createdAt: 1, _id: 1 },
+            limit: 50,
         });
     }
 
@@ -396,6 +419,9 @@ export interface GatewayStatsSourceSpec {
 }
 
 export const GATEWAY_STATS_SOURCES: Readonly<Record<GatewayStatsSource, GatewayStatsSourceSpec>> = Object.freeze({
+    // Every `purpose` counts, delivery top-ups (`order_delivery_topup`, ADR-A11) included, and
+    // deliberately: this measures whether an AGGREGATOR settles charges, and a top-up is a charge
+    // that aggregator carried like any other. It is not a per-order sum (decided W-G2).
     payments: {
         source: 'payments',
         createdField: 'createdAt',

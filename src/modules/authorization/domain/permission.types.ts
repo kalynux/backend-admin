@@ -45,6 +45,12 @@ export type PermissionFamily =
     // Domains with no admin surface today (built at Phase 6)
     | 'users'
     | 'vendors'
+    /**
+     * The marketplace-wide catalogue structure (2026-10-04) — today the shared product
+     * category list. Its own family rather than `vendors`: a category belongs to no vendor,
+     * and merging one rewrites MANY vendors' products at once.
+     */
+    | 'catalog'
     // `customers` was here and is DELETED (Phase 5 Part D, ADR-017 D-1). Its two permissions
     // were granted and backed no route, and the `users` family already covers customers
     // role-agnostically. A family must hold at least one permission (`test-authz.ts` § 1), so
@@ -71,7 +77,7 @@ export type PermissionFamily =
 
 export const PERMISSION_FAMILIES: readonly PermissionFamily[] = [
     'agents', 'agencies', 'billing', 'cod', 'money', 'orders', 'support', 'content',
-    'files', 'messaging', 'users', 'vendors', 'shipments', 'administrators',
+    'files', 'messaging', 'users', 'vendors', 'catalog', 'shipments', 'administrators',
     'notifications', 'system', 'developer_tools', 'permissions', 'approvals', 'audit',
     'employees',
 ] as const;

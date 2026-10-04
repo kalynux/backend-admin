@@ -262,7 +262,7 @@ export const ListPaymentsQuerySchema = listQuery(PAYMENT_SORT, '-createdAt', {
     status: platformTerm.optional(),
     gateway: platformTerm.optional(),
     method: platformTerm.optional(),
-    /** `primary` or `booking_balance` — a booking can be paid twice. */
+    /** `primary` · `booking_balance` (a booking can be paid twice) · `order_delivery_topup` (ADR-A11: a higher delivery fee the customer approved after checkout). */
     purpose: platformTerm.optional(),
     orderId: objectId.optional(),
     bookingId: objectId.optional(),
@@ -316,3 +316,61 @@ export type ListPaymentsQuery = z.infer<typeof ListPaymentsQuerySchema>;
 export type ListRefundsQuery = z.infer<typeof ListRefundsQuerySchema>;
 export type MarkPaidBody = z.infer<typeof MarkPaidSchema>;
 export type RejectPayoutBody = z.infer<typeof RejectPayoutSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Delivery-fee refunds — delivery money owed back to a customer (jovi-mall ADR-A11 W-E2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const DeliveryFeeRefundIdParamSchema = idParam('refundId', 'delivery-fee refund');
+
+/** `delivery_fee_refunds` is snake_case; `{status, created_at: -1}` serves the default. */
+export const DELIVERY_FEE_REFUND_SORT = {
+    createdAt: 'created_at',
+    amount: 'amount',
+} as const;
+
+/**
+ * The admin queue. `status` is OUR vocabulary for the queue, not jovi-mall's row status —
+ * which is why it is a pinned enum where every other term on this mount is a bounded string:
+ * `manual_required` (still owed; the default) · `settled` (settled by an administrator) ·
+ * `all` (both). The same three words jovi-mall's internal list takes.
+ */
+export const ListDeliveryFeeRefundsQuerySchema = listQuery(DELIVERY_FEE_REFUND_SORT, '-createdAt', {
+    status: z.enum(['manual_required', 'settled', 'all']).default('manual_required'),
+    orderId: objectId.optional(),
+    vendorId: objectId.optional(),
+    customerId: objectId.optional(),
+});
+
+/**
+ * Record that a person returned delivery money owed to a customer — or that a refund of the
+ * whole order already had.
+ *
+ * `.strict()` for the `MarkPaidSchema` reason: this records that money left the platform, and
+ * a misspelt key must be a 400 rather than a silently dropped field. There is no `amount` (the
+ * row's amount is what is settled — jovi-mall reads it off the row and compare-and-sets on it)
+ * and no `settledBy` (the caller is the administrator, sent as `X-Actor-*`).
+ *
+ * The bounds mirror jovi-mall's `SettleDeliveryFeeRefundSchema` exactly, so a body this
+ * accepts is never a wrapped 400 from the other side. `method` IS pinned — unlike the read
+ * vocabularies above, this service writes it, and a value jovi-mall does not know is a
+ * request that cannot succeed.
+ */
+export const DELIVERY_FEE_REFUND_SETTLEMENT_METHODS = [
+    'mobile_money',
+    'cash',
+    'bank',
+    'other',
+    'covered_by_order_refund',
+] as const;
+
+export const SettleDeliveryFeeRefundSchema = z
+    .object({
+        method: z.enum(DELIVERY_FEE_REFUND_SETTLEMENT_METHODS),
+        reference: z.string().trim().min(1).max(200).nullish(),
+        note: z.string().trim().min(1).max(1000).nullish(),
+    })
+    .strict();
+
+export type ListDeliveryFeeRefundsQuery = z.infer<typeof ListDeliveryFeeRefundsQuerySchema>;
+export type SettleDeliveryFeeRefundBody = z.infer<typeof SettleDeliveryFeeRefundSchema>;

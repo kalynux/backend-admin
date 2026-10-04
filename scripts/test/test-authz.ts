@@ -859,6 +859,26 @@ t.assert('deleteAttachment resolves the attachment to its ticket before scoping 
         && body.includes('assertMayAct(');
 });
 
+/**
+ * Every WRITE on `/money` moves (or records the movement of) money, so every permission that
+ * can reach one must be flagged `financial` — the flag is what keeps it out of
+ * `allInFamily(...)` and refuses it to Support unless named in `TIER_3_FINANCIAL_ALLOWLIST`.
+ * Pinned when the delivery-fee refund settle landed (ADR-A11 W-G2) under `orders.refund`, a
+ * permission from ANOTHER family: a write reusing an unflagged name here would be a money
+ * movement Support could reach with nothing in the grant table saying so.
+ */
+t.assert('every /money write route is gated only on financial permissions', () => {
+    const source = stripComments(readFileSync(join(SRC, 'modules', 'money', 'routes', 'money.routes.ts'), 'utf8'));
+    const blocks = source.split('defineRoute(router,').slice(1);
+    const writes = blocks.filter((b) => /method:\s*'(post|put|patch|delete)'/.test(b));
+    const names = writes.flatMap((b) => {
+        const access = /access:\s*(?:anyPermission|permission)\(([^)]*)\)/.exec(b)?.[1] ?? '';
+        return [...access.matchAll(/'([a-z_.]+)'/g)].map((m) => m[1]);
+    });
+    const catalog = PERMISSION_CATALOG as unknown as Record<string, { financial?: boolean }>;
+    return writes.length >= 6 && names.length >= writes.length && names.every((n) => catalog[n]?.financial === true);
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('9. The legacy surface is GONE (Phase 5 Part D)');
 

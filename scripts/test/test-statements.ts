@@ -41,7 +41,7 @@ import {
 import { maskPhone } from '../../src/modules/statements/domain/statement-masking';
 import { formatLocal, toStatementPeriod } from '../../src/modules/statements/domain/statement-period';
 import { StatementDocument } from '../../src/modules/statements/domain/statement.types';
-import { matchRemittance } from '../../src/modules/statements/domain/vendor-statement';
+import { matchRemittance, paymentFor } from '../../src/modules/statements/domain/vendor-statement';
 import { renderPdf, pdfSafe } from '../../src/modules/statements/render/pdf.renderer';
 import { renderXlsx } from '../../src/modules/statements/render/xlsx.renderer';
 import { CreateStatementBodySchema } from '../../src/modules/statements/validators/statement.validator';
@@ -200,6 +200,20 @@ async function main(): Promise<number> {
         matchRemittance(collection, [remittance(10, new ObjectId())]) === null);
     t.assert('remittance: nothing within a minute → blank, not a guess', () =>
         matchRemittance(collection, [remittance(120_000)]) === null);
+
+    // ADR-A11 W-G2: an order can hold a delivery top-up (`purpose: 'order_delivery_topup'`) beside
+    // its checkout charge, linked by the same `orderId`. The statement's payment columns (means,
+    // reference, payer, paid at) describe HOW THE ORDER WAS PAID, so they must never come from
+    // a top-up; the total the customer paid is `order.total_amount`, which top-ups already grow.
+    const orderId = new ObjectId();
+    const payRow = (purpose: string, status: string, ref: string) =>
+        ({ _id: new ObjectId(), orderId, purpose, status, gatewayRef: ref, gateway: 'NOTCHPAY', method: 'MOBILE_MONEY', amountSnapshot: 1, currencySnapshot: 'XAF', createdAt: new Date(), updatedAt: new Date() }) as never;
+    t.assert('payment: the checkout charge is named, never a delivery top-up', () =>
+        (paymentFor(orderId, [payRow('primary', 'SUCCEEDED', 'CHK'), payRow('order_delivery_topup', 'SUCCEEDED', 'TOP')]) as { gatewayRef: string } | null)?.gatewayRef === 'CHK');
+    t.assert('payment: a SUCCEEDED top-up does not outrank a checkout charge still open', () =>
+        (paymentFor(orderId, [payRow('primary', 'PENDING', 'CHK'), payRow('order_delivery_topup', 'SUCCEEDED', 'TOP')]) as { gatewayRef: string } | null)?.gatewayRef === 'CHK');
+    t.assert('payment: an order with only a top-up row reads as no checkout payment', () =>
+        paymentFor(orderId, [payRow('order_delivery_topup', 'SUCCEEDED', 'TOP')]) === null);
 
     t.assert('no statement source multiplies by a commission or margin RATE', () => {
         const src = ['domain/money-breakdown.ts', 'domain/vendor-statement.ts', 'domain/delivery-statement.ts'].map(read).join('\n');

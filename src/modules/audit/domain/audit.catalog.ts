@@ -1167,6 +1167,26 @@ export const AUDIT_CATALOG = Object.freeze({
         summary: 'Changed a vendor’s platform-governed order settings',
     },
 
+    // ═══ CATALOG — the shared category list, delegated to jovi-mall ═══════════
+    'catalog.categories.rename': {
+        permission: 'catalog.categories.manage',
+        target: 'category',
+        transport: 'delegated',
+        summary: 'Renamed a shared product category (the old spelling stays as an alias)',
+    },
+    'catalog.categories.merge': {
+        permission: 'catalog.categories.manage',
+        target: 'category',
+        transport: 'delegated',
+        summary: 'Merged one product category into another, moving every product that held it',
+    },
+    'catalog.categories.delete': {
+        permission: 'catalog.categories.manage',
+        target: 'category',
+        transport: 'delegated',
+        summary: 'Deleted an unused product category',
+    },
+
     // ═══ ORDERS — delegated to jovi-mall (Phase 10) ═══════════════════════════
     // Four mutations. The reads — a list, a detail, a timeline, an eligibility verdict —
     // are not here: they are not actions.
@@ -1214,6 +1234,22 @@ export const AUDIT_CATALOG = Object.freeze({
         target: 'order',
         transport: 'delegated',
         summary: 'Refunded an order, in full or in part',
+    },
+    /**
+     * jovi-mall ADR-A11 W-E2 (owner decision D-12): delivery money owed back to a customer that
+     * the gateway could not return — COD cash, mobile money, refunds disabled — is paid by a
+     * person, and this records that it was. Under `orders.refund` because it IS a customer
+     * refund (money leaving the platform to the person who paid for the order); a payout
+     * permission would govern money owed to a vendor, agency or agent instead.
+     *
+     * Filed against the ORDER, so it reads on `/orders/:orderId/activity` beside the order's
+     * other refunds; the refund id, method and transfer reference are in the payload.
+     */
+    'orders.delivery_fee_refund.settle': {
+        permission: 'orders.refund',
+        target: 'order',
+        transport: 'delegated',
+        summary: 'Settled a delivery-fee refund owed to a customer — recorded the money as returned by hand, or as covered by a refund of the whole order',
     },
 
     // ═══ SHIPMENTS — delegated to jovi-mall (Phase 10) ════════════════════════

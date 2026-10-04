@@ -43,7 +43,10 @@ process.env.ADMIN_DASHBOARD_ORIGINS = 'http://localhost:5173';
 import {
     ALLOCATION_SORT,
     LEDGER_SORT,
+    DELIVERY_FEE_REFUND_SETTLEMENT_METHODS,
     ListAllocationsQuerySchema,
+    ListDeliveryFeeRefundsQuerySchema,
+    SettleDeliveryFeeRefundSchema,
     ListEarningsAccountsQuerySchema,
     ListPaymentsQuerySchema,
     ListPayoutActivityQuerySchema,
@@ -65,6 +68,12 @@ import {
     buildLedgerFilter,
 } from '../../src/modules/money/repositories/earnings.read.repository';
 import { buildPayoutFilter } from '../../src/modules/money/repositories/payout-request.read.repository';
+import { buildDeliveryFeeRefundFilter } from '../../src/modules/money/repositories/delivery-fee.read.repository';
+import {
+    splitOrderPayments,
+    toDeliveryFeeRefundDto,
+    toOrderDeliveryFeeDto,
+} from '../../src/modules/money/read-models/delivery-fee.dto';
 import {
     buildPaymentFilter,
     buildRefundFilter,
@@ -1225,7 +1234,7 @@ t.section('10. The route manifest');
 
 const moneyRoutes = routeManifest().filter((route) => route.fullPath.startsWith('/api/v1/money'));
 
-t.assert('seventeen routes are declared on /money', () => moneyRoutes.length === 17);
+t.assert('twenty routes are declared on /money (17 + three delivery-fee refund routes, ADR-A11 W-G2)', () => moneyRoutes.length === 20);
 
 /**
  * The triage route is the ONE write on this surface a Support administrator can reach, and
@@ -1579,5 +1588,166 @@ t.assert('the repositories return the raw verdict, leaving the judgement in one 
         readCode(SRC, 'modules', ...file)
             .includes('findKycVerdictsByIds(ids: ObjectId[]): Promise<Map<string, string | null>>'));
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('12. Delivery-fee refunds owed to customers (jovi-mall ADR-A11 W-G2)');
+
+{
+    const route = (suffix: string, method: string) =>
+        moneyRoutes.find((r) => r.fullPath === `/api/v1/money${suffix}` && r.method === method);
+    const list = route('/delivery-fee-refunds', 'get');
+    const one = route('/delivery-fee-refunds/:refundId', 'get');
+    const settle = route('/delivery-fee-refunds/:refundId/settle', 'post');
+
+    t.assert('the queue and the detail are READS under money.payments.read (Support can see what is owed)', () =>
+        [list, one].every((r) => r !== undefined && r.access.kind === 'permission'
+            && r.access.permissions.length === 1 && r.access.permissions[0] === 'money.payments.read'
+            && r.audit === null));
+    t.assert('settling stands behind orders.refund ALONE — a customer refund, never a payout permission', () =>
+        settle !== undefined && settle.access.kind === 'permission'
+        && settle.access.permissions.length === 1 && settle.access.permissions[0] === 'orders.refund');
+    t.assert('settling is audited as orders.delivery_fee_refund.settle', () =>
+        settle?.audit?.kind === 'records' && settle.audit.actions.length === 1
+        && settle.audit.actions[0] === 'orders.delivery_fee_refund.settle');
+    t.assert('the audit action is delegated, filed against the order, governed by orders.refund', () => {
+        const spec = auditSpec('orders.delivery_fee_refund.settle');
+        return spec.transport === 'delegated' && spec.target === 'order' && spec.permission === 'orders.refund';
+    });
+    t.assert('orders.refund is financial, held by tier 2 and refused to Support (tier 3)', () =>
+        permissionSpec('orders.refund').financial === true
+        && !TIER_GRANTS[3].includes('orders.refund' as never) && TIER_GRANTS[2].includes('orders.refund' as never));
+    t.assert('...while Support can read the queue', () => TIER_GRANTS[3].includes('money.payments.read' as never));
+
+    // ── The body: strict, pinned methods, jovi-mall's bounds ──
+    t.assert('settle body: a paying method is accepted', () =>
+        SettleDeliveryFeeRefundSchema.parse({ method: 'mobile_money', reference: 'MP1' }).method === 'mobile_money');
+    t.assert('settle body: covered_by_order_refund is accepted', () =>
+        SettleDeliveryFeeRefundSchema.safeParse({ method: 'covered_by_order_refund' }).success);
+    t.assert('settle body: an unknown method is a 400', () =>
+        !SettleDeliveryFeeRefundSchema.safeParse({ method: 'cheque' }).success);
+    t.assert('settle body: .strict() — an amount key is refused, never silently dropped', () =>
+        !SettleDeliveryFeeRefundSchema.safeParse({ method: 'cash', amount: 1 }).success);
+    t.assert('settle body: no settledBy — the caller is the administrator', () =>
+        !SettleDeliveryFeeRefundSchema.safeParse({ method: 'cash', settledBy: 'x' }).success);
+    t.assert("settle body: reference <= 200, note <= 1000 (jovi-mall's bounds), both nullable", () =>
+        !SettleDeliveryFeeRefundSchema.safeParse({ method: 'cash', reference: 'x'.repeat(201) }).success
+        && !SettleDeliveryFeeRefundSchema.safeParse({ method: 'cash', note: 'x'.repeat(1001) }).success
+        && SettleDeliveryFeeRefundSchema.safeParse({ method: 'cash', reference: null, note: null }).success);
+    t.assert("the pinned methods equal jovi-mall's MANUAL_REFUND_SETTLEMENT_METHODS", () => {
+        const rules = read(JOVI, 'modules', 'delivery-fee-proposals', 'domain', 'customer-fee-change.rules.ts');
+        const paying = /MANUAL_REFUND_PAYMENT_METHODS = \[([^\]]*)\]/.exec(rules)?.[1] ?? '';
+        const covered = /MANUAL_REFUND_COVERED_METHOD = '([a-z_]+)'/.exec(rules)?.[1] ?? '';
+        const upstream = [...paying.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).concat(covered).sort().join(',');
+        return upstream.length > 0 && upstream === [...DELIVERY_FEE_REFUND_SETTLEMENT_METHODS].sort().join(',');
+    });
+
+    // ── The queue filter ──
+    const q = (status: 'manual_required' | 'settled' | 'all', extra: Record<string, string> = {}) =>
+        JSON.stringify(buildDeliveryFeeRefundFilter({ status, ...extra }));
+    t.assert('queue: manual_required is the default', () =>
+        ListDeliveryFeeRefundsQuerySchema.parse({}).status === 'manual_required');
+    t.assert('queue: an unknown status is a 400', () => !ListDeliveryFeeRefundsQuerySchema.safeParse({ status: 'owed' }).success);
+    t.assert('queue: manual_required matches the status alone', () => q('manual_required') === '{"status":"manual_required"}');
+    t.assert("queue: settled = completed WITH a settlement (automatic completions are not the queue's)", () =>
+        q('settled') === '{"status":"completed","settlement":{"$ne":null}}');
+    t.assert('queue: all leads with a status $in, so the {status, created_at} index selects', () =>
+        q('all').startsWith('{"status":{"$in":["manual_required","completed"]}'));
+    t.assert('queue: an order filter is ANDed in', () => q('manual_required', { orderId: OID }).includes('"$and"'));
+    t.assert('queue: a malformed id matches nothing rather than throwing', () =>
+        q('manual_required', { vendorId: 'nope' }).includes('"vendor_id":{"$in":[]}'));
+
+    // ── The DTO is jovi-mall's AdminDeliveryFeeRefundDto, field for field ──
+    const owed = {
+        _id: oid(OID), order_id: oid(OTHER_OID), customer_id: oid(OID), vendor_id: oid(OID),
+        amount: 1500, currency: 'XAF', status: 'manual_required', cause: 'fee_decrease',
+        note: 'COD', created_at: new Date('2026-10-04T10:00:00Z'), updated_at: new Date('2026-10-04T10:00:00Z'),
+    } as never;
+    const dto = toDeliveryFeeRefundDto(owed, 'WM-1');
+    t.assert('refund DTO: settleable while manual_required, no undefined anywhere', () =>
+        dto.settleable === true && dto.settlement === null && dto.orderNumber === 'WM-1'
+        && !JSON.stringify(dto, (_k, v) => (v === undefined ? '__UNDEF__' : v)).includes('__UNDEF__'));
+    t.assert("refund DTO: every key jovi-mall's admin DTO declares is present", () => {
+        const joviDto = read(JOVI, 'modules', 'delivery-fee-proposals', 'dto', 'delivery-fee-proposal.dto.ts');
+        const block = /export interface AdminDeliveryFeeRefundDto \{([\s\S]*?)\n\}/.exec(joviDto)?.[1] ?? '';
+        const keys = [...block.matchAll(/^  ([a-zA-Z]+)\??:/gm)].map((m) => m[1]);
+        return keys.length >= 10 && keys.every((k) => k in dto);
+    });
+    const settled = toDeliveryFeeRefundDto({
+        ...(owed as object), status: 'completed',
+        settlement: { method: 'cash', reference: null, note: null, settled_by_user_id: 'ad01', settled_by_source: 'admin', settled_by_name: 'Awa', settled_at: new Date() },
+    } as never, null);
+    t.assert('refund DTO: a settled row is not settleable and names who settled it', () =>
+        settled.settleable === false && settled.settlement?.settledBy.name === 'Awa' && settled.settlement.method === 'cash');
+
+    // ── Delegation: fail-closed audit, the internal route, refusals relayed ──
+    const gw = readCode(...MONEY_DIR, 'gateways', 'money.gateway.ts');
+    const settleFn = gw.slice(gw.indexOf('export async function settleDeliveryFeeRefund'));
+    t.assert('the settle goes through auditedDelegation (intent before the call — fail-closed)', () =>
+        /auditedDelegation\(\s*'orders\.delivery_fee_refund\.settle'/.test(settleFn));
+    t.assert("...to jovi-mall's internal settle route via platformRequest", () =>
+        settleFn.includes('platformRequest') && settleFn.includes('/delivery-fee-refunds/${refundId}/settle'));
+    t.assert("...filed against the ORDER, so it lands on the order's activity feed", () => settleFn.includes("type: 'order'"));
+    t.assert("...and the controller does not pre-judge settleability (jovi-mall's rule, relayed as PLATFORM_OPERATION_REJECTED)", () => {
+        const ctl = readCode(...MONEY_DIR, 'controllers', 'money.controller.ts');
+        const at = ctl.indexOf('static settleDeliveryFeeRefund');
+        const body = ctl.slice(at, at + 2500);
+        return at > 0 && !body.includes("'manual_required'") && !body.includes('auditedAttempt');
+    });
+    t.assert('jovi-mall still serves the settle route behind requireAdminCaller', () =>
+        read(JOVI, 'api', 'routes', 'internal-admin.routes.ts')
+            .includes("router.use('/delivery-fee-refunds', buildAdminDeliveryFeeRefundRouter([requireAdminCaller]))"));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('13. Per-order payments: the checkout charge vs the delivery top-ups (W-G2)');
+
+{
+    const pay = (over: Record<string, unknown>) => ({
+        _id: new ObjectId(), userId: oid(OTHER_OID), gateway: 'NOTCHPAY', method: 'MOBILE_MONEY',
+        gatewayRef: 'g', status: 'SUCCEEDED', amountSnapshot: 10_000, currencySnapshot: 'XAF',
+        orderId: oid(OID), createdAt: new Date('2026-10-01T00:00:00Z'), updatedAt: new Date(), ...over,
+    }) as never;
+    const primary = pay({ purpose: 'primary' });
+    const topUp = pay({
+        purpose: 'order_delivery_topup', amountSnapshot: 700, createdAt: new Date('2026-10-02T00:00:00Z'),
+        deliveryTopup: { shipmentId: oid(OTHER_OID), proposalId: oid(OID), appliedAt: null },
+    });
+    const failedTopUp = pay({ purpose: 'order_delivery_topup', amountSnapshot: 300, status: 'FAILED' });
+
+    t.assert('the checkout charge is never a top-up, even when the top-up is the only SUCCEEDED row', () => {
+        const split = splitOrderPayments([pay({ purpose: 'primary', status: 'PENDING' }), topUp]);
+        return split.checkout?.status === 'PENDING' && split.deliveryTopUps.length === 1;
+    });
+    t.assert('top-ups paid = SUCCEEDED top-ups only (a failed attempt moved nothing)', () =>
+        splitOrderPayments([primary, topUp, failedTopUp]).deliveryTopUpsPaid === 700);
+    t.assert('a top-up names the shipment and proposal it settles', () => {
+        const ref = splitOrderPayments([primary, topUp]).deliveryTopUps[0];
+        return ref.shipmentId === OTHER_OID && ref.proposalId === OID;
+    });
+    t.assert('a row with no purpose is a checkout charge (every row before the field existed)', () =>
+        splitOrderPayments([pay({})]).checkout !== null);
+    t.assert("a cart charge says its amount is the GROUP's", () =>
+        splitOrderPayments([pay({ orderId: undefined, orderIds: [oid(OID), oid(OTHER_OID)] })]).checkout?.sharedWithOtherOrders === true);
+    t.assert('the payment DTO exposes the top-up link (null on every other row)', () =>
+        toPaymentDto(topUp).settles.deliveryTopup?.proposalId === OID && toPaymentDto(primary).settles.deliveryTopup === null);
+    t.assert("the payment list's orderId filter INCLUDES top-ups (both linkages, no purpose clause)", () =>
+        !JSON.stringify(buildPaymentFilter({ orderId: OID } as never)).includes('purpose'));
+    t.assert('the payments projection carries deliveryTopup', () =>
+        readCode(...MONEY_DIR, 'repositories', 'payment-transaction.read.repository.ts').includes('deliveryTopup: 1'));
+
+    const refundRow = (over: Record<string, unknown>) => ({
+        _id: new ObjectId(), order_id: oid(OID), customer_id: oid(OID), vendor_id: oid(OID), currency: 'XAF',
+        cause: 'fee_decrease', created_at: new Date(), updated_at: new Date(), ...over,
+    });
+    const block = toOrderDeliveryFeeDto('WM-1', [primary, topUp], [], [
+        refundRow({ amount: 500, status: 'manual_required' }),
+        refundRow({ amount: 200, status: 'completed' }),
+        refundRow({ amount: 900, status: 'completed', settlement: { method: 'covered_by_order_refund', settled_by_user_id: 'a', settled_at: new Date() } }),
+        refundRow({ amount: 50, status: 'completed', settlement: { method: 'cash', settled_by_user_id: 'a', settled_at: new Date() } }),
+    ] as never);
+    t.assert('order block: owedManually counts manual_required rows only', () => block.owedManually === 500);
+    t.assert('order block: returned = gateway refunds + paid by hand, NOT covered_by_order_refund (already a refund_transaction)', () =>
+        block.returned === 250);
+}
 
 process.exit(t.finish());

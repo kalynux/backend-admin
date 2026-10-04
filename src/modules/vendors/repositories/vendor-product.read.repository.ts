@@ -25,7 +25,8 @@ export interface VendorProductReadModel extends Document {
     vendorId: ObjectId;
     title?: string;
     slug?: string;
-    category?: string;
+    /** 1–5 `product_categories` ids (2026-10-04). Named through `CategoryReadRepository`. */
+    categoryIds?: ObjectId[];
     type?: string;
     status: string;
     /** Absent on documents written before the field existed — readers coerce to 'advanced'. */
@@ -49,7 +50,7 @@ const PRODUCT_PROJECTION = {
     vendorId: 1,
     title: 1,
     slug: 1,
-    category: 1,
+    categoryIds: 1,
     type: 1,
     status: 1,
     mode: 1,

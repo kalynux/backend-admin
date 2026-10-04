@@ -362,7 +362,8 @@ behind it.
       "id": "66601122334455667788990a",
       "title": "Plantain — 1 kg",
       "slug": "plantain-1kg",
-      "category": "produce",
+      "categories": [{ "id": "66ff0c1e2a4b5c6d7e8f9a03", "name": "Produce", "slug": "produce" }],
+      "category": "Produce",            // ⚠ deprecated — categories[0].name (2026-10-04, see categories.md)
       "type": "physical",
       "status": "suspended",
       "mode": "simple",

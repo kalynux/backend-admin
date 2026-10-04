@@ -76,6 +76,9 @@ const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
     'vendors.read',
     'agents.read',
     'agencies.read',
+    // "Why is my product under the wrong shelf?" is a vendor ticket; reading the list is
+    // the lookup that answers it. Curating it (`catalog.categories.manage`) is tier 2.
+    'catalog.categories.read',
 
     /**
      * Resetting the customer bot's memory of one person's chat. It is the only `users.*` write
@@ -298,6 +301,7 @@ const ADMIN: readonly PermissionName[] = union(
     allInFamily('messaging'),
     allInFamily('users'),
     allInFamily('vendors'),
+    allInFamily('catalog'),
     // `allInFamily('customers')` was here. Deleted with the family at Phase 5 Part D
     // (ADR-017 D-1) — it was the tier-2 half of a grant that backed no route.
     allInFamily('shipments'),
@@ -378,6 +382,10 @@ const ADMIN: readonly PermissionName[] = union(
         // engages when the target is a Developer, which rule 2 already puts out of an
         // Admin's reach.
         'administrators.suspend',
+
+        // Destructive (a merge rewrites many vendors' products and cannot be undone), so the
+        // family sweep above leaves it out. Curating the shared list is operational work.
+        'catalog.categories.manage',
 
         // Named by hand because it is flagged `destructive`, so `allInFamily('audit')`
         // refuses to expand it. Granted to Admin because running a compliance export is

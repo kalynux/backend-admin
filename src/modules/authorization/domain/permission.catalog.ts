@@ -998,6 +998,26 @@ export const PERMISSION_CATALOG = Object.freeze({
         summary: 'Change a vendor’s platform-governed order settings — not their commission',
     },
 
+    // ═══ CATALOG ═══ the shared product-category list (2026-10-04) ═══════════
+    // Vendors create categories themselves while editing a product, through jovi-mall's
+    // duplicate check (PRODUCTION-READINESS/PRODUCT-CATEGORIES-PLAN.md). What slips past
+    // that check — a translation, a synonym — is cleaned up here.
+    'catalog.categories.read': {
+        family: 'catalog', action: 'read', phase: 6,
+        summary: 'List the shared product categories, with how many products use each',
+    },
+    /**
+     * ⚠ `destructive`, so `allInFamily('catalog')` does NOT sweep it into tier 2 — it is
+     * named by hand there. A merge rewrites every product holding the merged category,
+     * across every vendor, in one transaction, and there is no un-merge. Rename and delete
+     * ride the same permission because they are the same job (curating the list) and a
+     * delete is refused by jovi-mall while any live product holds the category.
+     */
+    'catalog.categories.manage': {
+        family: 'catalog', action: 'write', phase: 6, destructive: true,
+        summary: 'Rename, merge or delete a shared product category (a merge moves every product)',
+    },
+
     // ═══ CUSTOMERS ═══ DELETED at Phase 5 Part D — ADR-017 D-1 ═══════════════
     // `customers.read` and `customers.suspend` lived here, catalogued at `phase: 6` under a
     // header that already conceded the point (`no admin surface today`) and GRANTED anyway —

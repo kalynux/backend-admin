@@ -1,3 +1,4 @@
+import { OrderDeliveryFeeDto } from '../../money/read-models/delivery-fee.dto';
 import { FileDetail } from '../../../infra/storage/file-detail';
 import { productImageKey } from '../../vendors/repositories/product-media.read.repository';
 import { OrderReadModel } from '../repositories/order.read.repository';
@@ -88,6 +89,14 @@ export interface OrderDetailDto extends OrderListItemDto {
         components: Record<string, unknown> | null;
     } | null;
     items: OrderItemDto[];
+    /**
+     * Delivery-fee changes after checkout (jovi-mall ADR-A11 W-E/W-E2), READ-ONLY: the checkout
+     * charge vs the delivery top-ups the customer paid later, the fee proposals, and the ledger
+     * of delivery money owed back (with the manual rows the settle button acts on —
+     * `POST /money/delivery-fee-refunds/:refundId/settle`). `null` only when it was not read
+     * (never on `GET /orders/:orderId`).
+     */
+    deliveryFee: OrderDeliveryFeeDto | null;
 }
 
 export interface OrderItemDto {
@@ -249,6 +258,7 @@ export function toOrderDetailDto(
     order: OrderReadModel,
     names: { vendor: Map<string, string | null>; customer: Map<string, string | null> },
     itemContext: OrderItemContext = EMPTY_ITEM_CONTEXT,
+    deliveryFee: OrderDeliveryFeeDto | null = null,
 ): OrderDetailDto {
     const hold = order.dispute_hold;
     // Keyed on having ever been disputed, not on `active`: a resolved dispute is exactly
@@ -293,6 +303,7 @@ export function toOrderDetailDto(
             }
             : null,
         items: (order.items ?? []).map((item) => toOrderItemDto(item, itemContext)),
+        deliveryFee,
     };
 }
 

@@ -432,6 +432,19 @@ it. It carries no flag: `destructive` would make the boot check refuse it to Sup
 | `vendors.products.manage` | write | ● | ● | · | — | Take a vendor’s product off sale, or put it back, as platform oversight |
 | `vendors.settings.manage` | write | ● | ● | · | — | Change a vendor’s platform-governed order settings — not their commission |
 
+### `catalog`
+
+The shared product-category list (2026-10-04, [categories.md](categories.md)). Its own family:
+a category belongs to no vendor, and a merge rewrites many vendors' products at once.
+
+| Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
+|---|---|:-:|:-:|:-:|---|---|
+| `catalog.categories.read` | read | ● | ● | ● | — | List the shared product categories, with how many products use each |
+| `catalog.categories.manage` | write | ● | ● | · | destructive | Rename, merge or delete a shared product category (a merge moves every product) |
+
+`catalog.categories.manage` is **destructive**, so `allInFamily('catalog')` leaves it out and
+tier 2 names it by hand. A merge has no undo.
+
 > **The `customers` family is gone** (Phase 5 Part D, [ADR-017](../../docs/ADR-017-PHASE-17-CLOSEOUT.md)
 > D-1). `customers.read` and `customers.suspend` were catalogued, **granted**, and backed no
 > route — the only pair on the unbuilt list in that state, which is why they were deleted rather

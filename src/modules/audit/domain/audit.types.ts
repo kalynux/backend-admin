@@ -59,6 +59,9 @@ export const AUDIT_TARGET_TYPES = [
     // Platform records
     'order', 'shipment', 'remittance', 'deposit', 'discrepancy', 'payout', 'ticket',
     'article', 'plan',
+    // An entry of the shared product-category list (2026-10-04). Its own type: a merge is
+    // the row to find when a vendor asks why their product moved shelf.
+    'category',
     // This service's own records
     'administrator', 'admin_session', 'approval_request', 'audit_export',
     // Phase 12 operational targets. Both classify as `internal`: a flag flip and a worker

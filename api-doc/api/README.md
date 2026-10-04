@@ -38,6 +38,7 @@ the dashboard's behalf and returns the result in its own envelope.
 | [audit.md](audit.md) | `/audit` — the audit trail and exports |
 | [users.md](users.md) | `/users` — platform user directory, suspension, login identifiers |
 | [vendors.md](vendors.md) | `/vendors` — vendor directory, KYC, catalogue, suspension, settings |
+| [categories.md](categories.md) | `/categories` — the shared product-category list: usage, rename, merge, delete |
 | [agencies.md](agencies.md) | `/agencies` — delivery agencies, verification, rosters, contracts |
 | [agents.md](agents.md) | `/agents` — delivery agents, KYC, tracking, COD threshold, bans, transfer |
 | [verification.md](verification.md) | **The evidence behind a KYC verdict**, for all three parties — identity scans, the selfie, the geocoded addresses, the sketches. ⚠ Read the "the backend grades nothing" section before building the badge: there is deliberately no `estimatedVerdict` field, and the required/optional rules are the dashboard's |

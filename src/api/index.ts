@@ -112,6 +112,12 @@ apiV1.use('/users', userRoutes);
 import { vendorRoutes } from '../modules/vendors/routes/vendor.routes';
 apiV1.use('/vendors', vendorRoutes);
 
+// The shared product-category list (2026-10-04). Same split again: the list is a direct
+// read, and rename / merge / delete are delegated — a merge moves every product holding the
+// category and records the merged spelling as an alias jovi-mall's duplicate check reads.
+import { categoryRoutes } from '../modules/categories/routes/category.routes';
+apiV1.use('/categories', categoryRoutes);
+
 // The delivery network — agencies and delivery agents, two prefixes and one domain.
 //
 // It refines the read half of the split above rather than repeating it. The rule

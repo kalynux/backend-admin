@@ -65,9 +65,22 @@ export function matchRemittance(collection: CollectionRow, confirmed: Remittance
 const firstStatusAt = (s: ShipmentRow, ...statuses: string[]) =>
     s.status_history?.find((h) => statuses.includes(h.status))?.changed_at ?? null;
 
-/** The settled payment for an order: SUCCEEDED/REFUNDED over anything still open. */
-function paymentFor(orderId: ObjectId, rows: PaymentRow[]): PaymentRow | null {
-    const mine = rows.filter((p) => p.orderId?.equals(orderId) || p.orderIds?.some((o) => o.equals(orderId)));
+/**
+ * The settled CHECKOUT payment for an order: SUCCEEDED/REFUNDED over anything still open.
+ *
+ * ⚠ Excludes `purpose: 'order_delivery_topup'` (jovi-mall ADR-A11 W-E, decided W-G2). A top-up
+ * carries `orderId` exactly like a single-order payment, and this row's meaning is "how the
+ * order was paid" — its means, reference, payer and paid-at. A top-up is a second, later charge
+ * for delivery alone; picked here it would print the top-up's gateway reference as the order's.
+ * What the customer paid IN TOTAL is not lost: the row's `total` is `order.total_amount`, which
+ * jovi-mall grows by every applied top-up (`delivery-fee-topup.service.ts`).
+ */
+export function paymentFor(orderId: ObjectId, rows: PaymentRow[]): PaymentRow | null {
+    const mine = rows.filter(
+        (p) =>
+            p.purpose !== 'order_delivery_topup' &&
+            (p.orderId?.equals(orderId) || p.orderIds?.some((o) => o.equals(orderId))),
+    );
     return mine.find((p) => p.status === 'SUCCEEDED' || p.status === 'REFUNDED') ?? mine[mine.length - 1] ?? null;
 }
 

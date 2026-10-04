@@ -461,6 +461,7 @@ Search the platform's logs.
 | `since` / `until` | ISO-8601 instant with zone | |
 | `requestId` | string, 1–200 | |
 | `q` | string, **1–100** | Free text. **Bounded as a pattern-length defence** — the term is escaped and applied literally, and an unbounded one would be a scan amplifier against a collection with no text index |
+| `actorId` | 24-hex id | Every line one actor's requests produced. Matches the line's `actorId` (the **user** id, or an administrator id) **or** its `actorProfileId` (the **vendor / agency / agent / customer** id) — so the id on either the user's page or the party's page works. Combine with `level=warn` to get one person's failures. Unindexed: a quiet actor scans further back through the capped collection |
 | `source` | `ring` \| `persisted` | |
 | `limit` | integer | 1–500 |
 | `before` | 24-char id | A cursor, not an offset |
@@ -499,6 +500,11 @@ needs is to know which keys are guaranteed and that the rest are the writer's ow
   "level": "error",                      // always
   "msg": "…",                            // always
   "requestId": "…" | null,
+  "actorId": "…" | null,                 // the user (or administrator) whose request wrote it
+  "actorSource": "platform",             // "platform" | "admin" — which namespace actorId is in
+  "actorRole": "vendor",                 // customer | vendor | agency | agent | admin
+  "actorName": "Ama Mensah",             // the person, read off their profile (max 120 chars)
+  "actorProfileId": "…",                 // the vendor / agency / agent / customer id
   "err": { "type": "…", "message": "…", "stack": "…" },   // when the line carries an error
   "res": { "statusCode": 500 },                            // when the line closes a request
   "…": "any further keys the writer attached"
@@ -511,6 +517,8 @@ needs is to know which keys are guaranteed and that the rest are the writer's ow
 | `level` | ✅ | ⚠️ **The `level` filter is at-or-above**, so `?level=warn` returns `warn`, `error` and `fatal` |
 | `msg` | ✅ | |
 | `requestId` | — | Present on request-scoped lines; correlates with the `X-Request-Id` a client sent |
+| `actorId` | — | Present once the request was authenticated. ⚠ A **user id** when `actorSource` is `platform`, a wi-admin **administrator id** when it is `admin` — never label it by guessing |
+| `actorSource` · `actorRole` · `actorName` · `actorProfileId` | — | Stamped beside `actorId` from the profile the platform already loaded. `actorName` is a vendor's or agency's **display name** (the person), not the shop's business name. Any of them may be absent on lines written before this was added |
 | `err` | — | `type`, `message`, `stack` |
 | `res` | — | `statusCode` |
 | anything else | — | **The writer's context.** Render it raw as text; do not assume a shape |
