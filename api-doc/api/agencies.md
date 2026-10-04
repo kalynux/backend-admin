@@ -170,6 +170,8 @@ Every list field, plus:
           "rtoFee": 1200,
           "peakSeasonSurcharge": null
         },
+        "maxFeePerShipment": 5000,
+        "acceptsCashDeliveryFee": false,
         "notes": null
       },
       "returns": {
@@ -205,6 +207,9 @@ Every list field, plus:
 | `policies` | The agency's own terms, read-only here. `null` when unset. **camelCase and field-by-field since the dashboard-request round** — it previously shipped jovi-mall's raw sub-document, four nested blocks of `snake_case`. Each inner block is independently `null` when the agency has stored none |
 | `policies.pricing.storageBased.enabled: false` | **The agency does not offer warehousing at all** — different from offering it at zero. Say so rather than printing a rate nobody agreed to |
 | `policies.pricing.additionalFees.codHandlingFee.type` | `percentage` or `fixed`, and it decides how `value` reads |
+| **`policies.pricing.maxFeePerShipment`** | Ceiling on **one shipment's posted delivery fee** (jovi-mall ADR-A11, 2026-10-03), applied last by the fee formula. **`null` means no ceiling.** It caps the formula's price only — a per-shipment fee proposal may exceed it, approved by whoever pays (the vendor, or the customer on a customer-paid shipment) |
+| **`policies.pricing.acceptsCashDeliveryFee`** | Whether the agency lets a customer pay the delivery fee **in cash to the rider** on an otherwise online-paid order (ADR-A11 D-7). `false` when never set |
+| `policies.pricing.pickupBased.additionalPerKg` · `.outOfRegionSurcharge` | **Charged since ADR-A11.** The posted fee now grows with the shipment's weight (`max(1, ceil(kg))`, an item with no recorded weight counting as 1 kg per unit) and with a delivery outside the pickup's region. Before, only `baseRateFirstKg` was charged |
 | `policies.cod.maxOrderAmount` | **`null` means no ceiling**, not zero. Zero would block every COD order |
 | `policies.damage.inspector` · `.investigationFee` | **Administrator-controlled upstream**, not the agency's to set — which is why they can differ from everything else in the block |
 | `policies.documents[]` | Up to two links to off-platform term sheets. URLs to somewhere else entirely: render them as links, and note this service never fetches or previews them |

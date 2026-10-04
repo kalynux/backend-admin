@@ -350,6 +350,9 @@ const ADMIN: readonly PermissionName[] = union(
         'content.articles.delete',
         'content.authors.delete',
         'shipments.cancel',
+        // jovi-mall ADR-A10 (owner decision O-4): tiers 1 + 2, never Support. `destructive`
+        // keeps it out of `allInFamily('users')`, so it is named here.
+        'users.close',
 
         /**
          * Named at Phase 11, when the route that needs it was built.

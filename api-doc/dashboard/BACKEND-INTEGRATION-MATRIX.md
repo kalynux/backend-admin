@@ -188,7 +188,7 @@ is computed for you.
 **Detail:** `store|null`, `account|null`, `suspension|null` (only when `status === "inactive"`),
 `verification { status, verified, rejectionReason, verifiedAt, reviewedBy|null }`, `contact`,
 `addresses[]` (**never payout details**), `policies` (presence, not content),
-`settings { autoRedirectOrdersToAgency, autoRedirectThresholdAmount, autoCancelUnpaidDays, notifyDaysBeforeExpiry }`,
+`settings { autoRedirectOrdersToAgency, autoRedirectThresholdAmount, autoCancelUnpaidDays, notifyDaysBeforeExpiry, deliveryTerms { mode, freeAboveAmount } }` (`deliveryTerms` read-only),
 `defaultDeliveryAgencyId`, `counts { products{}, orders{}, agencyConnections{} }`.
 
 **Products sub-list:** filters `search`, `status`, `type`, `mode`, and **`suspensionReason`** — the
@@ -386,7 +386,10 @@ orthogonal to fulfilment), `from`/`to`.
 **Detail:** `priceBreakdown`, `paymentIntentId`, `dispute` (**`null` when never disputed** — absent
 rather than a block of nulls), `completion { confirmedAt, confirmedBy, auto }`, **`deliveryAddress`
 (textual only** — coordinates and raw customer input are excluded by projection *and* mapping),
-`items[]` each with `delivery { agencyId, shipmentId, status, freeDelivery, hold, pickup }`.
+`items[]` each with `weightGrams`, `weightSource` and `delivery { agencyId, shipmentId, status, hold, pickup }`.
+**Customer-paid delivery (2026-10-04):** `deliveryPayer` (list + detail), `priceBreakdown.delivery`,
+`deliveryPayerReason`, `freeDeliveryShortfall`; `items[].delivery.freeDelivery` is **gone** — see
+`FRONTEND-CHANGELOG-customer-paid-delivery.md`.
 
 **Refund flow — build it in this order:**
 1. `GET /refund-eligibility` → two nested ceilings: the outer `maxRefundable`/`remaining` is **the

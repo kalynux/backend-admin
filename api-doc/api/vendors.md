@@ -260,7 +260,8 @@ operational tally.
       "autoRedirectOrdersToAgency": false,
       "autoRedirectThresholdAmount": null,
       "autoCancelUnpaidDays": 3,
-      "notifyDaysBeforeExpiry": 7
+      "notifyDaysBeforeExpiry": 7,
+      "deliveryTerms": { "mode": "above", "freeAboveAmount": 25000 }
     },
 
     "defaultDeliveryAgencyId": "665c0011223344556677889a",
@@ -289,6 +290,8 @@ operational tally.
 | `policies` | **Content as well as presence, since the dashboard-request round.** The three booleans remain and are now *derived* from the content; `returns`, `cancellation` and `support` carry the terms themselves, each `null` when the vendor has stored none. See the field tables below |
 | `policies.returns.inspector` | **Administrator-controlled upstream, never vendor input** — it names who adjudicates a claim, not a term the vendor set. The same field, with the same caveat, exists on an agency's `damage` block |
 | `settings` | jovi-mall's schema defaults where no document exists — `vendor_settings` is created lazily, so an untouched vendor shows defaults rather than nulls |
+| **`settings.deliveryTerms`** | **Who pays delivery for this shop's part of a basket** (jovi-mall ADR-A11, 2026-10-03). `mode`: `always` — the shop pays (free delivery; **the default** for every shop that never set it) · `never` — the customer pays · `above` — free when the shop's part of the basket reaches `freeAboveAmount`, otherwise the customer pays. `freeAboveAmount` is non-null only for `above`. **Read-only here** — the vendor sets it in their own dashboard; there is no admin write, and the settings `PATCH` below refuses the key |
+| `settings.autoRedirectThresholdAmount` | Since ADR-A11 compared with the order's **goods**, never with a total that includes customer-paid delivery |
 | `counts.products` | Keyed by status. ⚠️ **Every key is always present, `0` included** — the block is built from a fixed set, not from the statuses that happened to occur. (This table used to say "only non-zero statuses appear", and the example omitted `total` and `pendingReview`. Both were wrong; corrected with BR-018) |
 | **`counts.agencyConnections`** | The seven integers are a `$group` over **exactly the population** [`GET /vendors/:vendorId/agencies`](#get-vendorsvendoridagencies) returns as rows — one `vendor_agency_connections` document each, same collection, same vendor scope, no status filter on either. So `total` here equals `meta.total` on an unfiltered first page there, and `active` / `pending` / `pausedReapproval` / `rejected` / `withdrawn` / `terminated` each equal `meta.total` with the matching `?status=`. An operator reading both screens is reading one set of documents twice. Every key is always present here too |
 

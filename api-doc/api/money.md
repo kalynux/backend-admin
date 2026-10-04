@@ -311,6 +311,7 @@ ways: **why has this money not been released?**
 | Field | Notes |
 |---|---|
 | `snapshots` | **The split's inputs, frozen at the moment it ran.** `amount` alone says what a beneficiary got; with the gross and the rate it says whether that was *right* |
+| `snapshots.gross` | On `order` and `cod_collection` rows: the **goods** gross. Since jovi-mall ADR-A11 (customer-paid delivery, 2026-10-03) it is **not** the order total or the COD cash expected, either of which may include delivery the customer paid. On a `shipment` row it is the delivery fee reserved |
 | **`release`** | **The reason this endpoint exists** — none of these four fields had an admin surface before |
 | `release.holdReleaseAt` | `completedAt + HOLD_DAYS`. **`null` means the source has not completed at all** |
 | `release.requiresCashSettlement` | COD: the money is physical cash, and release waits for it to arrive |

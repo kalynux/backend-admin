@@ -21,6 +21,7 @@ import {
     VendorConnectionReadRepository,
     VendorOrderReadRepository,
     VendorSettingsReadRepository,
+    vendorDeliveryTermsOf,
 } from '../repositories/vendor-context.read.repository';
 import {
     resolveDeliveryAgencyId,
@@ -482,6 +483,9 @@ export class VendorController {
                 autoRedirectThresholdAmount: vendorSettings?.auto_redirect_threshold_amount ?? null,
                 autoCancelUnpaidDays: vendorSettings?.auto_cancel_unpaid_days ?? 3,
                 notifyDaysBeforeExpiry: vendorSettings?.notify_days_before_expiry ?? 7,
+                // Who pays delivery for this shop (ADR-A11). Read-only here: the vendor sets it
+                // (`PUT /api/vendor/profile/delivery-terms`), and no admin write exists.
+                deliveryTerms: vendorDeliveryTermsOf(vendorSettings?.delivery_terms),
             },
 
             defaultDeliveryAgencyId: vendor.default_delivery_agency_id?.toString() ?? null,

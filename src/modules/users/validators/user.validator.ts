@@ -107,6 +107,22 @@ export const UpdateUserSchema = z
         message: 'Nothing to update — send `email`, `phone`, or both',
     });
 
+/**
+ * Role closure — jovi-mall ADR-A10. `:role` is one of the four platform roles; the user
+ * does not have to hold it for the URL to parse (jovi-mall answers that, with its own 422).
+ */
+export const RoleClosureParamsSchema = z.object({
+    userId: z.string().regex(/^[a-f0-9]{24}$/i, 'userId must be a 24-character hex id'),
+    role: z.enum(USER_ROLES),
+});
+
+/** The reason is shown to the user in the closure notice, so it is required. */
+export const RequestRoleClosureSchema = z.object({
+    reason: reasonText('A reason is required — the user is shown it in the closure notice'),
+}).strict();
+
+export type RequestRoleClosureBody = z.infer<typeof RequestRoleClosureSchema>;
+
 export const SuspendUserSchema = z.object({
     reason: reasonText('A reason is required to suspend an account'),
 });

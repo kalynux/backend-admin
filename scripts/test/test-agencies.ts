@@ -40,6 +40,7 @@ import {
     VerifyAgencySchema,
 } from '../../src/modules/agencies/validators/agency.validator';
 import { buildAgencyFilter } from '../../src/modules/agencies/repositories/agency.read.repository';
+import { toAgencyPoliciesDto } from '../../src/modules/agencies/read-models/agency-policies.dto';
 import { buildContractFilter } from '../../src/modules/agencies/repositories/contract.read.repository';
 import { AUDIT_CATALOG, auditSpec, isAuditAction } from '../../src/modules/audit/domain/audit.catalog';
 import { subjectClassOf } from '../../src/modules/audit/domain/audit-subject';
@@ -468,6 +469,18 @@ t.assert('the deactivation reason is audited, not forwarded', () => {
     const source = readCode(...AGENCY_GATEWAY);
     const block = source.slice(source.indexOf('export async function deactivate'));
     return block.includes('{ reason }') && !/body:\s*\{\s*reason/.test(block);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('Customer-paid delivery — the two ADR-A11 pricing fields');
+
+t.assert('pricing carries maxFeePerShipment and acceptsCashDeliveryFee', () => {
+    const dto = toAgencyPoliciesDto({ pricing: { max_fee_per_shipment: 5_000, accepts_cash_delivery_fee: true } });
+    return dto?.pricing?.maxFeePerShipment === 5_000 && dto?.pricing?.acceptsCashDeliveryFee === true;
+});
+t.assert('an agency that never set them reads "no ceiling" and "no cash fee"', () => {
+    const dto = toAgencyPoliciesDto({ pricing: {} });
+    return dto?.pricing?.maxFeePerShipment === null && dto?.pricing?.acceptsCashDeliveryFee === false;
 });
 
 process.exit(t.finish());

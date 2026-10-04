@@ -74,6 +74,17 @@ export interface AgencyPoliciesDto {
             /** Optional; `null` means the agency levies none. */
             peakSeasonSurcharge: number | null;
         } | null;
+        /**
+         * Ceiling on ONE shipment's posted delivery fee (jovi-mall ADR-A11). `null` = no ceiling.
+         * It caps the formula's price only — a per-shipment fee proposal may exceed it, with the
+         * payer's approval.
+         */
+        maxFeePerShipment: number | null;
+        /**
+         * Whether this agency lets a customer pay the delivery fee in CASH to the rider on an
+         * otherwise online-paid order (ADR-A11 D-7). `false` when never set.
+         */
+        acceptsCashDeliveryFee: boolean;
         notes: string | null;
     } | null;
     returns: {
@@ -150,6 +161,8 @@ export function toAgencyPoliciesDto(raw: Raw): AgencyPoliciesDto | null {
                             peakSeasonSurcharge: num(additionalFees.peak_season_surcharge),
                         }
                       : null,
+                  maxFeePerShipment: num(pricing.max_fee_per_shipment),
+                  acceptsCashDeliveryFee: bool(pricing.accepts_cash_delivery_fee),
                   notes: str(pricing.notes),
               }
             : null,

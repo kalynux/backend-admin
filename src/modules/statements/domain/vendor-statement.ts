@@ -18,7 +18,14 @@ import {
     StatementShipmentRepository,
     StatementTimelineRepository,
 } from '../repositories/statement.read.repository';
-import { apportionBargainFee, vendorSaleBreakdown, VendorSaleBreakdown } from './money-breakdown';
+import {
+    apportionBargainFee,
+    collectionCashBreakdown,
+    customerPaidDeliveryFee,
+    vendorBorneDeliveryFee,
+    vendorSaleBreakdown,
+    VendorSaleBreakdown,
+} from './money-breakdown';
 import { maskPhone } from './statement-masking';
 import { allocationStatusLabel, col, idOf, loadNames, NameBook, sumOf } from './statement-common';
 import { StatementRow, StatementSection, SummaryLine } from './statement.types';
@@ -140,7 +147,9 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
         if (a.source_type === 'cod_collection') {
             const shipmentId = collectionById.get(idOf(a.source_id))?.shipment_id;
             const s = shipmentId ? orderShipments.find((x) => x._id.equals(shipmentId)) : undefined;
-            deliveryFeeSnapshot = s?.delivery_fee_snapshot ?? null;
+            // The VENDOR-BORNE part, not the agency's whole fee: on a customer-paid shipment the
+            // customer's cash covered the fee and the residual holds only the COD fee (ADR-A11).
+            deliveryFeeSnapshot = s ? vendorBorneDeliveryFee(s) : null;
         }
         breakdowns.set(
             idOf(a._id),
@@ -175,8 +184,10 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
         title: 'Sales and deductions',
         description:
             'One row per payment received: an online order when it was paid, a cash-on-delivery shipment when the agent ' +
-            'collected the cash. Net = gross − bargain fee − commission − delivery fee − COD fee, and is what was credited ' +
-            'to your earnings balance.',
+            'collected the cash. Gross is what the goods sold for — delivery a customer paid is not part of it. ' +
+            'Net = gross − bargain fee − commission − delivery fee − COD fee, and is what was credited to your earnings ' +
+            'balance. "Delivery fee" is the part of the delivery cost YOUR shop paid: the whole fee when your shop offers ' +
+            'free delivery, nothing when the customer paid it.',
         columns: [
             col.at('receivedAt', 'Money received'),
             col.text('order', 'Order', 18),
@@ -185,7 +196,7 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
             col.money('bargainFee', 'Bargain fee'),
             col.money('commission', 'Commission'),
             col.text('commissionPct', 'Comm. %', 7),
-            col.money('deliveryFee', 'Delivery fee'),
+            col.money('deliveryFee', 'Delivery fee (yours)'),
             col.money('codFee', 'COD fee'),
             col.money('net', 'Net to you'),
             col.text('status', 'Status', 20),
@@ -217,7 +228,8 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
         title: 'Orders',
         description:
             'Every order behind a movement in this period. Phone numbers are partly hidden. "Paid by" is the person ' +
-            'who completed the payment where it was recorded; see the notes on the summary page.',
+            'who completed the payment where it was recorded; see the notes on the summary page. "Order total" is what the ' +
+            'customer paid: the goods plus any delivery the customer paid for.',
         columns: [
             col.text('order', 'Order', 18),
             col.at('placedAt', 'Placed'),
@@ -229,7 +241,10 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
             col.at('paidAt', 'Paid'),
             col.text('payer', 'Paid by', 22),
             col.text('reference', 'Payment reference', 22),
+            col.money('goods', 'Goods'),
+            col.money('customerDelivery', 'Delivery (customer)'),
             col.money('total', 'Order total'),
+            col.text('deliveryPayer', 'Delivery paid by', 14),
             col.text('fulfilment', 'Fulfilment', 12),
             col.at('completedAt', 'Completed'),
             col.text('agencies', 'Agency', 18),
@@ -291,7 +306,9 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
     const deliveriesSection: StatementSection = {
         key: 'deliveries',
         title: 'Deliveries',
-        description: 'Every shipment of those orders: who carried it, what it was charged, and when it moved.',
+        description:
+            'Every shipment of those orders: who carried it, what the agency charged for it, who paid that fee, and when ' +
+            'it moved. "Your share" is what your shop paid of the fee; the rest was paid by the customer.',
         columns: [
             col.text('order', 'Order', 18),
             col.text('tracking', 'Tracking #', 16),
@@ -299,6 +316,9 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
             col.text('agent', 'Agent', 18),
             col.text('status', 'Status', 14),
             col.money('fee', 'Delivery fee'),
+            col.text('payer', 'Paid by', 10),
+            col.money('customerPaid', 'Customer paid'),
+            col.money('vendorShare', 'Your share'),
             col.at('assignedAt', 'Assigned'),
             col.at('pickedUpAt', 'Picked up'),
             col.at('deliveredAt', 'Delivered'),
@@ -311,11 +331,15 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
             agent: names.agent(s.agent_id),
             status: s.status,
             fee: s.delivery_fee_snapshot ?? null,
+            payer: payerLabel(s.delivery_payer),
+            customerPaid: customerPaidDeliveryFee(s),
+            vendorShare: vendorBorneDeliveryFee(s),
             assignedAt: firstStatusAt(s, 'assigned'),
             pickedUpAt: firstStatusAt(s, 'picked_up'),
             deliveredAt: firstStatusAt(s, 'agent_delivered', 'delivered'),
             endedOtherwiseAt: firstStatusAt(s, 'returned', 'failed'),
         })),
+        totals: ['fee', 'customerPaid', 'vendorShare'],
         pdf: 'xlsx-only',
     };
 
@@ -324,10 +348,13 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
         title: 'Cash on delivery — collection and remittance',
         description:
             'For each cash-on-delivery shipment: who collected the cash, and when the agency settled it to the platform. ' +
-            'Your earnings for a COD sale become available only after that settlement.',
+            'Your earnings for a COD sale become available only after that settlement. "Amount" is all the cash the agent ' +
+            'collected: the goods plus any delivery fee the customer paid in cash, which goes to the delivery side, not to you.',
         columns: [
             col.text('order', 'Order', 18),
             col.text('agent', 'Collected by', 18),
+            col.money('goods', 'Goods'),
+            col.money('deliveryFee', 'Delivery fee'),
             col.money('amount', 'Amount'),
             col.text('status', 'Status', 11),
             col.at('collectedAt', 'Collected'),
@@ -339,9 +366,12 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
         ],
         rows: orderCollections.map((c) => {
             const r = matchRemittance(c, confirmedRemittances);
+            const cash = collectionCashBreakdown(c);
             return {
                 order: orderNo(c.order_id),
                 agent: names.agent(c.agent_id),
+                goods: cash.itemsAmount,
+                deliveryFee: cash.deliveryFeeAmount,
                 amount: c.expected_amount,
                 status: c.status,
                 collectedAt: c.collected_at ?? null,
@@ -352,7 +382,7 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
                 confirmedBy: r?.resolved_by_name ?? null,
             };
         }),
-        totals: ['amount'],
+        totals: ['goods', 'deliveryFee', 'amount'],
     };
 
     const adjustmentsSection: StatementSection = {
@@ -489,10 +519,16 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
         { label: 'Net earnings in period', value: total('net') + bookingNet + credited - reversedTotal, kind: 'money' },
         { label: 'Orders with money received', value: receivedAtByOrder.size, kind: 'int' },
         { label: 'Refunds paid to customers', value: sumOf(refundRows.filter((r) => r.status === 'completed'), (r) => r.refundAmount), kind: 'money' },
+        // Informational, outside the net arithmetic above: delivery the customers paid on the
+        // orders behind this period's movements. It went to the delivery side, never to the shop.
+        { label: 'Delivery paid by customers (to agencies)', value: sumOf(touchedOrders, (o) => customerDeliveryOf(o)), kind: 'money' },
     ];
 
     const notes = [
         'Net revenue = gross − bargain fee − commission − delivery fee − COD fee, read from the amounts recorded when each payment was split.',
+        'Gross is the goods only. Where your shop\'s delivery terms made the customer pay delivery, that fee is shown in the order and ' +
+            'delivery tables but is not part of your gross or your net: it was paid to the delivery agency, and the "Delivery fee" ' +
+            'deduction is only the part your shop paid.',
         '"Paid by": the platform began recording the payer separately from the customer on shareable payment links in September 2026. ' +
             'Earlier online payments show the ordering customer; cash-on-delivery sales show the agent who collected the cash.',
         '"Listed price" (the price shown before bargaining) is recorded from September 2026; earlier lines leave it blank.',
@@ -510,6 +546,29 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
         notes,
         currency: created[0]?.currency ?? reversed[0]?.currency ?? null,
     };
+}
+
+/** Who paid a delivery, in words. `null`/absent predates customer-paid delivery and IS the shop. */
+function payerLabel(payer: 'vendor' | 'customer' | null | undefined): string {
+    return payer === 'customer' ? 'Customer' : 'Your shop';
+}
+
+/**
+ * What the customer was charged for delivery on this order — `price_breakdown.delivery`, 0 when
+ * absent (every order before ADR-A11, and every vendor-paid one).
+ */
+function customerDeliveryOf(o: OrderRow): number {
+    const d = o.price_breakdown?.delivery;
+    return typeof d === 'number' && Number.isFinite(d) && d > 0 ? d : 0;
+}
+
+/**
+ * The order's goods — mirrors jovi-mall's `orderItemsGrossOf`: `price_breakdown.base` when
+ * written (every order checkout produced), else the total minus customer-paid delivery.
+ */
+function orderGoodsOf(o: OrderRow): number {
+    const base = o.price_breakdown?.base;
+    return typeof base === 'number' && Number.isFinite(base) ? base : o.total_amount - customerDeliveryOf(o);
 }
 
 function orderRow(
@@ -546,7 +605,10 @@ function orderRow(
         paidAt: isCod ? lastCollected ?? null : payment?.paidAt ?? receivedAtByOrder.get(idOf(o._id)) ?? null,
         payer,
         reference: payment?.gatewayRef || payment?.merchantRef || null,
+        goods: orderGoodsOf(o),
+        customerDelivery: customerDeliveryOf(o),
         total: o.total_amount,
+        deliveryPayer: o.order_type === 'digital' ? null : payerLabel(o.delivery_payer),
         fulfilment: o.fulfillment_status,
         completedAt: o.completion?.confirmed_at ?? null,
         agencies: [...new Set(mine.map((s) => names.agency(s.agency_id)))].join(', ') || null,

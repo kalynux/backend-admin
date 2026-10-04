@@ -1,5 +1,7 @@
 # `/users` — platform user management
 
+**Amended 2026-10-04.** Three routes for **role closure** (jovi-mall ADR-A10): an administrator holding the new `users.close` asks a user to close ONE role, and the user confirms or declines it themselves. See [the section at the end](#role-closure). Pinned by `npm run test:users`.
+
 **Amended 2026-09-22.** A ninth route, `POST /users/:userId/bot-memory/reset`, was added under the new permission `users.bot_memory.reset`. It is the one write on this surface that **all three levels** hold. See [the section at the end](#the-customer-bots-memory). Checked against the route manifest and `tier-grants.ts`, and pinned by `npm run test:users` § 7–8.
 
 **Verified against source on 2026-09-08** — all eight routes and their guards against the live route manifest; every query parameter, bound and sort allowlist against `users/validators/user.validator.ts` and `core/validation/common.schemas.ts`; the read DTO and the `profiles`/`missing` shape against `users/controllers/user.controller.ts:54-116` and `users/repositories/role-profile.read.repository.ts`; the write responses against `users/gateways/user.gateway.ts`; and the `details` exposure on the 429 against `core/errors/detail-policy.ts:156`.
@@ -22,6 +24,9 @@ Design record: [`../../docs/ADR-007-USER-MANAGEMENT.md`](../../docs/ADR-007-USER
 | `POST` | `/users/:userId/password-reset-link` | `users.password.reset` | **delegated** | ✅ |
 | `POST` | `/users/:userId/login-link` | `users.login_link.send` | **delegated** | ✅ |
 | `POST` | `/users/:userId/bot-memory/reset` | `users.bot_memory.reset` | **delegated** | ✅ |
+| `GET` | `/users/:userId/closure-requests` | `users.read` | direct read | — |
+| `POST` | `/users/:userId/roles/:role/closure` | `users.close` | **delegated** | ✅ |
+| `DELETE` | `/users/:userId/roles/:role/closure` | `users.close` | **delegated** | ✅ |
 
 Reads go straight to the platform database; every write is executed by jovi-mall. A suspension
 is only meaningful because jovi-mall's auth path refuses a non-active account, and a login
@@ -34,7 +39,7 @@ reset, which every level holds. Every other write here is **Admin and above**.
 
 | Missing | Why |
 |---|---|
-| **Role changes** (`users.roles.manage` exists with no route) | Adding a role provisions a role entity (a Store, a Magazin); removing one strands every record that entity owns. There is no code path in jovi-mall that removes a role, and inventing the semantics from the admin side is how a vendor's products end up belonging to nobody |
+| **Role changes** (`users.roles.manage` exists with no route). *Closing* one role at the user's own confirmation is built, below; adding or silently removing one is not | Adding a role provisions a role entity (a Store, a Magazin); removing one strands every record that entity owns. There is no code path in jovi-mall that removes a role, and inventing the semantics from the admin side is how a vendor's products end up belonging to nobody |
 | **Forced sign-out** (`users.sessions.revoke`) | jovi-mall issues stateless JWTs with no session store — there is nothing to revoke. Suspension covers the need: it blocks the next request on every device |
 | **Setting a password directly** | An administrator never learns or chooses a platform party's credential. The two routes below send the person a link and let them choose it themselves. Contrast `POST /administrators/:adminId/password-reset`, which *does* generate a password and shows it once — because an administrator has no email, phone or chat on file to be reached on, and a platform party has three |
 
@@ -644,3 +649,77 @@ reaches the client. Two presses mean two resets and two audit rows, and neither 
 
 The row is written **before** jovi-mall is called. If it cannot be written, the reset does not
 happen.
+
+## Role closure
+
+Design record: jovi-mall [`docs/ADR-A10-ROLE-CLOSURE.md`](../../../jovi-mall/docs/ADR-A10-ROLE-CLOSURE.md).
+
+**An administrator ASKS; only the user can close.** Closing is anonymise-and-retain and
+irreversible, so these routes create a *request*. The user gets a notice and answers it signed in
+as that role, within **7 days**. Nothing about the role changes until they confirm. **No route
+here can confirm**, and `test:users` fails if one appears.
+
+`users.close` is `destructive`, held by **Admin and Developer**, never Support. The list is a
+read on `users.read`, so Support can see that a request exists and how it was answered, which
+is the conversation they will be having.
+
+### `POST /users/:userId/roles/:role/closure`
+
+`:role` is `customer` · `vendor` · `agency` · `agent`. The body is strict:
+
+```json
+{ "reason": "Owner asked by email to close the shop" }
+```
+
+The reason is **shown to the user** in the notice. `201` answers with the request (shape below).
+jovi-mall refuses up front on anything the user's confirm would refuse, so the administrator
+learns it now:
+
+| Status | `details.platformCode` | When |
+|---|---|---|
+| 422 | `ROLE_CLOSURE_BLOCKED` | Live work or money on the role. jovi-mall's `details.blockers` lists them (`[{ code, count, amount?, currency? }]`; codes in jovi-mall `api-doc/me/role-closure.md`) |
+| 409 | `ROLE_CLOSURE_ALREADY_PENDING` | One is already waiting |
+| 422 | `ROLE_CLOSURE_ROLE_NOT_HELD` | The user does not hold that role |
+| 409 | `ROLE_CLOSED` | That role is already closed |
+| 409 | `USER_STATUS_CONFLICT` | The account is suspended or closed |
+
+Holding **other roles is not a refusal**. Closing a vendor role leaves the same person's customer
+role working. Closing their **last** role closes the whole account.
+
+### `DELETE /users/:userId/roles/:role/closure`
+
+Withdraws the pending request. Returns `404` with `ROLE_CLOSURE_REQUEST_NOT_FOUND` when there is
+none, including when the user answered first.
+
+### `GET /users/:userId/closure-requests`
+
+Every request for the account, newest first, read directly from `jovi_mall.role_closure_requests`:
+
+```json
+{
+  "id": "6710…", "userId": "…", "role": "vendor", "roleEntityId": "…",
+  "status": "confirmed",
+  "reason": "Owner asked by email to close the shop",
+  "requestedBy": { "id": "…", "name": "Awa N." },
+  "requestedAt": "…", "expiresAt": "…",
+  "warnings": [{ "code": "prepaid_plan_forfeited", "planCode": "pro", "expiresAt": "…", "amount": null }],
+  "resolvedAt": "…",
+  "resolvedBy": { "id": "…", "source": "platform", "name": null },
+  "declineNote": null,
+  "outcome": { "closedAt": "…", "accountClosed": false, "endedRelationships": 3 }
+}
+```
+
+`status` is `pending` · `confirmed` · `declined` · `cancelled` · `expired`. It is **effective**: a
+stored `pending` past `expiresAt` is reported `expired`. `warnings` are what the user forfeits
+(paid plan time, credits) and were shown to them before confirming.
+
+### Audit
+
+| Action | When |
+|---|---|
+| `users.close.request` | The administrator asked. The payload records the role and reason |
+| `users.close.cancel` | The administrator withdrew it |
+
+The user's confirm or decline is **not** an administrator action, so it has no row here. It is
+on the request itself (`status`, `resolvedAt`, `outcome`).

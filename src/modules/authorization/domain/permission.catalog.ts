@@ -932,6 +932,23 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'users', action: 'write', phase: 6, destructive: true,
         summary: 'Add or remove a user’s platform roles',
     },
+    /**
+     * Ask a user to close ONE of their roles — jovi-mall ADR-A10 (owner decision O-4).
+     *
+     * ⚠ **The administrator ASKS; only the user can confirm.** The closure is irreversible
+     * (anonymise-and-retain), so nothing behind this permission closes anything: it creates a
+     * request the person answers, signed in as that role, within seven days. There is no
+     * admin confirm and there must never be one. What it CAN do on its own is put a closure
+     * notice in front of somebody, which is why it is `destructive` — and therefore named by
+     * hand in ADMIN and refused to Support by the boot assertion.
+     *
+     * Not `users.roles.manage`, deliberately: that one is "add or remove a role" and stays
+     * unbuilt, because removing a role without the user's consent has no implementation.
+     */
+    'users.close': {
+        family: 'users', action: 'write', phase: 6, destructive: true,
+        summary: 'Ask a user to close one of their roles (they must confirm; irreversible once they do)',
+    },
 
     // ═══ VENDORS ═══ all five built ═══════════════════════════════════════════
     // ⚠️ None of these is flagged sensitive, and that is load-bearing rather than an

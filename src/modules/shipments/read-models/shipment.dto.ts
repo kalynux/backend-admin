@@ -40,7 +40,15 @@ export interface ShipmentListItemDto {
     /** Frozen by the agency-deactivation cascade. */
     held: boolean;
     itemCount: number;
+    /** What the AGENCY is paid for this run. Written at checkout since ADR-A11; `null` on older rows. */
     deliveryFeeSnapshot: number | null;
+    /** Who pays that fee — `vendor` · `customer`. `null` = a shipment from before ADR-A11 (the shop paid). */
+    deliveryPayer: 'vendor' | 'customer' | null;
+    /**
+     * What the CUSTOMER was charged for this run — 0 when the shop pays. Deliberately separate
+     * from `deliveryFeeSnapshot`: they differ while a fee change awaits the customer's money.
+     */
+    customerDeliveryFee: number | null;
     createdAt: string | null;
     updatedAt: string | null;
 }
@@ -152,11 +160,34 @@ export interface ShipmentDetailDto extends ShipmentListItemDto {
         auto: boolean;
     } | null;
     hold: { previousStatus: string | null; heldAt: string | null } | null;
+    /**
+     * How the posted fee was built at checkout (base · weight · region · storage · ceiling).
+     * Display only — `deliveryFeeSnapshot` is the number; `null` on older shipments.
+     */
+    feeComponents: {
+        pickupBase: number;
+        weightExtra: number;
+        regionSurcharge: number;
+        storage: number;
+        capApplied: boolean;
+        kg: number;
+        weightGrams: number;
+        outOfRegion: boolean;
+        /** The agency had no pricing policy and the flat fallback was charged. */
+        flatFallback: boolean;
+    } | null;
+    /** Delivery money owed BACK to the customer (a customer-paid return, or an overpayment). 0 = none. */
+    customerFeeRefundable: number;
     /** Cash state. **Never the delivery code** — see the repository's ban list. */
     cod: {
         collectionId: string;
         status: string;
+        /** All the cash to collect: `itemsAmount + deliveryFeeAmount`. */
         expectedAmount: number;
+        /** The goods part. */
+        itemsAmount: number;
+        /** The delivery fee the customer hands over in cash (customer-paid shipments); 0 otherwise. */
+        deliveryFeeAmount: number;
         currency: string | null;
         collectedAt: string | null;
         verificationMethod: string | null;
@@ -226,6 +257,8 @@ export function toShipmentListItemDto(
         held: Boolean(shipment.hold),
         itemCount: shipment.items?.length ?? 0,
         deliveryFeeSnapshot: shipment.delivery_fee_snapshot ?? null,
+        deliveryPayer: shipment.delivery_payer ?? null,
+        customerDeliveryFee: shipment.customer_delivery_fee ?? null,
         createdAt: toIso(shipment.created_at),
         updatedAt: toIso(shipment.updated_at),
     };
@@ -352,6 +385,20 @@ export function toShipmentDetailDto(
                 heldAt: toIso(shipment.hold.heldAt),
             }
             : null,
+        feeComponents: shipment.fee_components
+            ? {
+                pickupBase: shipment.fee_components.pickup_base ?? 0,
+                weightExtra: shipment.fee_components.weight_extra ?? 0,
+                regionSurcharge: shipment.fee_components.region_surcharge ?? 0,
+                storage: shipment.fee_components.storage ?? 0,
+                capApplied: shipment.fee_components.cap_applied ?? false,
+                kg: shipment.fee_components.kg ?? 1,
+                weightGrams: shipment.fee_components.weight_grams ?? 0,
+                outOfRegion: shipment.fee_components.out_of_region ?? false,
+                flatFallback: shipment.fee_components.flat_fallback ?? false,
+            }
+            : null,
+        customerFeeRefundable: shipment.customer_fee_refundable ?? 0,
         cod: context.cod ? toCodDto(context.cod) : null,
         offers: context.offers.map((offer) => toShipmentOfferDto(offer, names.agent)),
         items: (shipment.items ?? []).map((item) => {
@@ -390,6 +437,12 @@ function toCodDto(collection: CashCollectionReadModel): ShipmentDetailDto['cod']
         collectionId: collection._id.toString(),
         status: collection.status,
         expectedAmount: collection.expected_amount,
+        // Mirrors jovi-mall's `collectionBreakdownOf`: a row from before ADR-A11 was all goods.
+        itemsAmount:
+            typeof collection.items_amount === 'number'
+                ? collection.items_amount
+                : collection.expected_amount - Math.max(0, collection.delivery_fee_amount ?? 0),
+        deliveryFeeAmount: Math.max(0, collection.delivery_fee_amount ?? 0),
         currency: collection.currency ?? null,
         collectedAt: toIso(collection.collected_at),
         verificationMethod: collection.verification?.method ?? null,

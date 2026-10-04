@@ -76,6 +76,10 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'Suspension and role changes cascade into sessions and role entities jovi-mall owns',
     },
+    [COLLECTIONS.ROLE_CLOSURE_REQUEST]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'jovi-mall ADR-A10: the user’s confirm runs the irreversible anonymisation in the same transaction as the status write',
+    },
     [COLLECTIONS.CUSTOMER]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'Role entity; created and mutated by the auth and profile paths',

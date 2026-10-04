@@ -16,8 +16,10 @@ import {
     findRoleProfiles,
 } from '../repositories/role-profile.read.repository';
 import { UserReadModel, UserReadRepository } from '../repositories/user.read.repository';
+import { RoleClosureReadRepository, toRoleClosureDto } from '../repositories/role-closure.read.repository';
 import {
     ListUserActivityQuery,
+    RequestRoleClosureBody,
     ResetBotMemoryBody,
     SearchUsersQuery,
     SendCredentialBody,
@@ -50,6 +52,7 @@ import {
  */
 
 const users = new UserReadRepository();
+const closureRequests = new RoleClosureReadRepository();
 const audit = new AuditRepository();
 
 interface UserDto {
@@ -151,6 +154,53 @@ async function loadOr404(userId: string): Promise<UserReadModel> {
 }
 
 export class UserController {
+    /**
+     * GET /api/v1/users/:userId/closure-requests — jovi-mall ADR-A10.
+     *
+     * Every request to close one of this account's roles, newest first, with how the user
+     * answered. Read directly; the user's confirm and decline happen in jovi-mall under their
+     * own session, so this row is the only place an administrator sees the outcome.
+     */
+    static listClosureRequests = asyncHandler(async (req: Request, res: Response) => {
+        await loadOr404(req.params.userId);
+        const rows = await closureRequests.listForUser(req.params.userId);
+        sendSuccess(res, rows.map((row) => toRoleClosureDto(row)));
+    });
+
+    /**
+     * POST /api/v1/users/:userId/roles/:role/closure — ask the user to close one role.
+     *
+     * ⚠ This closes NOTHING. It sends the user a notice; the closure happens only if they
+     * confirm, signed in as that role, within seven days (owner decision O-3).
+     */
+    static requestClosure = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as RequestRoleClosureBody;
+        const before = await loadOr404(req.params.userId);
+        const request = await gateway.requestRoleClosure(
+            req.params.userId,
+            req.params.role,
+            body.reason,
+            toAuditState(before),
+            actorContextOf(req),
+        );
+        sendSuccess(res, request, {
+            status: 201,
+            message: 'Closure requested — nothing changes unless the user confirms',
+        });
+    });
+
+    /** DELETE /api/v1/users/:userId/roles/:role/closure — withdraw the pending request. */
+    static cancelClosure = asyncHandler(async (req: Request, res: Response) => {
+        const before = await loadOr404(req.params.userId);
+        const request = await gateway.cancelRoleClosure(
+            req.params.userId,
+            req.params.role,
+            toAuditState(before),
+            actorContextOf(req),
+        );
+        sendSuccess(res, request, { message: 'Closure request withdrawn' });
+    });
+
     /**
      * GET /api/v1/users — search and filter across every role.
      *

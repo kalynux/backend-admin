@@ -38,8 +38,15 @@ export interface OrderReadModel extends Document {
     vendor_id: ObjectId;
     customer_id: ObjectId;
     currency: string;
+    /** Items + customer-paid delivery since jovi-mall ADR-A11 (2026-10-03). */
     total_amount: number;
-    price_breakdown?: { base?: number; tax?: number; discount?: number; total?: number };
+    /** `delivery` = what the customer was charged for delivery; absent on older orders (read 0). */
+    price_breakdown?: { base?: number; delivery?: number; tax?: number; discount?: number; total?: number };
+    /** Who pays this order's delivery — decided per vendor order at checkout. `null` = older/digital. */
+    delivery_payer?: 'vendor' | 'customer' | null;
+    delivery_payer_reason?: string | null;
+    /** How much more of this shop's goods would have made delivery free at checkout. */
+    free_delivery_shortfall?: number | null;
     payment_method: 'online' | 'cash_on_delivery';
     payment_status: string;
     payment_intent_id?: string | null;
@@ -72,11 +79,14 @@ export interface OrderReadModel extends Document {
         quantity?: number;
         price?: number;
         currency?: string;
+        /** Grams for ONE unit, snapshotted at checkout — what the delivery fee was priced on. */
+        weight_grams?: number | null;
+        /** `variant` · `shipping_config` · `default` (the 1-kg-per-unit fallback). */
+        weight_source?: string | null;
         delivery?: {
             agency_id?: ObjectId;
             shipment_id?: ObjectId | null;
             status?: string;
-            free_delivery?: boolean;
             hold?: { previousStatus?: string; heldAt?: Date } | null;
             pickup_location?: {
                 source?: string;
@@ -138,6 +148,9 @@ const ORDER_CORE_PROJECTION = {
     payment_method: 1,
     payment_status: 1,
     fulfillment_status: 1,
+    // Who pays delivery (ADR-A11). A scalar on both projections: `total_amount` now includes
+    // customer-paid delivery, and a directory row that shows it needs to say whose money it is.
+    delivery_payer: 1,
     created_at: 1,
     updated_at: 1,
 } as const;
@@ -172,6 +185,8 @@ const ORDER_DETAIL_PROJECTION = {
     // collide with the whole-subdocument forms below. See ORDER_CORE_PROJECTION.
     ...ORDER_CORE_PROJECTION,
     price_breakdown: 1,
+    delivery_payer_reason: 1,
+    free_delivery_shortfall: 1,
     payment_intent_id: 1,
     dispute_hold: 1,
     completion: 1,
@@ -188,10 +203,11 @@ const ORDER_DETAIL_PROJECTION = {
     'items.quantity': 1,
     'items.price': 1,
     'items.currency': 1,
+    'items.weight_grams': 1,
+    'items.weight_source': 1,
     'items.delivery.agency_id': 1,
     'items.delivery.shipment_id': 1,
     'items.delivery.status': 1,
-    'items.delivery.free_delivery': 1,
     'items.delivery.hold': 1,
     'items.delivery.pickup_location.source': 1,
     'items.delivery.pickup_location.vendor_address_id': 1,

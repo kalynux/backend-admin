@@ -52,6 +52,7 @@ export const COLLECTIONS = Object.freeze({
   STOCK_AUDIT_LOG: 'stock_audit_logs',
   AGENCY_STOCK_LEVEL: 'agency_stock_levels',
   STOCK_ADJUSTMENT_REQUEST: 'stock_adjustment_requests',
+  ROLE_CLOSURE_REQUEST: 'role_closure_requests',
   FILE: 'files',
   FILE_REFERENCE: 'file_references',
   FILE_CLEANUP_AUDIT: 'file_cleanup_audit',

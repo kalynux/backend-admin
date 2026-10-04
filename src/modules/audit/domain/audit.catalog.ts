@@ -1083,6 +1083,26 @@ export const AUDIT_CATALOG = Object.freeze({
         transport: 'delegated',
         summary: 'Reset the customer bot’s conversation memory for a user',
     },
+    /**
+     * Role closure — jovi-mall ADR-A10. Two acts, one permission, as suspend/reinstate.
+     *
+     * Only the ADMINISTRATOR's acts are here. The user's confirm or decline happens in
+     * jovi-mall, under the user's own session, and is recorded on the request itself
+     * (`role_closure_requests.status`, `resolved_at`, `outcome`) — which is what the
+     * closure-requests read shows beside these rows.
+     */
+    'users.close.request': {
+        permission: 'users.close',
+        target: 'user',
+        transport: 'delegated',
+        summary: 'Asked a user to close one of their roles',
+    },
+    'users.close.cancel': {
+        permission: 'users.close',
+        target: 'user',
+        transport: 'delegated',
+        summary: 'Withdrew a request asking a user to close one of their roles',
+    },
 
     // ═══ VENDORS — delegated to jovi-mall ═════════════════════════════════════
     // Seven mutations. The reads — list, detail, products, activity — are not here: a

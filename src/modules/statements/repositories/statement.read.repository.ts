@@ -125,7 +125,12 @@ export interface OrderRow extends Document {
     payment_method: string;
     payment_status: string;
     fulfillment_status: string;
+    /** Items + customer-paid delivery since ADR-A11 — never a vendor's gross. */
     total_amount: number;
+    /** `delivery` = what the customer was charged for delivery (absent → 0, before ADR-A11). */
+    price_breakdown?: { base?: number | null; delivery?: number | null } | null;
+    /** `null`/absent before ADR-A11 and on digital orders — read as `vendor`. */
+    delivery_payer?: 'vendor' | 'customer' | null;
     currency: string;
     items: OrderItemRow[];
     completion?: { confirmed_at?: Date | null } | null;
@@ -139,6 +144,7 @@ export class StatementOrderRepository extends PlatformReadRepository<OrderRow> {
         super(COLLECTIONS.ORDER, {
             _id: 1, order_number: 1, vendor_id: 1, customer_id: 1, order_type: 1,
             payment_method: 1, payment_status: 1, fulfillment_status: 1, total_amount: 1, currency: 1,
+            'price_breakdown.base': 1, 'price_breakdown.delivery': 1, delivery_payer: 1,
             'items._id': 1, 'items.title': 1, 'items.sku': 1, 'items.quantity': 1, 'items.price': 1,
             'items.negotiated_unit_price': 1, 'items.floor_price_snapshot': 1, 'items.list_price_snapshot': 1,
             'completion.confirmed_at': 1, 'customer_snapshot.name': 1, 'customer_snapshot.phone': 1,
@@ -268,7 +274,11 @@ export interface ShipmentRow extends Document {
     agent_id?: ObjectId | null;
     status: string;
     tracking_number?: string | null;
+    /** What the AGENCY is paid for the run. */
     delivery_fee_snapshot?: number | null;
+    /** ADR-A11 — see `ShipmentFeeFacts` in `money-breakdown.ts`. */
+    delivery_payer?: 'vendor' | 'customer' | null;
+    customer_delivery_fee?: number | null;
     status_history?: { status: string; changed_at: Date; changed_by_role?: string }[];
     created_at: Date;
 }
@@ -277,7 +287,7 @@ export class StatementShipmentRepository extends PlatformReadRepository<Shipment
     constructor() {
         super(COLLECTIONS.SHIPMENT, {
             _id: 1, order_id: 1, agency_id: 1, agent_id: 1, status: 1, tracking_number: 1,
-            delivery_fee_snapshot: 1, 'status_history.status': 1, 'status_history.changed_at': 1,
+            delivery_fee_snapshot: 1, delivery_payer: 1, customer_delivery_fee: 1, 'status_history.status': 1, 'status_history.changed_at': 1,
             'status_history.changed_by_role': 1, created_at: 1,
         });
     }
@@ -300,7 +310,12 @@ export interface CollectionRow extends Document {
     agency_id: ObjectId;
     agent_id: ObjectId;
     vendor_id: ObjectId;
+    /** The cash to collect: `items_amount + delivery_fee_amount` since ADR-A11. */
     expected_amount: number;
+    /** The goods part; null on rows before ADR-A11 (all of whose cash was goods). */
+    items_amount?: number | null;
+    /** Customer-paid delivery handed to the agent with the goods; null before ADR-A11. */
+    delivery_fee_amount?: number | null;
     currency: string;
     status: string;
     collected_at?: Date | null;
@@ -313,7 +328,8 @@ export class StatementCashCollectionRepository extends PlatformReadRepository<Co
     constructor() {
         super(COLLECTIONS.CASH_COLLECTION, {
             _id: 1, order_id: 1, shipment_id: 1, agency_id: 1, agent_id: 1, vendor_id: 1,
-            expected_amount: 1, currency: 1, status: 1, collected_at: 1, 'verification.method': 1,
+            expected_amount: 1, items_amount: 1, delivery_fee_amount: 1, currency: 1, status: 1, collected_at: 1,
+            'verification.method': 1,
             settled_amount: 1, settled_at: 1,
         });
     }

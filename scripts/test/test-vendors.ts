@@ -53,6 +53,7 @@ import {
     VENDOR_SORT,
 } from '../../src/modules/vendors/validators/vendor.validator';
 import { buildFilter } from '../../src/modules/vendors/repositories/vendor.read.repository';
+import { vendorDeliveryTermsOf } from '../../src/modules/vendors/repositories/vendor-context.read.repository';
 import { buildProductFilter } from '../../src/modules/vendors/repositories/vendor-product.read.repository';
 import {
     buildConnectionFilter,
@@ -953,5 +954,29 @@ t.assert('the three newly-read collections are declared read / internal-api', ()
 t.assert('no collection became owned — still exactly the two blog ones', () =>
     Object.values(PLATFORM_COLLECTIONS as Record<string, { access: string }>)
         .filter((spec) => spec.access === 'owned').length === 2);
+
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('Shop delivery terms (jovi-mall ADR-A11) — shown, never written');
+
+t.assert('no terms stored → always (the shop pays, owner decision D-2)', () => {
+    const d = vendorDeliveryTermsOf(undefined);
+    return d.mode === 'always' && d.freeAboveAmount === null;
+});
+t.assert('never → the customer pays', () => vendorDeliveryTermsOf({ mode: 'never', free_above_amount: 9 }).mode === 'never');
+t.assert('above with a threshold → kept, floored', () => {
+    const d = vendorDeliveryTermsOf({ mode: 'above', free_above_amount: 25_000.7 });
+    return d.mode === 'above' && d.freeAboveAmount === 25_000;
+});
+t.assert('above with no usable threshold, or an unknown mode → always, never a charge nobody set', () =>
+    vendorDeliveryTermsOf({ mode: 'above', free_above_amount: null }).mode === 'always'
+    && vendorDeliveryTermsOf({ mode: 'sometimes' }).mode === 'always');
+t.assert('the settings projection names the two fields dotted', () => {
+    const code = readCode(MODULE, 'repositories', 'vendor-context.read.repository.ts');
+    return code.includes("'delivery_terms.mode': 1") && code.includes("'delivery_terms.free_above_amount': 1");
+});
+t.assert('the detail reports the terms through the default-applying reader', () =>
+    readCode(MODULE, 'controllers', 'vendor.controller.ts').includes('deliveryTerms: vendorDeliveryTermsOf(vendorSettings?.delivery_terms)'));
+t.assert('no admin write of delivery terms exists — the settings PATCH does not accept them', () =>
+    throws(() => UpdateVendorSettingsSchema.parse({ deliveryTerms: { mode: 'never' } })));
 
 process.exit(t.finish());

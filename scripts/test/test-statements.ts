@@ -15,7 +15,7 @@
  *
  * Run: npm run test:statements
  */
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { ObjectId } from 'mongodb';
 import { suite } from './_assert';
@@ -33,6 +33,9 @@ import {
     NET_FORMULA,
     agencyEarningBreakdown,
     apportionBargainFee,
+    collectionCashBreakdown,
+    customerPaidDeliveryFee,
+    vendorBorneDeliveryFee,
     vendorSaleBreakdown,
 } from '../../src/modules/statements/domain/money-breakdown';
 import { maskPhone } from '../../src/modules/statements/domain/statement-masking';
@@ -88,6 +91,76 @@ async function main(): Promise<number> {
     const impossible = vendorSaleBreakdown({ sourceType: 'cod_collection', gross: 10_000, net: 7_530, commission: 970, bargainFee: 300, deliveryFeeSnapshot: 5_000 });
     t.assert('COD with a snapshot larger than the residual: refused, not negative', () =>
         impossible.codFee === null);
+
+    // ── Customer-paid delivery (jovi-mall ADR-A11) ───────────────────────────
+    // NET_FORMULA's `deliveryFee` is the VENDOR-BORNE fee: max(0, agency fee − what the customer paid).
+    t.assert('vendor-borne fee: a vendor-paid shipment bears the whole agency fee', () =>
+        vendorBorneDeliveryFee({ delivery_fee_snapshot: 1_000, delivery_payer: 'vendor', customer_delivery_fee: 0 }) === 1_000);
+    t.assert('vendor-borne fee: a shipment from before ADR-A11 (no payer) is the shop\'s — the whole fee', () =>
+        vendorBorneDeliveryFee({ delivery_fee_snapshot: 1_000 }) === 1_000);
+    t.assert('vendor-borne fee: a customer-paid shipment the customer covered bears nothing', () =>
+        vendorBorneDeliveryFee({ delivery_fee_snapshot: 1_000, delivery_payer: 'customer', customer_delivery_fee: 1_000 }) === 0);
+    t.assert('vendor-borne fee: a fee raised above what the customer paid leaves the vendor the difference', () =>
+        vendorBorneDeliveryFee({ delivery_fee_snapshot: 1_300, delivery_payer: 'customer', customer_delivery_fee: 1_000 }) === 300);
+    t.assert('vendor-borne fee: a customer overpayment never goes negative', () =>
+        vendorBorneDeliveryFee({ delivery_fee_snapshot: 800, delivery_payer: 'customer', customer_delivery_fee: 1_000 }) === 0);
+    t.assert('vendor-borne fee: a customer fee on a VENDOR-paid shipment is ignored (payer decides)', () =>
+        vendorBorneDeliveryFee({ delivery_fee_snapshot: 1_000, delivery_payer: 'vendor', customer_delivery_fee: 1_000 }) === 1_000);
+    t.assert('vendor-borne fee: no recorded fee → null (the caller refuses to split)', () =>
+        vendorBorneDeliveryFee({ delivery_fee_snapshot: null, delivery_payer: 'customer', customer_delivery_fee: 1_000 }) === null);
+    t.assert('customer-paid fee: 0 unless the shipment says the customer paid', () =>
+        customerPaidDeliveryFee({ delivery_fee_snapshot: 1_000, customer_delivery_fee: 1_000 }) === 0
+        && customerPaidDeliveryFee({ delivery_fee_snapshot: 1_000, delivery_payer: 'customer', customer_delivery_fee: 1_000 }) === 1_000);
+
+    // A customer-paid COD collection: goods 10 000, the customer also hands over 1 000 delivery.
+    // jovi-mall's split: gross = items 10 000, vendorNet = 10 000 − 300 − 970 − 0 (vendor-borne) − 200 = 8 530.
+    const paidShipment = { delivery_fee_snapshot: 1_000, delivery_payer: 'customer' as const, customer_delivery_fee: 1_000 };
+    const customerPaidCod = vendorSaleBreakdown({
+        sourceType: 'cod_collection', gross: 10_000, net: 8_530, commission: 970, bargainFee: 300,
+        deliveryFeeSnapshot: vendorBorneDeliveryFee(paidShipment),
+    });
+    t.assert('customer-paid COD: delivery 0, COD fee 200 — the row is split, not blanked', () =>
+        customerPaidCod.deliveryFee === 0 && customerPaidCod.codFee === 200);
+    t.assert('customer-paid COD: the formula closes exactly', () =>
+        customerPaidCod.gross - customerPaidCod.bargainFee - customerPaidCod.commission
+            - customerPaidCod.deliveryFee! - customerPaidCod.codFee! === customerPaidCod.net);
+    t.assert('regression guard: splitting with the AGENCY fee would have blanked that row', () =>
+        vendorSaleBreakdown({ sourceType: 'cod_collection', gross: 10_000, net: 8_530, commission: 970, bargainFee: 300, deliveryFeeSnapshot: 1_000 })
+            .deliveryFee === null);
+    const customerPaidPrepaid = vendorSaleBreakdown({ sourceType: 'order', gross: 10_000, net: 8_730, commission: 970, bargainFee: 300, deliveryFeeSnapshot: null });
+    t.assert('customer-paid prepaid: residual 0 — no delivery deducted from the vendor', () =>
+        customerPaidPrepaid.deliveryFee === 0 && customerPaidPrepaid.codFee === 0);
+
+    t.assert('COD cash breakdown: goods + delivery from the collection', () => {
+        const b = collectionCashBreakdown({ expected_amount: 11_000, items_amount: 10_000, delivery_fee_amount: 1_000 });
+        return b.itemsAmount === 10_000 && b.deliveryFeeAmount === 1_000;
+    });
+    t.assert('COD cash breakdown: a row from before ADR-A11 is all goods', () => {
+        const b = collectionCashBreakdown({ expected_amount: 10_000 });
+        return b.itemsAmount === 10_000 && b.deliveryFeeAmount === 0;
+    });
+
+    t.assert('the vendor statement splits COD with the VENDOR-BORNE fee, never the raw snapshot', () => {
+        const src = read('domain/vendor-statement.ts');
+        return /deliveryFeeSnapshot = s \? vendorBorneDeliveryFee\(s\) : null/.test(src)
+            && !/deliveryFeeSnapshot = s\?\.delivery_fee_snapshot/.test(src);
+    });
+    t.assert('the statement reads the payer and the customer fee off the shipment, and the cash breakdown off the collection', () => {
+        const repo = read('repositories/statement.read.repository.ts');
+        return /delivery_payer: 1, customer_delivery_fee: 1/.test(repo) && /items_amount: 1, delivery_fee_amount: 1/.test(repo);
+    });
+    {
+        // jovi-mall's analytics are the other reader of the same money: both must split with the
+        // vendor-borne fee, or a vendor's dashboard and the emailed statement disagree.
+        const analytics = join(__dirname, '../../../jovi-mall/src/modules/vendors/services/vendor-analytics.service.ts');
+        if (existsSync(analytics)) {
+            const text = readFileSync(analytics, 'utf8');
+            t.assert("jovi-mall's vendor analytics also split with the vendor-borne fee", () =>
+                /deliveryFeeShares\(snapshot, customerDeliveryFeeOf\(null, s\)\)\.vendorBorne/.test(text));
+        } else {
+            console.log('  ⚪ jovi-mall not checked out beside wi-admin — analytics parity check skipped');
+        }
+    }
 
     const agencyCod = agencyEarningBreakdown({ sourceType: 'cod_collection', agencyNet: 900, agentCut: 300, deliveryFee: 1_000 });
     t.assert('agency COD: handling fee = agencyNet + agentCut − deliveryFee', () =>

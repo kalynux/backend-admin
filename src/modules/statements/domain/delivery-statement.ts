@@ -10,7 +10,7 @@ import {
     StatementReserveHoldRepository,
     StatementShipmentRepository,
 } from '../repositories/statement.read.repository';
-import { agencyEarningBreakdown, AgencyEarningBreakdown } from './money-breakdown';
+import { agencyEarningBreakdown, AgencyEarningBreakdown, collectionCashBreakdown } from './money-breakdown';
 import { allocationStatusLabel, col, idOf, loadNames, sumOf } from './statement-common';
 import { StatementSection, SummaryLine } from './statement.types';
 
@@ -118,9 +118,11 @@ export async function deliveryStatement(
         description:
             ownerType === 'agency'
                 ? 'One row per delivery credited in this period. The agency keeps the delivery fee earned minus the ' +
-                  "agent's share, plus the whole COD handling fee on cash-on-delivery runs."
+                  "agent's share, plus the whole COD handling fee on cash-on-delivery runs. \"Fee paid by\" says whether the " +
+                  "shop or the customer paid the delivery fee; the agency earns the same either way."
                 : "One row per delivery credited in this period. Your share comes out of the delivery fee earned, under " +
-                  "your contract's fee split. The COD handling fee stays with the agency.",
+                  "your contract's fee split. The COD handling fee stays with the agency. \"Fee paid by\" says whether the " +
+                  'shop or the customer paid the delivery fee; your share is the same either way.',
         columns: [
             col.at('at', 'Credited'),
             col.text('order', 'Order', 18),
@@ -129,6 +131,7 @@ export async function deliveryStatement(
             col.text(ownerType === 'agency' ? 'agent' : 'agency', ownerType === 'agency' ? 'Agent' : 'Agency', 18),
             col.text('kind', 'Payment', 14),
             col.text('outcome', 'Outcome', 12),
+            col.text('feePayer', 'Fee paid by', 10),
             col.money('fee', 'Delivery fee earned'),
             col.money('codFee', 'COD fee'),
             col.money('agentCut', "Agent's share"),
@@ -149,6 +152,8 @@ export async function deliveryStatement(
                 agency: s ? names.agency(s.agency_id) : null,
                 kind: a.source_type === 'shipment' ? 'Prepaid' : 'Cash on delivery',
                 outcome: s?.status ?? null,
+                // `null`/absent predates customer-paid delivery (jovi-mall ADR-A11) and IS the shop.
+                feePayer: s ? (s.delivery_payer === 'customer' ? 'Customer' : 'Shop') : null,
                 fee: b.earnedDeliveryFee,
                 codFee: b.codFee,
                 agentCut: b.agentCut,
@@ -165,29 +170,36 @@ export async function deliveryStatement(
         title: 'Cash collected on delivery',
         description:
             ownerType === 'agency'
-                ? "Cash your agents collected from customers in this period, and how much of it has been settled to the platform."
-                : 'Cash you collected from customers in this period, and how much of it has been settled to the platform.',
+                ? 'Cash your agents collected from customers in this period, and how much of it has been settled to the platform. ' +
+                  '"Delivery fee" is the part the customer paid for delivery in cash, where the shop made the customer pay it.'
+                : 'Cash you collected from customers in this period, and how much of it has been settled to the platform. ' +
+                  '"Delivery fee" is the part the customer paid for delivery in cash, where the shop made the customer pay it.',
         columns: [
             col.at('collectedAt', 'Collected'),
             col.text('order', 'Order', 18),
             col.text(ownerType === 'agency' ? 'agent' : 'vendor', ownerType === 'agency' ? 'Agent' : 'Vendor', 18),
+            col.money('goods', 'Goods'),
+            col.money('deliveryFee', 'Delivery fee'),
             col.money('amount', 'Amount'),
             col.money('settled', 'Settled so far'),
             col.at('settledAt', 'Fully settled'),
         ],
         rows: cashRows.map((c) => {
             const o = orderById.get(idOf(c.order_id)) ?? orderOfShipment(c.shipment_id);
+            const cash = collectionCashBreakdown(c);
             return {
                 collectedAt: c.collected_at ?? null,
                 order: o?.order_number ?? null,
                 agent: names.agent(c.agent_id),
                 vendor: o ? names.vendor(o.vendor_id) : null,
+                goods: cash.itemsAmount,
+                deliveryFee: cash.deliveryFeeAmount,
                 amount: c.expected_amount,
                 settled: c.settled_amount,
                 settledAt: c.settled_at ?? null,
             };
         }),
-        totals: ['amount', 'settled'],
+        totals: ['goods', 'deliveryFee', 'amount', 'settled'],
     };
 
     const depositSection: StatementSection = {

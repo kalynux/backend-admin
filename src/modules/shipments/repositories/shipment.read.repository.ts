@@ -28,7 +28,26 @@ export interface ShipmentReadModel extends Document {
     agent_id?: ObjectId | null;
     status: string;
     tracking_number?: string | null;
+    /** What the AGENCY is paid for the run — written at checkout since jovi-mall ADR-A11. */
     delivery_fee_snapshot?: number | null;
+    /** Who pays the fee (ADR-A11), copied from the order. `null` = older shipment = the shop. */
+    delivery_payer?: 'vendor' | 'customer' | null;
+    /** What the CUSTOMER was charged for this run; 0 when the shop pays, `null` on older rows. */
+    customer_delivery_fee?: number | null;
+    /** The posted price's itemisation at checkout. Display only — no money path reads it. */
+    fee_components?: {
+        pickup_base?: number;
+        weight_extra?: number;
+        region_surcharge?: number;
+        storage?: number;
+        cap_applied?: boolean;
+        kg?: number;
+        weight_grams?: number;
+        out_of_region?: boolean;
+        flat_fallback?: boolean;
+    } | null;
+    /** Delivery money the platform holds that is owed BACK to the customer (RTO leftover, excess). */
+    customer_fee_refundable?: number | null;
     delivery_proof_file_id?: ObjectId | null;
     hold?: { previousStatus?: string; heldAt?: Date } | null;
     assignment?: {
@@ -130,6 +149,8 @@ const SHIPMENT_LIST_PROJECTION = {
     status: 1,
     tracking_number: 1,
     delivery_fee_snapshot: 1,
+    delivery_payer: 1,
+    customer_delivery_fee: 1,
     hold: 1,
     'assignment.state': 1,
     'assignment.current_offer_id': 1,
@@ -149,6 +170,9 @@ const SHIPMENT_LIST_PROJECTION = {
 const SHIPMENT_DETAIL_PROJECTION = {
     ...SHIPMENT_LIST_PROJECTION,
     delivery_proof_file_id: 1,
+    // Numbers and flags only — no address, no position, nothing a ban below names.
+    fee_components: 1,
+    customer_fee_refundable: 1,
     status_history: 1,
     delivery_failures: 1,
     rejection: 1,

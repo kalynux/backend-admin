@@ -28,7 +28,13 @@ export interface OrderListItemDto {
     customerId: string;
     customerName: string | null;
     currency: string;
+    /** What the customer was charged: the goods plus any customer-paid delivery (ADR-A11). */
     totalAmount: number;
+    /**
+     * Who pays this order's delivery — `vendor` · `customer`. `null` on a digital order and on
+     * orders placed before customer-paid delivery existed, all of which the shop paid.
+     */
+    deliveryPayer: 'vendor' | 'customer' | null;
     paymentMethod: string;
     paymentStatus: string;
     fulfillmentStatus: string;
@@ -43,11 +49,22 @@ export interface OrderListItemDto {
 
 export interface OrderDetailDto extends OrderListItemDto {
     priceBreakdown: {
+        /** The goods. */
         base: number | null;
+        /** What the customer was charged for delivery; 0 when the shop paid (or before ADR-A11). */
+        delivery: number;
         tax: number | null;
         discount: number | null;
         total: number | null;
     } | null;
+    /**
+     * Why `deliveryPayer` is what it is: `shop_always` · `shop_never` · `shop_threshold_met` ·
+     * `threshold_not_met` · `cap_fallback` (free delivery would have failed the 30% delivery-cost
+     * cap, so the customer paid). `null` where `deliveryPayer` is.
+     */
+    deliveryPayerReason: string | null;
+    /** How much more of this shop's goods would have made delivery free at checkout; `null` = n/a. */
+    freeDeliveryShortfall: number | null;
     paymentIntentId: string | null;
     /** Present only while meaningful — `null` when this order has never been disputed. */
     dispute: {
@@ -85,6 +102,10 @@ export interface OrderItemDto {
     quantity: number;
     price: number;
     currency: string | null;
+    /** Grams for ONE unit as priced at checkout; `null` on digital lines and older orders. */
+    weightGrams: number | null;
+    /** `variant` · `shipping_config` · `default` (no weight recorded — counted as 1 kg per unit). */
+    weightSource: string | null;
     /**
      * What the thing on this line looks like — the PRIMARY image, never the gallery (BR-017 A).
      *
@@ -127,7 +148,6 @@ export interface OrderItemDto {
          */
         trackingNumber: string | null;
         status: string | null;
-        freeDelivery: boolean;
         /** Set when an agency deactivation put this item on hold. */
         hold: { previousStatus: string | null; heldAt: string | null } | null;
         pickup: {
@@ -213,6 +233,7 @@ export function toOrderListItemDto(
         customerName: names.customer.get(order.customer_id.toString()) ?? null,
         currency: order.currency,
         totalAmount: order.total_amount,
+        deliveryPayer: order.delivery_payer ?? null,
         paymentMethod: order.payment_method,
         paymentStatus: order.payment_status,
         fulfillmentStatus: order.fulfillment_status,
@@ -240,11 +261,14 @@ export function toOrderDetailDto(
         priceBreakdown: order.price_breakdown
             ? {
                 base: order.price_breakdown.base ?? null,
+                delivery: order.price_breakdown.delivery ?? 0,
                 tax: order.price_breakdown.tax ?? null,
                 discount: order.price_breakdown.discount ?? null,
                 total: order.price_breakdown.total ?? null,
             }
             : null,
+        deliveryPayerReason: order.delivery_payer_reason ?? null,
+        freeDeliveryShortfall: order.free_delivery_shortfall ?? null,
         paymentIntentId: order.payment_intent_id ?? null,
         dispute: everDisputed
             ? {
@@ -294,6 +318,8 @@ function toOrderItemDto(
         quantity: item.quantity ?? 0,
         price: item.price ?? 0,
         currency: item.currency ?? null,
+        weightGrams: item.weight_grams ?? null,
+        weightSource: item.weight_source ?? null,
         image: context.image.get(productImageKey(productId, variantId)) ?? null,
         delivery: delivery
             ? {
@@ -302,7 +328,6 @@ function toOrderItemDto(
                 shipmentId,
                 trackingNumber: shipmentId ? context.trackingNumber.get(shipmentId) ?? null : null,
                 status: delivery.status ?? null,
-                freeDelivery: delivery.free_delivery ?? false,
                 hold: delivery.hold
                     ? {
                         previousStatus: delivery.hold.previousStatus ?? null,

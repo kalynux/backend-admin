@@ -48,6 +48,9 @@ import {
     SearchOrdersQuerySchema,
 } from '../../src/modules/orders/validators/order.validator';
 import { buildFilter } from '../../src/modules/orders/repositories/order.read.repository';
+import type { OrderReadModel } from '../../src/modules/orders/repositories/order.read.repository';
+import { toOrderDetailDto, toOrderListItemDto } from '../../src/modules/orders/read-models/order.dto';
+import { ObjectId } from 'mongodb';
 import { AUDIT_CATALOG } from '../../src/modules/audit/domain/audit.catalog';
 import { PERMISSION_CATALOG } from '../../src/modules/authorization/domain/permission.catalog';
 import { PLATFORM_COLLECTIONS } from '../../src/infra/platform/platform-collections';
@@ -506,7 +509,10 @@ t.assert(
 // F-4 — the cart-group refund defect, in both halves.
 t.assert(
     'the refund lookup covers cart-group payments (orderIds), not just orderId',
-    () => orchestrator.includes('{ orderIds: new Types.ObjectId(sourceId) }'),
+    // Shape, not spelling: `$or: [{ orderId: X }, { orderIds: X }]` with the SAME X on both
+    // sides. The literal `new Types.ObjectId(sourceId)` was pinned until jovi-mall's refund-legs
+    // rework (ADR-A11 W-E, 2026-10-04) hoisted it into a variable — same lookup, new spelling.
+    () => /\$or:\s*\[\s*\{\s*orderId:\s*([^}]+?)\s*\},\s*\{\s*orderIds:\s*\1\s*\}\s*\]/.test(orchestrator),
 );
 t.assert(
     'a per-source ceiling exists — a group payment cannot fund one order’s refund from another’s',
@@ -541,5 +547,56 @@ t.assert(
     'it takes an actor, so the timeline row is not anonymous',
     () => disputeService.includes('actor: DisputeActor = SYSTEM_ACTOR'),
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('12. Customer-paid delivery (jovi-mall ADR-A11)');
+
+{
+    const repoCode = files.find((f) => f.file.endsWith('order.read.repository.ts'))!.code;
+    t.assert('the removed item flag free_delivery is projected nowhere', () =>
+        files.every((f) => !f.code.includes('free_delivery:') && !f.code.includes("'items.delivery.free_delivery'")));
+    t.assert('delivery_payer is on the shared core projection (list AND detail)', () =>
+        repoCode.indexOf('delivery_payer: 1') > repoCode.indexOf('ORDER_CORE_PROJECTION')
+        && repoCode.indexOf('delivery_payer: 1') < repoCode.indexOf('ORDER_LIST_PROJECTION = {'));
+    t.assert('the payer reason, the shortfall and the item weights are detail-only', () => {
+        const detail = repoCode.slice(repoCode.indexOf('ORDER_DETAIL_PROJECTION = {'));
+        const list = repoCode.slice(repoCode.indexOf('ORDER_LIST_PROJECTION = {'), repoCode.indexOf('ORDER_DETAIL_PROJECTION = {'));
+        return ['delivery_payer_reason: 1', 'free_delivery_shortfall: 1', "'items.weight_grams': 1", "'items.weight_source': 1"]
+            .every((k) => detail.includes(k) && !list.includes(k));
+    });
+
+    const names = { vendor: new Map<string, string | null>(), customer: new Map<string, string | null>() };
+    const base = {
+        _id: new ObjectId(), order_number: 'ORD-1', order_type: 'physical', cart_id: new ObjectId(),
+        vendor_id: new ObjectId(), customer_id: new ObjectId(), currency: 'XAF',
+        payment_method: 'online', payment_status: 'paid', fulfillment_status: 'processing',
+        created_at: new Date(), updated_at: new Date(),
+    };
+    const paid = {
+        ...base,
+        total_amount: 11_500,
+        price_breakdown: { base: 10_000, delivery: 1_500, tax: 0, discount: 0, total: 11_500 },
+        delivery_payer: 'customer',
+        delivery_payer_reason: 'threshold_not_met',
+        free_delivery_shortfall: 5_000,
+        items: [{ _id: new ObjectId(), quantity: 2, price: 5_000, weight_grams: 1_200, weight_source: 'variant', delivery: { status: 'pending' } }],
+    } as unknown as OrderReadModel;
+    const dto = toOrderDetailDto(paid, names);
+    t.assert('detail: priceBreakdown.delivery is what the customer paid for delivery', () =>
+        dto.priceBreakdown?.delivery === 1_500 && dto.priceBreakdown?.base === 10_000 && dto.totalAmount === 11_500);
+    t.assert('detail: payer, reason and shortfall are mapped', () =>
+        dto.deliveryPayer === 'customer' && dto.deliveryPayerReason === 'threshold_not_met' && dto.freeDeliveryShortfall === 5_000);
+    t.assert('detail: an item carries its priced weight and where it came from', () =>
+        dto.items[0].weightGrams === 1_200 && dto.items[0].weightSource === 'variant');
+    t.assert('detail: an item\'s delivery block no longer carries freeDelivery', () =>
+        dto.items[0].delivery !== null && !('freeDelivery' in (dto.items[0].delivery as object)));
+
+    const legacy = { ...base, total_amount: 10_000, price_breakdown: { base: 10_000, tax: 0, discount: 0, total: 10_000 }, items: [] } as unknown as OrderReadModel;
+    const legacyDto = toOrderDetailDto(legacy, names);
+    t.assert('an order from before ADR-A11 reads delivery 0 and payer null (the shop paid)', () =>
+        legacyDto.priceBreakdown?.delivery === 0 && legacyDto.deliveryPayer === null
+        && legacyDto.deliveryPayerReason === null && legacyDto.freeDeliveryShortfall === null);
+    t.assert('the list row says whose money the total includes', () => toOrderListItemDto(paid, names).deliveryPayer === 'customer');
+}
 
 process.exit(t.finish());

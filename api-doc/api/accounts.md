@@ -569,13 +569,13 @@ Excel file only, and the PDF lists them by name.
 
 | Section | Vendor | Agency | Agent |
 |---|:-:|:-:|:-:|
-| Sales and deductions: gross, bargain fee, commission (and %), delivery fee, COD fee, **net**, status | ✅ | | |
-| Orders: placed at and by whom, phone (masked), payment method and means, paid at, paid by, reference, total, completion, agency, agent *(Excel only)* | ✅ | | |
+| Sales and deductions: gross (**goods only**), bargain fee, commission (and %), delivery fee (**the shop's part**), COD fee, **net**, status | ✅ | | |
+| Orders: placed at and by whom, phone (masked), payment method and means, paid at, paid by, reference, goods, delivery paid by the customer, total, **delivery paid by**, completion, agency, agent *(Excel only)* | ✅ | | |
 | Products sold: listed price, your floor, final (negotiated) price, quantity, bargain fee per line *(Excel only)* | ✅ | | |
-| Deliveries: tracking number, agency, agent, fee, when assigned, picked up, delivered or returned *(Excel only)* | ✅ | | |
-| Cash on delivery: collected by whom and when, **settled to the platform when**, which remittance and who confirmed it | ✅ | | |
-| Delivery earnings: fee earned, COD fee, agent's share, agency net | | ✅ | ✅ |
-| Cash collected on delivery / cash handed over by agents | | ✅ | ✅ |
+| Deliveries: tracking number, agency, agent, fee, **paid by, customer paid, the shop's share**, when assigned, picked up, delivered or returned *(Excel only)* | ✅ | | |
+| Cash on delivery: **goods, delivery fee, amount**, collected by whom and when, **settled to the platform when**, which remittance and who confirmed it | ✅ | | |
+| Delivery earnings: **fee paid by (shop or customer)**, fee earned, COD fee, agent's share, agency net | | ✅ | ✅ |
+| Cash collected on delivery (**goods, delivery fee**, amount) / cash handed over by agents | | ✅ | ✅ |
 | Cash remitted to the platform (who confirmed it) · COD reserve | | ✅ | |
 | Adjustments (reversed earnings; delivery fees returned) | ✅ | ✅ | ✅ |
 | Refunds to customers · service bookings · order timeline *(timeline in Excel only)* | ✅ | | |
@@ -584,6 +584,20 @@ Excel file only, and the PDF lists them by name.
 **Net revenue** = gross − bargain fee − commission − delivery fee − COD fee. Every figure is the
 amount jovi-mall recorded when the payment was split, so the net equals what reached the
 wallet. The file never recalculates anything from a rate.
+
+**Customer-paid delivery (jovi-mall ADR-A11, since 2026-10-04 in the file).** A shop may now make
+the customer pay delivery. The formula is unchanged, but two of its terms are read precisely:
+
+- **gross is the goods only** — never the order total, which includes delivery the customer paid;
+- **delivery fee is the part the shop paid**: the whole agency fee on a free-delivery order,
+  normally `0` when the customer paid it (more only when a fee was raised above what the customer
+  paid). On a customer-paid cash-on-delivery sale the COD fee is therefore still shown on its
+  own; it is not lumped with delivery.
+
+Delivery the customers paid is shown in the order, delivery and cash tables and as one
+informational summary line, **"Delivery paid by customers (to agencies)"**, which sits outside the
+net arithmetic. A COD row's **amount** is all the cash collected (goods + delivery fee); its
+goods equal the sale's gross.
 
 **Balances** are printed "at the time of generation", and they are asked from jovi-mall.
 When jovi-mall cannot be reached, a download still works and the file says the balances were

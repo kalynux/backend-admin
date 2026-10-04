@@ -366,9 +366,41 @@ t.section('6. Routes, permissions and the audit catalog');
 const USER_ROUTES = routeManifest().filter((route) => route.fullPath.startsWith('/api/v1/users'));
 
 // Six at the user-management phase, eight once credential recovery landed, and nine since the
-// bot-memory reset (2026-09-22). §7 pins the ninth by name, so this count cannot pass on a
-// swap of one route for another.
-t.assert('nine routes are declared', () => USER_ROUTES.length === 9);
+// bot-memory reset (2026-09-22), twelve since role closure (jovi-mall ADR-A10, 2026-10-04 —
+// the closure-requests read, request and cancel, pinned by name below). §7 pins the ninth by
+// name, so this count cannot pass on a swap of one route for another.
+t.assert('twelve routes are declared', () => USER_ROUTES.length === 12);
+
+/**
+ * Role closure — jovi-mall ADR-A10. The administrator ASKS; only the user confirms. So the
+ * two writes sit behind `users.close`, which is destructive (tiers 1 + 2, never Support),
+ * and there is no confirm route on this surface at all.
+ */
+const closureRoute = (method: string, suffix: string) => USER_ROUTES.find(
+    (route) => route.method === method && route.fullPath.endsWith(suffix));
+
+t.assert('role closure: request and cancel are behind `users.close`', () => {
+    const request = closureRoute('post', '/roles/:role/closure');
+    const cancel = closureRoute('delete', '/roles/:role/closure');
+    return [request, cancel].every((route) => route?.access.kind === 'permission'
+        && route.access.permissions.includes('users.close'));
+});
+
+t.assert('role closure: the closure-requests list is a read on `users.read`', () => {
+    const list = closureRoute('get', '/closure-requests');
+    return list?.access.kind === 'permission' && list.access.permissions.includes('users.read');
+});
+
+t.assert('role closure: NO route can confirm a closure — only the user can, in jovi-mall', () =>
+    USER_ROUTES.every((route) => !/confirm/i.test(route.fullPath)));
+
+t.assert('role closure: `users.close` is destructive, held by Admin and Developer, not Support', () => {
+    const spec = permissionSpec('users.close');
+    return spec.destructive === true
+        && new Set(TIER_GRANTS[1]).has('users.close')
+        && new Set(TIER_GRANTS[2]).has('users.close')
+        && !new Set(TIER_GRANTS[3]).has('users.close');
+});
 
 t.assert('every one declares a permission — none is public or self-service', () =>
     USER_ROUTES.every((route) => route.access.kind === 'permission'));
@@ -469,9 +501,10 @@ t.assert('...unlike role management, which is', () =>
     isSensitive(permissionSpec('users.roles.manage')));
 
 // Three at the user-management phase, five once the two credential sends were catalogued,
-// and six since `users.bot_memory.reset` (2026-09-22).
-t.assert('six user actions are catalogued, and no read among them', () =>
-    USER_AUDIT_ACTIONS.length === 6
+// six since `users.bot_memory.reset` (2026-09-22), and eight since role closure's request
+// and cancel (2026-10-04).
+t.assert('eight user actions are catalogued, and no read among them', () =>
+    USER_AUDIT_ACTIONS.length === 8
     && USER_AUDIT_ACTIONS.every((action) => isAuditAction(action)));
 
 /**

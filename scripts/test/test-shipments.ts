@@ -51,7 +51,9 @@ import { routeManifest } from '../../src/api/route-manifest';
 import { TIER_GRANTS } from '../../src/modules/authorization/domain/tier-grants';
 import '../../src/modules/shipments/routes/shipment.routes';
 import { ObjectId } from 'mongodb';
-import { toShipmentOfferDto } from '../../src/modules/shipments/read-models/shipment.dto';
+import { toShipmentDetailDto, toShipmentListItemDto, toShipmentOfferDto } from '../../src/modules/shipments/read-models/shipment.dto';
+import type { ShipmentReadModel } from '../../src/modules/shipments/repositories/shipment.read.repository';
+import type { CashCollectionReadModel } from '../../src/modules/shipments/repositories/shipment-context.read.repository';
 import type { ShipmentOfferReadModel } from '../../src/modules/shipments/repositories/shipment-context.read.repository';
 
 const t = suite('shipment management');
@@ -513,5 +515,49 @@ t.assert(
         && !codRepo.code.includes('admin_override.by_user_id')
         && !/\badmin_override:\s*1/.test(codRepo.code),
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('11. Customer-paid delivery (jovi-mall ADR-A11)');
+
+{
+    const names = { agency: new Map<string, string | null>(), agent: new Map<string, string | null>(), order: new Map() };
+    const shipment = {
+        _id: new ObjectId(), order_id: new ObjectId(), agency_id: new ObjectId(), status: 'assigned',
+        delivery_fee_snapshot: 1_500, delivery_payer: 'customer', customer_delivery_fee: 1_500,
+        fee_components: { pickup_base: 1_000, weight_extra: 500, region_surcharge: 0, storage: 0, cap_applied: false, kg: 2, weight_grams: 1_800, out_of_region: false, flat_fallback: false },
+        customer_fee_refundable: 0,
+        created_at: new Date(), updated_at: new Date(),
+    } as unknown as ShipmentReadModel;
+    const list = toShipmentListItemDto(shipment, names);
+    t.assert('list: the agency fee, the payer and what the customer paid travel separately', () =>
+        list.deliveryFeeSnapshot === 1_500 && list.deliveryPayer === 'customer' && list.customerDeliveryFee === 1_500);
+
+    const cod = {
+        _id: new ObjectId(), shipment_id: shipment._id, order_id: shipment.order_id, status: 'pending',
+        expected_amount: 11_500, items_amount: 10_000, delivery_fee_amount: 1_500,
+    } as unknown as CashCollectionReadModel;
+    const detail = toShipmentDetailDto(shipment, names, {
+        offers: [], cod, outbox: {} as never, vendorName: null, itemSnapshots: new Map(), images: new Map(),
+    });
+    t.assert('detail: the fee itemisation is mapped camelCase, field by field', () =>
+        detail.feeComponents?.pickupBase === 1_000 && detail.feeComponents?.weightExtra === 500
+        && detail.feeComponents?.kg === 2 && detail.feeComponents?.flatFallback === false);
+    t.assert('detail: the COD block splits the cash into goods and delivery', () =>
+        detail.cod?.expectedAmount === 11_500 && detail.cod?.itemsAmount === 10_000 && detail.cod?.deliveryFeeAmount === 1_500);
+    const legacyDetail = toShipmentDetailDto(
+        { ...shipment, delivery_payer: undefined, customer_delivery_fee: undefined, fee_components: undefined, customer_fee_refundable: undefined } as unknown as ShipmentReadModel,
+        names,
+        { offers: [], cod: { ...cod, items_amount: undefined, delivery_fee_amount: undefined, expected_amount: 10_000 } as unknown as CashCollectionReadModel, outbox: {} as never, vendorName: null, itemSnapshots: new Map(), images: new Map() },
+    );
+    t.assert('a shipment from before ADR-A11: payer null, no itemisation, nothing refundable, all cash is goods', () =>
+        legacyDetail.deliveryPayer === null && legacyDetail.feeComponents === null && legacyDetail.customerFeeRefundable === 0
+        && legacyDetail.cod?.itemsAmount === 10_000 && legacyDetail.cod?.deliveryFeeAmount === 0);
+    t.assert('the new money fields are named in the projections, never a whole-document grab', () => {
+        const repo = files.find((f) => f.file.endsWith('shipment.read.repository.ts'))!.code;
+        const ctx = files.find((f) => f.file.endsWith('shipment-context.read.repository.ts'))!.code;
+        return repo.includes('delivery_payer: 1') && repo.includes('customer_delivery_fee: 1') && repo.includes('fee_components: 1')
+            && ctx.includes('items_amount: 1') && ctx.includes('delivery_fee_amount: 1');
+    });
+}
 
 process.exit(t.finish());

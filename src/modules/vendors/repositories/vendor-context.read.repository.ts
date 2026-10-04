@@ -36,6 +36,42 @@ export interface VendorSettingsReadModel extends Document {
     auto_redirect_orders_to_agency?: boolean;
     auto_redirect_threshold_amount?: number | null;
     auto_cancel_unpaid_days?: number;
+    /**
+     * Who pays delivery for this shop's part of a basket (jovi-mall ADR-A11). Absent until the
+     * vendor sets it — read through `vendorDeliveryTermsOf`, never raw.
+     */
+    delivery_terms?: { mode?: string | null; free_above_amount?: number | null } | null;
+}
+
+export type VendorDeliveryTermsMode = 'always' | 'never' | 'above';
+
+export interface VendorDeliveryTermsDto {
+    /** `always` — the shop pays · `never` — the customer pays · `above` — free from `freeAboveAmount`. */
+    mode: VendorDeliveryTermsMode;
+    /** Non-null iff `mode === 'above'`: the shop's items subtotal from which delivery is free. */
+    freeAboveAmount: number | null;
+}
+
+/**
+ * The stored terms with jovi-mall's default applied — a copy of its `vendorDeliveryTermsOf`
+ * (`vendors/domain/delivery-terms.ts`), rule for rule: absent → `always` (D-2); an unknown
+ * mode, or `above` without a usable threshold, also reads as `always` — the shop-pays
+ * reading, never one that tells an administrator a customer is charged on the strength of a
+ * value nobody set. A copy rather than a delegated read because it is a DEFAULT, not a
+ * verdict: checkout is the only thing that acts on it, and it acts on jovi-mall's own copy.
+ */
+export function vendorDeliveryTermsOf(
+    stored: { mode?: string | null; free_above_amount?: number | null } | null | undefined,
+): VendorDeliveryTermsDto {
+    const mode = stored?.mode;
+    if (mode === 'never') return { mode: 'never', freeAboveAmount: null };
+    if (mode === 'above') {
+        const amount = stored?.free_above_amount;
+        if (typeof amount === 'number' && Number.isFinite(amount) && amount >= 1) {
+            return { mode: 'above', freeAboveAmount: Math.floor(amount) };
+        }
+    }
+    return { mode: 'always', freeAboveAmount: null };
 }
 
 /**
@@ -54,6 +90,8 @@ const VENDOR_SETTINGS_PROJECTION = {
     auto_redirect_orders_to_agency: 1,
     auto_redirect_threshold_amount: 1,
     auto_cancel_unpaid_days: 1,
+    'delivery_terms.mode': 1,
+    'delivery_terms.free_above_amount': 1,
 } as const;
 
 export class VendorSettingsReadRepository extends PlatformReadRepository<VendorSettingsReadModel> {

@@ -3,7 +3,9 @@ import { defineRoute, permission, records } from '../../../api/route-manifest';
 import { UserController } from '../controllers/user.controller';
 import {
     ListUserActivityQuerySchema,
+    RequestRoleClosureSchema,
     ResetBotMemorySchema,
+    RoleClosureParamsSchema,
     SearchUsersQuerySchema,
     SendCredentialSchema,
     SuspendUserSchema,
@@ -108,6 +110,44 @@ defineRoute(router, {
     validate: { params: UserIdParamSchema },
     audit: records('users.reinstate'),
     handler: UserController.restore,
+});
+
+/**
+ * Role closure — jovi-mall ADR-A10. The administrator ASKS; the user confirms or declines
+ * in jovi-mall, signed in as that role, within seven days. There is no confirm route here
+ * and there must never be one.
+ *
+ * One permission, `users.close` (destructive — tiers 1 and 2), two audit actions. The list
+ * is a read and needs only `users.read`: Support can see that a request exists and how it
+ * was answered, which is the conversation they will be having with the user.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/:userId/closure-requests',
+    access: permission('users.read'),
+    validate: { params: UserIdParamSchema },
+    handler: UserController.listClosureRequests,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/:userId/roles/:role/closure',
+    access: permission('users.close'),
+    validate: { params: RoleClosureParamsSchema, body: RequestRoleClosureSchema },
+    audit: records('users.close.request'),
+    handler: UserController.requestClosure,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'delete',
+    path: '/:userId/roles/:role/closure',
+    access: permission('users.close'),
+    validate: { params: RoleClosureParamsSchema },
+    audit: records('users.close.cancel'),
+    handler: UserController.cancelClosure,
 });
 
 /**

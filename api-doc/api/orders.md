@@ -90,6 +90,7 @@ one to a collection this size to serve a sort nobody has asked for is the wrong 
       "customerName": "Amina B.",
       "currency": "XAF",
       "totalAmount": 27500,
+      "deliveryPayer": "customer",
       "paymentMethod": "cash_on_delivery",
       "paymentStatus": "pending",
       "fulfillmentStatus": "processing",
@@ -148,7 +149,9 @@ Every list field, plus:
   "data": {
     "…all list fields…": "…",
 
-    "priceBreakdown": { "base": 25000, "tax": 1250, "discount": 0, "total": 27500 },
+    "priceBreakdown": { "base": 25000, "delivery": 2500, "tax": 0, "discount": 0, "total": 27500 },
+    "deliveryPayerReason": "threshold_not_met",
+    "freeDeliveryShortfall": 5000,
     "paymentIntentId": "pi_9f2b8c1a…",
 
     "dispute": {
@@ -179,6 +182,8 @@ Every list field, plus:
         "quantity": 3,
         "price": 2500,
         "currency": "XAF",
+        "weightGrams": 1000,
+        "weightSource": "variant",
         "image": {
           "id": "6612aabbccddeeff00112233",
           "key": "products/6660.../plantain-1kg.jpg",
@@ -194,7 +199,6 @@ Every list field, plus:
           "shipmentId": "6671aabbccddeeff00112233",
           "trackingNumber": "WM-2026-0088412",
           "status": "assigned",
-          "freeDelivery": false,
           "hold": null,
           "pickup": { "source": "vendor_address", "vendorAddressId": "6650…", "agencyAddressId": null }
         }
@@ -208,6 +212,13 @@ Every list field, plus:
 
 | Field | Notes |
 |---|---|
+| **`totalAmount`** (list and detail) | What the customer was charged: **the goods plus any delivery the customer paid** (jovi-mall ADR-A11, 2026-10-03). It is not the vendor's gross — that is `priceBreakdown.base` |
+| **`deliveryPayer`** (list and detail) | `vendor` · `customer` — who paid this order's delivery, decided **per vendor order** at checkout from the shop's delivery terms. **`null`** on a digital order and on every order placed before customer-paid delivery existed — the shop paid all of those |
+| **`priceBreakdown.delivery`** | What the customer was charged for delivery: Σ the order's shipment fees when `deliveryPayer` is `customer`, **`0`** when the shop paid (and on older orders, which never wrote it). `total = base + delivery` |
+| **`deliveryPayerReason`** | Why: `shop_always` (shop offers free delivery) · `shop_never` (shop never does) · `shop_threshold_met` / `threshold_not_met` (shop offers it above an amount) · **`cap_fallback`** (the shop would have paid, but that failed the 30% delivery-cost cap, so the customer paid). `null` where `deliveryPayer` is |
+| **`freeDeliveryShortfall`** | How much more of this shop's goods would have made delivery free at checkout. `null` when not applicable |
+| **`items[].weightGrams`** / **`weightSource`** | Per-unit weight the delivery fee was priced on, snapshotted at checkout. `weightSource`: `variant` · `shipping_config` · `default` (no weight recorded — counted as 1 kg per unit). `null` on digital lines and older orders |
+| ~~`items[].delivery.freeDelivery`~~ | **Removed 2026-10-04.** The product-level flag no longer exists upstream; who pays delivery is the order's `deliveryPayer` |
 | `dispute` | **`null` when the order has never been disputed** — absent entirely rather than a block of nulls that reads as "unknown". Present (with `active: false`) once resolved, because a resolved dispute is exactly what an administrator opens this screen for |
 | `completion.auto` | Whether the escrow released automatically or a person confirmed |
 | **`deliveryAddress`** | **Textual only.** `coordinates` and the customer's raw input are excluded by projection *and* by the mapping — the sharpest PII in the collection |

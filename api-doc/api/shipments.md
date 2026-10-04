@@ -100,7 +100,9 @@ collection.
       "assignmentState": "accepted",
       "held": false,
       "itemCount": 3,
-      "deliveryFeeSnapshot": 1500,
+      "deliveryFeeSnapshot": 2500,
+      "deliveryPayer": "customer",
+      "customerDeliveryFee": 2500,
       "createdAt": "2026-08-12T10:30:00.000Z",
       "updatedAt": "2026-08-12T11:02:00.000Z"
     }
@@ -110,6 +112,13 @@ collection.
 ```
 
 `agent` is `null` while unassigned. `held` means the agency-deactivation cascade froze it.
+
+**Delivery money (jovi-mall ADR-A11, 2026-10-03).** `deliveryFeeSnapshot` is what the **agency** is
+paid for the run — written at checkout for every physical shipment since ADR-A11, `null` on older
+ones. `deliveryPayer` (`vendor` · `customer`, `null` = a shipment from before ADR-A11, which the
+shop paid) says who pays it, and `customerDeliveryFee` is what the **customer** was charged for the
+run (`0` when the shop pays). The two numbers are deliberately separate: they differ while a fee
+change is waiting for the customer's money.
 
 ---
 
@@ -177,10 +186,18 @@ Every list field, plus:
     "customerConfirmation": null,
     "hold": null,
 
+    "feeComponents": {
+      "pickupBase": 1500, "weightExtra": 1000, "regionSurcharge": 0, "storage": 0,
+      "capApplied": false, "kg": 3, "weightGrams": 3000, "outOfRegion": false, "flatFallback": false
+    },
+    "customerFeeRefundable": 0,
+
     "cod": {
       "collectionId": "6674aabbccddeeff00112233",
       "status": "pending",
-      "expectedAmount": 27500,
+      "expectedAmount": 10000,
+      "itemsAmount": 7500,
+      "deliveryFeeAmount": 2500,
       "currency": "XAF",
       "collectedAt": null,
       "verificationMethod": "delivery_code",
@@ -230,6 +247,9 @@ Every list field, plus:
 | **`handover`** | Where a replacement agent collects. **Textual only** — the geographic point is excluded by projection *and* by the mapping. Its `source` is very often `previous_agent_location`, i.e. a delivery agent's last known GPS position, and that value does not leave through here |
 | **`cod`** | The cash state. **Never the delivery code.** `codePlain`/`codeHash` are excluded twice over — the code is a bearer credential over the customer's cash |
 | `cod.codeLocked` | Too many wrong code attempts |
+| **`cod.expectedAmount`** | All the cash to collect: **`itemsAmount + deliveryFeeAmount`** since ADR-A11. `deliveryFeeAmount` is the delivery fee a customer-paid shipment's customer hands the agent with the goods (`0` when the shop pays). A collection from before ADR-A11 reads as all goods |
+| **`feeComponents`** | How the posted fee was built at checkout — base for the first kg, extra kg, out-of-region surcharge, storage part, whether the agency's per-shipment ceiling cut it (`capApplied`), and `flatFallback` when the agency had no pricing policy. **Display only**: `deliveryFeeSnapshot` is the number. `null` on older shipments |
+| **`customerFeeRefundable`** | Delivery money the platform holds that is **owed back to the customer** — the unspent fee of a customer-paid return, or what they paid above the fee finally charged. `0` = nothing owed |
 | `rejection.by.source` | **Says which database the id resolves in.** An `admin` id resolves in neither the platform database nor as a platform user |
 | `statusHistory[].byRole` | `agent`, `agency`, `admin` or `system` |
 | **`order.vendorName`** | The vendor's **business name** — `stores.name`. ⚠ **Not the same source as [`GET /orders`](orders.md#get-orders)'s `vendorName`**, which is `vendors.display_name`, the vendor's *personal* name. The two fields share a name and answer different questions; this one is the business, which is what an operator recognises the shop by. `null` where the vendor has no Store row (mid-onboarding) — **never `display_name` substituted in** |

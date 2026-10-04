@@ -414,3 +414,81 @@ export async function resetBotMemory(
         asBotMemoryState,
     );
 }
+
+/**
+ * Role closure — jovi-mall ADR-A10. What jovi-mall answers with: the request, not a user.
+ */
+export interface PlatformRoleClosureRequest {
+    id: string;
+    userId: string;
+    role: string;
+    status: string;
+    reason: string;
+    expiresAt: string;
+    [key: string]: unknown;
+}
+
+/** The fields worth diffing on a closure request: which role, and where it stands. */
+function asClosureState(result: PlatformRoleClosureRequest): Record<string, unknown> | null {
+    if (!result || typeof result !== 'object') return null;
+    return { requestId: result.id, role: result.role, status: result.status, expiresAt: result.expiresAt };
+}
+
+/**
+ * Ask the user to close one role. jovi-mall refuses up front — `ROLE_CLOSURE_BLOCKED` (422,
+ * itemised in `details.blockers`), `ROLE_CLOSURE_ALREADY_PENDING` (409),
+ * `ROLE_CLOSURE_ROLE_NOT_HELD` (422) — and every code reaches the dashboard in
+ * `details.platformCode`. Nothing about the role changes until the USER confirms.
+ */
+export async function requestRoleClosure(
+    userId: string,
+    role: string,
+    reason: string,
+    before: UserSnapshot,
+    context: ActorContext,
+): Promise<PlatformRoleClosureRequest> {
+    return auditedDelegation(
+        'users.close.request',
+        context,
+        { id: userId, label: labelOf(before) },
+        { role, reason },
+        before,
+        async () => {
+            const result = await platformRequest<PlatformRoleClosureRequest>({
+                method: 'POST',
+                path: `/users/${userId}/roles/${role}/closure`,
+                body: { reason },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return result.data;
+        },
+        asClosureState,
+    );
+}
+
+/** Withdraw the pending request. 404 `ROLE_CLOSURE_REQUEST_NOT_FOUND` when there is none. */
+export async function cancelRoleClosure(
+    userId: string,
+    role: string,
+    before: UserSnapshot,
+    context: ActorContext,
+): Promise<PlatformRoleClosureRequest> {
+    return auditedDelegation(
+        'users.close.cancel',
+        context,
+        { id: userId, label: labelOf(before) },
+        { role },
+        before,
+        async () => {
+            const result = await platformRequest<PlatformRoleClosureRequest>({
+                method: 'DELETE',
+                path: `/users/${userId}/roles/${role}/closure`,
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return result.data;
+        },
+        asClosureState,
+    );
+}

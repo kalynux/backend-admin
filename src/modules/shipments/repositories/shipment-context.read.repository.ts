@@ -96,7 +96,12 @@ export interface CashCollectionReadModel extends Document {
     agent_id?: ObjectId | null;
     agency_id?: ObjectId | null;
     status: string;
+    /** `items_amount + delivery_fee_amount` since jovi-mall ADR-A11; the goods alone before. */
     expected_amount: number;
+    /** The goods part; `null` on rows before ADR-A11 (all of whose cash was goods). */
+    items_amount?: number | null;
+    /** Customer-paid delivery collected in cash with the goods; `null` before ADR-A11. */
+    delivery_fee_amount?: number | null;
     currency?: string | null;
     code_attempts?: number;
     code_locked?: boolean;
@@ -135,6 +140,8 @@ export class CashCollectionReadRepository extends PlatformReadRepository<CashCol
             agency_id: 1,
             status: 1,
             expected_amount: 1,
+            items_amount: 1,
+            delivery_fee_amount: 1,
             currency: 1,
             code_attempts: 1,
             code_locked: 1,
