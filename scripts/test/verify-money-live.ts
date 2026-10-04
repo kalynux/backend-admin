@@ -457,14 +457,22 @@ async function main(): Promise<number> {
          * ADR-024 added `POST /payouts/:payoutId/triage` and `POST /payouts/:payoutId/send`,
          * taking this from fourteen to sixteen. Resolve-unknown (884bc90) added
          * `POST /payouts/:payoutId/resolve-unknown`, taking it to seventeen — and CI's live job
-         * was the first thing to notice, because this suite needs jovi-mall served.
+         * was the first thing to notice, because this suite needs jovi-mall served. The
+         * delivery-fee refund desk (8d3cf25) added list, detail and settle, taking it to
+         * twenty — and CI's live job noticed first again.
          *
          * It stays a hand-maintained count ON PURPOSE: every other assertion in this section
          * reads a route out of the manifest and would pass just as happily on an EMPTY one, so
          * a count is the only thing here that catches a mount which quietly stopped happening.
          * Update it deliberately when routes change; never derive it from the manifest it guards.
          */
-        t.assert('seventeen /money routes reached Express', () => money.length === 17);
+        t.assert('twenty /money routes reached Express', () => money.length === 20);
+
+        /** The three delivery-fee refund routes, by path. */
+        t.assert('...including the three delivery-fee refund routes, named rather than counted', () =>
+            ['/api/v1/money/delivery-fee-refunds', '/api/v1/money/delivery-fee-refunds/:refundId',
+                '/api/v1/money/delivery-fee-refunds/:refundId/settle']
+                .every((p) => money.some((r) => r.fullPath === p)));
 
         /** The resolve-unknown route, by path, for the same reason as the ADR-024 pair below. */
         t.assert('...including resolve-unknown, named rather than counted', () =>
