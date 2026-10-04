@@ -31,9 +31,9 @@ Design records: [`../../docs/ADR-003-GRANULAR-PERMISSIONS.md`](../../docs/ADR-00
 
 | Level (`tier`) | Label | Holds | Shape of the job |
 |---|---|---|---|
-| **1** | Developer | 128 of 128 | Everything, including the developer tools and every escalation-flagged action |
-| **2** | Admin | 106 of 128 | The operational tier — runs the platform day to day, including the money |
-| **3** | Support | 40 of 128 | Ticket work, the lookups needed to answer a ticket, sending an account holder their statement, editorial write on articles and bylines, resetting the customer bot's memory of a chat, and **pre-screening** a declared COD handover or a payout request. Nothing destructive, publishing stays a level above, and the one `financial` permission it holds cannot send money anywhere |
+| **1** | Developer | 132 of 132 | Everything, including the developer tools and every escalation-flagged action |
+| **2** | Admin | 110 of 132 | The operational tier — runs the platform day to day, including the money |
+| **3** | Support | 42 of 132 | Ticket work, the lookups needed to answer a ticket, sending an account holder their statement, editorial write on articles and bylines, resetting the customer bot's memory of a chat, and **pre-screening** a declared COD handover or a payout request. Nothing destructive, publishing stays a level above, and the one `financial` permission it holds cannot send money anywhere |
 
 A level is an administrator's **entire** authorization state. `tier` appears on the profile
 returned by `GET /auth/me`.
@@ -186,7 +186,7 @@ record were one decision, not two. See [ADR-020](../../docs/ADR-020-ADMIN-DATA-D
 ## The matrix
 
 ● granted  ·  not granted  ·  **†** = catalogued policy with **no endpoint built yet**
-(**4** of 128 permissions — down from 27, and the four that remain each have a written reason
+(**4** of 132 permissions — down from 27, and the four that remain each have a written reason
 below. The policy is decided ahead of the surface, deliberately.)
 
 ### `agents`
@@ -418,6 +418,7 @@ size cap still apply to it.
 | `users.password.reset` | write | ● | ● | · | — | Send a user a password-reset link over email, WhatsApp or Telegram |
 | `users.login_link.send` | write | ● | ● | · | — | Send a customer a passwordless sign-in link over email, WhatsApp or Telegram |
 | `users.bot_memory.reset` | write | ● | ● | ● | — | Reset the customer bot’s conversation memory for one user, so their next chat starts fresh |
+| `users.close` | write | ● | ● | · | destructive | Ask a user to close one of their roles (they must confirm; irreversible once they do) |
 | `users.roles.manage` † | write | ● | · | · | destructive | Add or remove a user’s platform roles |
 
 `users.bot_memory.reset` is the one `users` write Support holds, by the owner's decision
