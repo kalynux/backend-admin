@@ -168,11 +168,13 @@ function toPage<T>(result: { data: unknown; meta?: unknown }): PlatformPage<T> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * The platform's own commission account: `{ pending, available, reserve, requested,
- * currency }`.
+ * The platform's own earnings: the commission account's `{ pending, available, reserve,
+ * requested, currency }` at the top level (unchanged), plus `accounts.{commission,
+ * bargainFee}` and their `total` (2026-10-04 — the bargain fee lives in a second singleton,
+ * `platform_ai`, and was in no administrative total until then).
  *
- * The singleton, and the only earnings account that is not somebody's. `owner_id` is null
- * on its rows, which is why the ledger endpoint beside this one passes `null` explicitly
+ * Singletons, and the only earnings accounts that are not somebody's. `owner_id` is null
+ * on their rows, which is why the ledger endpoint beside this one passes `null` explicitly
  * rather than omitting the term.
  *
  * Not audited: a read leaves no state to reconstruct, so the permission gate is the whole
@@ -184,6 +186,44 @@ export async function platformEarnings(context: ActorContext): Promise<unknown> 
     const result = await platformRequest<unknown>({
         method: 'GET',
         path: '/earnings/platform',
+        actor: context.actor,
+        requestId: context.requestId,
+    });
+    return result.data;
+}
+
+/** A beneficiary as jovi-mall's money-split view names one — ids only; names are added here. */
+export interface PlatformMoneyBeneficiary {
+    type: string;
+    id: string | null;
+}
+
+/** The parts of jovi-mall's `OrderMoneySplitDto` this service touches; the rest passes through. */
+export interface PlatformOrderMoneySplit {
+    order: { vendorId: string; [key: string]: unknown };
+    sections: Array<{
+        shipment: { agencyId: string; agentId: string | null; [key: string]: unknown } | null;
+        lines: Array<{ beneficiary: PlatformMoneyBeneficiary; [key: string]: unknown }>;
+        [key: string]: unknown;
+    }>;
+    [key: string]: unknown;
+}
+
+/**
+ * Who gets what from one order, and on what basis — allocated where the split has run,
+ * projected where it has not.
+ *
+ * **Delegated, and it must be**: before a split runs, its figures exist only as jovi-mall's
+ * split arithmetic (`EarningsSplitService.compute*`, the same methods the split itself calls).
+ * A copy here would be a second formula, and a drifted explanation does not fail — support
+ * repeats it to a vendor. ADR-009 D-1: a verdict is asked for, a record is read.
+ *
+ * Not audited: a read that moves nothing and discloses no payout destination.
+ */
+export async function orderMoneySplit(orderId: string, context: ActorContext): Promise<PlatformOrderMoneySplit> {
+    const result = await platformRequest<PlatformOrderMoneySplit>({
+        method: 'GET',
+        path: `/earnings/orders/${orderId}/split`,
         actor: context.actor,
         requestId: context.requestId,
     });

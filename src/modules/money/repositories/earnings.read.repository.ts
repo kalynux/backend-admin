@@ -119,7 +119,7 @@ export class EarningsLedgerReadRepository extends PlatformReadRepository<Earning
      * dropped the term would return every owner's ledger under the platform's heading.
      */
     async listForOwner(
-        ownerType: string,
+        ownerType: string | readonly string[],
         ownerId: string | null,
         query: LedgerSearchQuery,
     ): Promise<Paginated<EarningsLedgerReadModel>> {
@@ -179,12 +179,14 @@ export class EarningsLedgerReadRepository extends PlatformReadRepository<Earning
  * owner's rows at once.
  */
 export function buildLedgerFilter(
-    ownerType: string,
+    ownerType: string | readonly string[],
     ownerId: string | null,
     query: LedgerSearchQuery,
 ): Filter<EarningsLedgerReadModel> {
     const clauses: Record<string, unknown>[] = [
-        { owner_type: ownerType },
+        // A LIST only for the platform's two singletons (commission + bargain fee) — both carry
+        // a null owner id, so the pair below still pins the feed to the marketplace's own rows.
+        { owner_type: typeof ownerType === 'string' ? ownerType : { $in: [...ownerType] } },
         { owner_id: ownerId === null ? null : toObjectIdOrNothing(ownerId) },
     ];
 
@@ -318,6 +320,62 @@ export class EarningsAllocationReadRepository extends PlatformReadRepository<Ear
             { sort: { created_at: 1, _id: 1 }, limit: 50 },
         );
     }
+
+    /**
+     * What the marketplace earned in `[from, to)` — Σ its allocations, by account, status and
+     * currency. `GET /money/earnings/platform/summary`.
+     *
+     * A sum of RECORDS, read directly, and it answers a question the balance endpoint cannot:
+     * a balance is "what is held now", never "what came in this month". It is not a second
+     * opinion about a balance — no sub-balance is derived here, and a reversed row is reported
+     * as reversed rather than netted against anything.
+     *
+     * Dated by `created_at`, which is the moment the split ran — payment for a prepaid order,
+     * the cash hand-over for COD. That is the "date money was received" rule the vendor
+     * analytics already follow (account-statements plan, O-2).
+     *
+     * Served by `{beneficiary_type, beneficiary_id, created_at}`: both platform accounts are
+     * singletons with a null id, so the match is two index ranges.
+     */
+    async platformEarnedBetween(from: Date | undefined, to: Date | undefined): Promise<PlatformEarnedRow[]> {
+        return this.aggregateBy<PlatformEarnedRow>([
+            { $match: buildPlatformEarnedFilter(from, to) },
+            {
+                $group: {
+                    _id: { account: '$beneficiary_type', status: '$status', currency: '$currency' },
+                    amount: { $sum: '$amount' },
+                    count: { $sum: 1 },
+                },
+            },
+        ]);
+    }
+}
+
+/** One group of `platformEarnedBetween`. */
+export interface PlatformEarnedRow extends Document {
+    _id: { account: string; status: string; currency: string };
+    amount: number;
+    count: number;
+}
+
+/**
+ * The two platform-owned accounts. `platform` is commission; `platform_ai` is the bargain fee
+ * (30% of what a bargainable line sold for above the vendor's minimum), kept in its own
+ * singleton by jovi-mall so it stays separately answerable (`earnings-account.model.ts`).
+ */
+export const PLATFORM_ACCOUNT_TYPES = ['platform', 'platform_ai'] as const;
+
+/** Pure, and exported so `test-money.ts` can assert it without a database. */
+export function buildPlatformEarnedFilter(from: Date | undefined, to: Date | undefined): Filter<EarningsAllocationReadModel> {
+    const clauses: Record<string, unknown>[] = [
+        { beneficiary_type: { $in: [...PLATFORM_ACCOUNT_TYPES] } },
+        // Genuinely null on both singletons — the term keeps the match inside the index range
+        // and would exclude a row nobody should ever write (a platform row carrying an id).
+        { beneficiary_id: null },
+    ];
+    const range = dateRange(from, to);
+    if (range) clauses.push({ created_at: range });
+    return { $and: clauses } as Filter<EarningsAllocationReadModel>;
 }
 
 /** Pure, and exported so `test-money.ts` can assert every branch without a database. */

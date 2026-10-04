@@ -66,7 +66,9 @@ import * as payoutWrites from '../../src/modules/money/domain/payout-dual-contro
 import {
     buildAllocationFilter,
     buildLedgerFilter,
+    buildPlatformEarnedFilter,
 } from '../../src/modules/money/repositories/earnings.read.repository';
+import { ledgerOwnerTypesOf, toPlatformEarnedSummaries } from '../../src/modules/money/domain/platform-earnings';
 import { buildPayoutFilter } from '../../src/modules/money/repositories/payout-request.read.repository';
 import { buildDeliveryFeeRefundFilter } from '../../src/modules/money/repositories/delivery-fee.read.repository';
 import {
@@ -1234,7 +1236,7 @@ t.section('10. The route manifest');
 
 const moneyRoutes = routeManifest().filter((route) => route.fullPath.startsWith('/api/v1/money'));
 
-t.assert('twenty routes are declared on /money (17 + three delivery-fee refund routes, ADR-A11 W-G2)', () => moneyRoutes.length === 20);
+t.assert('twenty-two routes are declared on /money (17 + three delivery-fee refund routes, ADR-A11 W-G2, + platform summary and order split, 2026-10-04)', () => moneyRoutes.length === 22);
 
 /**
  * The triage route is the ONE write on this surface a Support administrator can reach, and
@@ -1748,6 +1750,83 @@ t.section('13. Per-order payments: the checkout charge vs the delivery top-ups (
     t.assert('order block: owedManually counts manual_required rows only', () => block.owedManually === 500);
     t.assert('order block: returned = gateway refunds + paid by hand, NOT covered_by_order_refund (already a refund_transaction)', () =>
         block.returned === 250);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('13. What the platform earned — commission AND bargain fee (2026-10-04)');
+// ─────────────────────────────────────────────────────────────────────────────
+{
+    const group = (account: string, status: string, amount: number, count = 1, currency = 'XAF') =>
+        ({ _id: { account, status, currency }, amount, count });
+
+    // The owner's worked example: 65 000 sold over a 50 000 minimum, 10% plan.
+    const [xaf] = toPlatformEarnedSummaries([
+        group('platform', 'held', 6050),
+        group('platform_ai', 'held', 4500),
+        group('platform', 'released', 1000, 2),
+        group('platform_ai', 'reversed', 300),
+    ]);
+
+    t.assert('the bargain fee (platform_ai) is in the total, not only commission', () =>
+        xaf.total.earned === 6050 + 4500 + 1000 && xaf.bargainFee.earned === 4500 && xaf.commission.earned === 7050);
+    t.assert('reversed money is reported apart and excluded from earned', () =>
+        xaf.bargainFee.reversed === 300 && xaf.total.reversed === 300 && xaf.total.earned === 11550);
+    t.assert('held and released stay separate', () => xaf.total.held === 10550 && xaf.total.released === 1000);
+    t.assert('count follows earned rows only', () => xaf.total.count === 4);
+    t.assert('one summary per currency, never a cross-currency sum', () =>
+        toPlatformEarnedSummaries([group('platform', 'held', 1, 1, 'XAF'), group('platform', 'held', 1, 1, 'EUR')]).length === 2);
+    t.assert('an account that is not the platform\'s is ignored', () =>
+        toPlatformEarnedSummaries([group('vendor', 'held', 999)]).length === 0);
+
+    const filter = JSON.stringify(buildPlatformEarnedFilter(undefined, undefined));
+    t.assert('the summary reads BOTH platform singletons, null-id only', () =>
+        filter.includes('"platform"') && filter.includes('"platform_ai"') && filter.includes('"beneficiary_id":null'));
+
+    t.assert('ledger default reads both accounts; each choice narrows to one', () =>
+        ledgerOwnerTypesOf(undefined).join() === 'platform,platform_ai'
+        && ledgerOwnerTypesOf('commission').join() === 'platform'
+        && ledgerOwnerTypesOf('bargain_fee').join() === 'platform_ai');
+    t.assert('a ledger filter over both keeps the null owner id (never every owner\'s rows)', () => {
+        const f = JSON.stringify(buildLedgerFilter(['platform', 'platform_ai'], null, {} as never));
+        return f.includes('"$in":["platform","platform_ai"]') && f.includes('"owner_id":null');
+    });
+    t.assert('the ledger route now offers ?account=', () =>
+        ListPlatformLedgerQuerySchema.safeParse({ account: 'bargain_fee' }).success
+        && !ListPlatformLedgerQuerySchema.safeParse({ account: 'everything' }).success);
+    t.assert('jovi-mall\'s platform endpoint reads BOTH balances (the delegated half)', () => {
+        const ctrl = readFileSync(join(JOVI, 'modules', 'earnings', 'controllers', 'admin-earnings.controller.ts'), 'utf8');
+        return ctrl.includes("getBalances('platform', null)") && ctrl.includes("getBalances('platform_ai', null)");
+    });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('14. One order\'s money split (2026-10-04)');
+// ─────────────────────────────────────────────────────────────────────────────
+{
+    const route = moneyRoutes.find((r) => r.fullPath === '/api/v1/money/orders/:orderId/split');
+    t.assert('the split route is declared, GET, behind money.splits.read alone', () =>
+        route !== undefined && route.method === 'get' && route.access.kind === 'permission'
+        && [...route.access.permissions].join() === 'money.splits.read');
+    t.assert('money.splits.read is held by EVERY tier, Support included, and is not financial', () =>
+        ([1, 2, 3] as const).every((tier) => (TIER_GRANTS[tier] as readonly string[]).includes('money.splits.read'))
+        && !(PERMISSION_CATALOG as Record<string, { financial?: boolean }>)['money.splits.read']?.financial);
+    t.assert('the split is DELEGATED to jovi-mall, never computed here', () =>
+        read(...MONEY_GATEWAY).includes('path: `/earnings/orders/${orderId}/split`'));
+    t.assert('the path jovi-mall serves matches (cross-repo)', () =>
+        readFileSync(join(JOVI, 'modules', 'earnings', 'routes', 'admin-earnings.routes.ts'), 'utf8')
+            .includes("router.get('/orders/:orderId/split'"));
+    t.assert('no split arithmetic in this service (no rate, no rounding in the money module\'s split code)', () => {
+        const ctrl = readCode(...MONEY_CONTROLLER);
+        const start = ctrl.indexOf('static orderSplit');
+        const body = ctrl.slice(start, ctrl.indexOf('\n    static ', start + 10));
+        return start > 0 && !/Math\.floor|\/\s*100\b|\*\s*\d/.test(body);
+    });
+    t.assert('names are ADDED beside ids, through the shared batched lookup', () => {
+        const ctrl = readCode(...MONEY_CONTROLLER);
+        const start = ctrl.indexOf('static orderSplit');
+        const body = ctrl.slice(start, ctrl.indexOf('\n    static ', start + 10));
+        return body.includes('hydrateOwnerNames(owners)') && body.includes('beneficiary: { ...line.beneficiary, name:');
+    });
 }
 
 process.exit(t.finish());

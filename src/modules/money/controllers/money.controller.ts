@@ -55,10 +55,12 @@ import {
     ListPlatformLedgerQuery,
     ListRefundsQuery,
     MarkPaidBody,
+    PlatformEarningsSummaryQuery,
     RejectPayoutBody,
     ResolveUnknownPayoutBody,
     TriagePayoutBody,
 } from '../validators/money.validator';
+import { ledgerOwnerTypesOf, toPlatformEarnedSummaries } from '../domain/platform-earnings';
 
 /**
  * `/api/v1/money` — earnings, payouts and gateway settlements.
@@ -111,15 +113,13 @@ const vendors = new VendorReadRepository();
 const agencies = new AgencyReadRepository();
 const agents = new AgentReadRepository();
 
-/**
- * The platform singleton's owner terms.
- *
- * `owner_id` is genuinely `null` on those rows — that is what "the marketplace's own
- * commission account" looks like in this schema — so the ledger filter is given `null`
- * explicitly rather than having the term omitted. Omitting it would return every owner's
- * ledger under the platform's heading.
+/*
+ * The platform singletons' owner terms are `ledgerOwnerTypesOf(account)` — `platform`
+ * (commission) and/or `platform_ai` (bargain fee). `owner_id` is genuinely `null` on those
+ * rows — that is what "the marketplace's own account" looks like in this schema — so the
+ * ledger filter is given `null` explicitly rather than having the term omitted. Omitting it
+ * would return every owner's ledger under the platform's heading.
  */
-const PLATFORM_OWNER_TYPE = 'platform';
 
 interface OwnerRow {
     ownerType: string;
@@ -286,7 +286,9 @@ export class MoneyController {
     static platformLedger = asyncHandler(async (req: Request, res: Response) => {
         const query = req.query as unknown as ListPlatformLedgerQuery;
 
-        const page = await ledger.listForOwner(PLATFORM_OWNER_TYPE, null, {
+        // Both platform singletons by default — commission AND the bargain fee (2026-10-04).
+        // Each row still names its own `owner.type`, so the two stay distinguishable.
+        const page = await ledger.listForOwner(ledgerOwnerTypesOf(query.account), null, {
             entryType: query.entryType,
             reasonCode: query.reasonCode,
             sourceType: query.sourceType,
@@ -305,6 +307,71 @@ export class MoneyController {
             page.items.map((row) => toLedgerEntryDto(row, names)),
             toPageMeta(page.total, page.page, page.limit),
         );
+    });
+
+    /**
+     * GET /api/v1/money/earnings/platform/summary — what the marketplace earned in a window,
+     * commission and bargain fee side by side. A DIRECT read: a sum of allocation records,
+     * not a balance. See `domain/platform-earnings.ts`.
+     */
+    static platformSummary = asyncHandler(async (req: Request, res: Response) => {
+        const query = req.query as unknown as PlatformEarningsSummaryQuery;
+        const rows = await allocations.platformEarnedBetween(query.from, query.to);
+        sendSuccess(res, {
+            from: query.from ?? null,
+            to: query.to ?? null,
+            currencies: toPlatformEarnedSummaries(rows),
+        });
+    });
+
+    /**
+     * GET /api/v1/money/orders/:orderId/split — who gets what from one order, and why.
+     *
+     * DELEGATED (the figures before a split exist only as jovi-mall's split arithmetic), then
+     * given display names here with the same batched lookup every money list uses. A name is
+     * ADDED beside each id, never replacing it: `platform` and `platform_ai` carry `name: null`
+     * (they have no directory row — see `hydrateOwnerNames`), and a customer is left unnamed
+     * on purpose; this view explains money to a vendor, and the customer's identity is not
+     * part of that explanation.
+     */
+    static orderSplit = asyncHandler(async (req: Request, res: Response) => {
+        if (!(await orderNumbers.findById(req.params.orderId))) {
+            throw createAppError(ERROR_CODES.NOT_FOUND, 404, 'Order not found');
+        }
+        const split = await gateway.orderMoneySplit(req.params.orderId, actorContextOf(req));
+
+        const owners: OwnerRow[] = [{ ownerType: 'vendor', ownerId: split.order.vendorId }];
+        for (const section of split.sections) {
+            if (section.shipment) {
+                owners.push({ ownerType: 'agency', ownerId: section.shipment.agencyId });
+                owners.push({ ownerType: 'agent', ownerId: section.shipment.agentId });
+            }
+            for (const line of section.lines) {
+                owners.push({ ownerType: line.beneficiary.type, ownerId: line.beneficiary.id });
+            }
+        }
+        const names = await hydrateOwnerNames(owners);
+        const nameOf = (type: string, id: string | null): string | null =>
+            id ? names.get(ownerKey(type, id)) ?? null : null;
+
+        sendSuccess(res, {
+            ...split,
+            order: { ...split.order, vendorName: nameOf('vendor', split.order.vendorId) },
+            sections: split.sections.map((section) => ({
+                ...section,
+                shipment: section.shipment
+                    ? {
+                          ...section.shipment,
+                          agencyName: nameOf('agency', section.shipment.agencyId),
+                          agentName: nameOf('agent', section.shipment.agentId),
+                      }
+                    : null,
+                lines: section.lines.map((line) => ({
+                    ...line,
+                    beneficiary: { ...line.beneficiary, name: nameOf(line.beneficiary.type, line.beneficiary.id) },
+                })),
+            })),
+        });
     });
 
     /**

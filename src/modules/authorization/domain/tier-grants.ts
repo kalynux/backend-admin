@@ -190,6 +190,12 @@ const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
     'money.statements.send',
 
     /**
+     * One order's money split (2026-10-04) — the per-order answer to the same ticket a
+     * statement answers in bulk: "why did I receive this amount?". Read-only, moves nothing.
+     */
+    'money.splits.read',
+
+    /**
      * The payout queue, and the verdict on it. Added when payout review became a two-stage
      * job (tier 3 pre-screens, tier 1/2 sends).
      *

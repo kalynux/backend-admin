@@ -29,7 +29,9 @@ import {
     ListPlatformLedgerQuerySchema,
     ListRefundsQuerySchema,
     MarkPaidSchema,
+    OrderIdParamSchema,
     PayoutIdParamSchema,
+    PlatformEarningsSummaryQuerySchema,
     RejectPayoutSchema,
     ResolveUnknownPayoutSchema,
     TriagePayoutSchema,
@@ -80,7 +82,10 @@ defineRoute(router, {
     handler: MoneyController.platformEarnings,
 });
 
-/** Its ledger. A DIRECT read of the same account the route above delegates. */
+/**
+ * Its ledger. A DIRECT read of the same accounts the route above delegates — both platform
+ * singletons by default (`?account=all|commission|bargain_fee`, 2026-10-04).
+ */
 defineRoute(router, {
     mountedAt,
     method: 'get',
@@ -88,6 +93,34 @@ defineRoute(router, {
     access: permission('money.earnings.read'),
     validate: { query: ListPlatformLedgerQuerySchema },
     handler: MoneyController.platformLedger,
+});
+
+/**
+ * What the marketplace earned in `[from, to)`, commission and bargain fee side by side
+ * (2026-10-04). A DIRECT read — a sum of allocation records, never a balance.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/earnings/platform/summary',
+    access: permission('money.earnings.read'),
+    validate: { query: PlatformEarningsSummaryQuerySchema },
+    handler: MoneyController.platformSummary,
+});
+
+/**
+ * One order's money split — who gets what, on what basis, allocated or projected
+ * (2026-10-04). DELEGATED: before a split runs its figures exist only as jovi-mall's split
+ * arithmetic. `money.splits.read` is held by every tier, Support included — it answers the
+ * vendor's "why did I get this amount?" ticket.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/orders/:orderId/split',
+    access: permission('money.splits.read'),
+    validate: { params: OrderIdParamSchema },
+    handler: MoneyController.orderSplit,
 });
 
 /**

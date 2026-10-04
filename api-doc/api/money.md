@@ -7,7 +7,7 @@ verification date — see the section under `GET /money/payouts` (BR-026 § 1).
 
 Base path: `/api/v1/money`
 
-Fourteen routes; eight had no legacy equivalent at all.
+Twenty-two routes on the mount (`test:money` § 10 pins the count — re-measured 2026-10-04, when the platform summary and the order split were added).
 
 Design record: [`../../docs/ADR-011-ACCOUNTS-AND-FINANCE.md`](../../docs/ADR-011-ACCOUNTS-AND-FINANCE.md).
 
@@ -15,6 +15,8 @@ Design record: [`../../docs/ADR-011-ACCOUNTS-AND-FINANCE.md`](../../docs/ADR-011
 |---|---|---|---|---|
 | `GET` | `/money/earnings/platform` | `money.earnings.read` | **delegated** | — |
 | `GET` | `/money/earnings/platform/ledger` | `money.earnings.read` | direct read | — |
+| `GET` | `/money/earnings/platform/summary` | `money.earnings.read` | direct read | — |
+| `GET` | `/money/orders/:orderId/split` | **`money.splits.read`** (every tier) | **delegated** | — |
 | `GET` | `/money/earnings/accounts` | `money.earnings.read` | **delegated** | — |
 | `GET` | `/money/earnings/allocations` | `money.earnings.read` | direct read | — |
 | `GET` | `/money/earnings/allocations/:allocationId` | `money.earnings.read` | direct read | — |
@@ -82,10 +84,14 @@ that arithmetic would be a second opinion about how much money exists.
 
 ## What Support can see here
 
-Only **`money.payments.read`** — gateway payments and refunds. *"Did my payment go through, and
+**`money.payments.read`** — gateway payments and refunds. *"Did my payment go through, and
 was I refunded"* is one of the commonest ticket questions, and the sharp fields (raw gateway
 payload, payload hash, idempotency key) are removed by **projection**, for everyone, rather than
 by permission.
+
+**`money.splits.read`** (2026-10-04) — one order's money split, `GET /money/orders/:orderId/split`.
+*"Why did I receive this amount?"* arrives as a vendor's ticket, and this answers it for one
+order the way a statement answers it in bulk.
 
 Everything else on this mount is Admin and above.
 
@@ -101,7 +107,13 @@ than a `400`. That is honest: it is a filter matching nothing.
 
 ## `GET /money/earnings/platform`
 
-The platform's own commission account.
+What the marketplace holds: its **two** earnings accounts and their total.
+
+⚠ **Until 2026-10-04 this returned the commission account alone**, so every answer to "how much
+has the platform made" left out the **bargain fee** — 30% of what each bargainable line sold for
+above the vendor's minimum. That fee is credited to a second platform account (`platform_ai`),
+kept separate on purpose so it can be reported on its own. Read **`total`** for what the platform
+made; read `accounts` to see the two parts.
 
 | | |
 |---|---|
@@ -111,14 +123,82 @@ The platform's own commission account.
 
 ### Response (200)
 
-`data` is the platform's earnings-account object (pending, available, reserved, withdrawn).
+```jsonc
+{
+  "success": true,
+  "data": {
+    // The COMMISSION account, at the top level — unchanged, so an older client keeps working.
+    "pending": 6050, "available": 120000, "reserve": 0, "requested": 0, "currency": "XAF",
+    "accounts": {
+      "commission": { "pending": 6050, "available": 120000, "reserve": 0, "requested": 0, "currency": "XAF" },
+      "bargainFee": { "pending": 4500, "available": 30000, "reserve": 0, "requested": 0, "currency": "XAF" }
+    },
+    "total": { "pending": 10550, "available": 150000, "earned": 160550, "currency": "XAF" }
+  }
+}
+```
+
+| Field | Notes |
+|---|---|
+| `accounts.commission` | The vendor's plan rate, taken from the items after the bargain fee |
+| `accounts.bargainFee` | The bargain fee. 0 on a marketplace with no bargainable products sold |
+| `pending` | Earned, still in escrow (the order has not completed, or its hold window has not passed) |
+| `available` | Earned and final. Platform accounts are never paid out, so it only grows |
+| `total.earned` | **What the platform has made, to date**, net of anything a refund reversed. The sum of all four sub-balances of both accounts |
+| `total` | `null` if the two accounts ever hold different currencies — never a cross-currency sum |
+
+For "what did we make **this month**", use `/money/earnings/platform/summary` — a balance cannot
+answer a question about a period.
+
+---
+
+## `GET /money/earnings/platform/summary`
+
+What the marketplace earned in a window, commission and bargain fee side by side. A **direct
+read**: the sum of the platform's allocation records, dated by when each split ran — payment for
+a prepaid order, the cash hand-over for COD (the same "date the money was received" rule the
+vendor analytics use).
+
+| | |
+|---|---|
+| **Permission** | `money.earnings.read` |
+| **Parameters** | `from`, `to` — ISO-8601, both optional, half-open `[from, to)`. Neither ⇒ since the beginning. **No span cap.** ⚠ **Strict**: any other key is a `400` |
+
+### Response (200)
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "from": "2026-10-01T00:00:00.000Z",
+    "to": null,
+    "currencies": [
+      {
+        "currency": "XAF",
+        "commission": { "held": 6050, "released": 1000, "reversed": 0,   "earned": 7050,  "count": 3 },
+        "bargainFee": { "held": 4500, "released": 0,    "reversed": 300, "earned": 4500,  "count": 1 },
+        "total":      { "held": 10550, "released": 1000, "reversed": 300, "earned": 11550, "count": 4 }
+      }
+    ]
+  }
+}
+```
+
+| Field | Notes |
+|---|---|
+| `currencies` | One entry per currency, ordered by code. `[]` when nothing was earned in the window |
+| `held` | Earned, still in escrow |
+| `released` | Earned and final |
+| `reversed` | Taken back by a refund. **Not** part of `earned` |
+| `earned` | `held + released` |
+| `count` | Allocations behind `earned` |
 
 ---
 
 ## `GET /money/earnings/platform/ledger`
 
-The movements behind that account. A **direct read** of the same account the route above
-delegates.
+The movements behind those accounts. A **direct read** of the same accounts the route above
+delegates — **both of them by default** since 2026-10-04.
 
 | | |
 |---|---|
@@ -130,6 +210,7 @@ delegates.
 
 | Parameter | Type | Notes |
 |---|---|---|
+| `account` | `all` · `commission` · `bargain_fee` | Default **`all`**. Each row names its own account in `owner.type` (`platform` = commission, `platform_ai` = bargain fee). ⚠ `balancesAfter` is **that row's account's** balance — on an `all` page, consecutive rows can belong to different accounts, so do not chain them |
 | `entryType` | string, 1–40 | **The filter this endpoint exists for.** A `hold` is money arriving in escrow and a `release` is the same money becoming withdrawable — reading a page that mixes them without being able to separate them is how a ledger gets double-counted by eye |
 | `reasonCode` | string, 1–40 | |
 | `sourceType` | string, 1–40 | |
@@ -163,6 +244,179 @@ delegates.
 | `entryType` | `hold` · `release` · `reversal` · `reserve_hold` · `reserve_release` |
 | **`amount`** | **The positive magnitude moved — never signed.** Direction is `entryType`'s job. A client that subtracts on the sign alone gets `reserve_hold` backwards: it moves money *sideways* (pending → reserve), not in or out |
 | `balancesAfter` | The balances immediately after this entry. **What makes the ledger checkable** |
+
+---
+
+## `GET /money/orders/:orderId/split`
+
+**Who gets what from one order, and on what basis**, as early as it can be known. Built so
+support can explain to a vendor why they received the amount they see.
+
+| | |
+|---|---|
+| **Permission** | `money.splits.read` — **every tier, Support included** |
+| **Transport** | **Delegated** to jovi-mall (`GET /api/internal/admin/earnings/orders/:orderId/split`). Before a split runs, its figures exist only as jovi-mall's own split arithmetic, so a copy here would be a second formula. Names are added here |
+| **Errors** | `404 NOT_FOUND` — no such order |
+
+### How an order is split — the sections
+
+One order's money moves at up to three kinds of moment. Each is a **section**:
+
+| `moment` | When | Who is in it |
+|---|---|---|
+| `payment` | prepaid order paid | the items: **bargain fee** (platform), **commission** (platform), **vendor net** |
+| `delivery` | one prepaid parcel delivered (or returned) | that parcel's delivery fee: **agency**, **agent**, any **refund** of an unused fee |
+| `cash_collection` | one COD parcel's cash handed over | everything at once: the items **and** the delivery fee for that parcel |
+
+A prepaid order has one `payment` section plus one `delivery` section per parcel. A COD order has
+one `cash_collection` section per parcel. A digital order has `payment` only.
+
+| `state` | Meaning |
+|---|---|
+| `allocated` | The split ran. Every figure is the **real** amount, read from the money records |
+| `projected` | Not yet. Every figure is what the split **would** write now. ⚠ An **estimate**: the commission rate is read again when the money moves, an agent's share is unknown until an agent accepts, and an agency can still re-price the delivery |
+| `none` | Nothing will be split here — see `noneReason` |
+| `unavailable` | The projection failed (logged on jovi-mall). Retry; report if persistent |
+
+| `noneReason` | Meaning |
+|---|---|
+| `order_void` | The order was cancelled, failed or refunded before this moment |
+| `returned_without_cash` | A COD parcel (or a cash-paid delivery fee) came back: no cash, nothing to split |
+| `agency_paid_at_payment` | An old order whose agency was paid at payment (shown in the `payment` section) |
+
+### Response (200) — the owner's example, prepaid, before payment
+
+Sold at 65 000 over a 50 000 minimum, vendor on a 10% plan, vendor pays a 2 000 delivery.
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "order": {
+      "id": "…", "orderNumber": "ORD-2026-000123", "vendorId": "…", "vendorName": "Chez Ama",
+      "customerId": "…", "currency": "XAF", "orderType": "physical",
+      "paymentMethod": "mobile_money", "paymentStatus": "AWAITING_PAYMENT",
+      "fulfillmentStatus": "pending", "deliveryPayer": "vendor",
+      "completedAt": null, "createdAt": "2026-10-04T09:00:00.000Z"
+    },
+    "charged": { "items": 65000, "delivery": 0, "deliveryInCash": 0, "total": 65000 },
+    "sections": [
+      {
+        "key": "payment", "moment": "payment",
+        "source": { "type": "order", "id": "…" },
+        "state": "projected", "noneReason": null, "shipment": null,
+        "goods": {
+          "gross": 65000,
+          "bargainFee": {
+            "percent": 30, "amount": 4500,
+            "lines": [
+              { "orderItemId": "…", "title": "Phone — Black", "unitPrice": 65000, "floorPrice": 50000,
+                "quantity": 1, "uplift": 15000, "fee": 4500 }
+            ]
+          },
+          "commission": { "percent": 10, "base": 60500, "amount": 6050 },
+          "deliveryFeeCharged": 2000,
+          "codHandlingFee": 0,
+          "vendorNet": 52450
+        },
+        "delivery": null,
+        "lines": [
+          { "role": "vendor_net", "beneficiary": { "type": "vendor", "id": "…", "name": "Chez Ama" },
+            "amount": 52450, "status": "projected", "allocationId": null, "holdReleaseAt": null,
+            "releasedAt": null, "requiresCashSettlement": false, "cashSettledAt": null, "waitingOn": [] },
+          { "role": "commission", "beneficiary": { "type": "platform", "id": null, "name": null }, "amount": 6050, "status": "projected", "…": "…" },
+          { "role": "bargain_fee", "beneficiary": { "type": "platform_ai", "id": null, "name": null }, "amount": 4500, "status": "projected", "…": "…" }
+        ],
+        "notes": ["commission_rate_may_change"]
+      },
+      {
+        "key": "shipment:…", "moment": "delivery",
+        "source": { "type": "shipment", "id": "…" },
+        "state": "projected", "noneReason": null,
+        "shipment": { "id": "…", "trackingNumber": "DLX-261004-…", "status": "pending",
+                      "agencyId": "…", "agencyName": "Douala Express", "agentId": null, "agentName": null },
+        "goods": null,
+        "delivery": {
+          "fee": 2000, "feeSource": "snapshot", "payer": "vendor", "customerPaid": 0, "vendorBorne": 2000,
+          "outcome": "expected", "earnedFee": 2000, "codHandlingFee": 0,
+          "agentCut": null, "agentSplit": null, "refundToVendor": 0, "refundToCustomer": 0
+        },
+        "lines": [
+          { "role": "delivery_agency", "beneficiary": { "type": "agency", "id": "…", "name": "Douala Express" }, "amount": 2000, "status": "projected", "…": "…" }
+        ],
+        "notes": ["agent_not_assigned"]
+      }
+    ],
+    "totals": {
+      "platform": { "commission": 6050, "bargainFee": 4500, "total": 10550 },
+      "vendor": 52450, "agencies": 2000, "agents": 0, "customerRefunds": 0, "reversed": 0
+    },
+    "reconciliation": { "charged": 65000, "distributed": 65000, "difference": 0, "complete": true },
+    "estimated": true,
+    "holdDays": 7,
+    "bargainFeePercent": 30
+  }
+}
+```
+
+### The fields that explain the money
+
+| Field | Notes |
+|---|---|
+| `goods.gross` | What the items sold for. **Never** includes a delivery fee the customer paid |
+| `goods.bargainFee.lines[]` | Per item: price paid, the vendor's **minimum** at checkout (`floorPrice`, `null` = not a bargainable item), `uplift` = (price − minimum) × quantity, `fee` = `percent`% of the uplift, rounded down |
+| `goods.commission.base` | `gross − bargainFee`. **No commission is taken on the bargain fee** |
+| `goods.deliveryFeeCharged` | The part of the delivery the **vendor** pays. 0 when the customer pays delivery |
+| `goods.codHandlingFee` | COD only: the agency's fee for handling cash, paid by the vendor, on the goods only |
+| `goods.vendorNet` | `gross − bargainFee − commission − deliveryFeeCharged − codHandlingFee` |
+| `delivery.fee` | The agency's fee for the parcel. `feeSource`: `vendor_approved` (a fee change the vendor accepted) · `snapshot` (the price at checkout, or at cash collection) · `formula` (priced live — no snapshot) |
+| `delivery.payer` | `vendor` or `customer`. `customerPaid` and `vendorBorne` split the fee between them |
+| `delivery.outcome` | `expected` (not over, shown as if delivered) · `delivered` · `returned` |
+| `delivery.earnedFee` | What the run earned — the whole fee if delivered, the agency's return fee if returned |
+| `delivery.agentCut` | The agent's share. **`null` = no agent has accepted yet**, and the agency line then **includes** the agent's future share |
+| `delivery.agentSplit` | The agent's contract: `{ model: percentage \| flat \| monthly_salary, percent, flatAmount }` |
+| `delivery.refundToVendor` / `refundToCustomer` | The unused fee going back when a parcel is returned (or a customer paid above a lowered fee) |
+
+### Lines — who gets what
+
+| `role` | Beneficiary | What it is |
+|---|---|---|
+| `bargain_fee` | `platform_ai` | 30% of the uplift above the vendor's minimum |
+| `commission` | `platform` | The vendor's plan rate on `gross − bargainFee` |
+| `vendor_net` | `vendor` | What the vendor keeps from the items |
+| `delivery_agency` | `agency` | The fee the run earned − the agent's cut + any COD handling fee |
+| `delivery_agent` | `agent` | The agent's contracted share |
+| `delivery_refund_vendor` | `vendor` | Unused vendor-paid fee returned |
+| `delivery_refund_customer` | `customer` | Owed to the customer. **Not** an earnings line — it is settled through `/money/delivery-fee-refunds` |
+
+| `status` | Meaning |
+|---|---|
+| `projected` | Not split yet |
+| `held` | Split, in escrow. `waitingOn` says why it is not released: `order_not_completed` (escrow starts when the order completes) · `hold_window` (completed; releases at `holdReleaseAt`, `holdDays` after) · `cash_not_settled` (COD cash not yet back at the platform) |
+| `released` | Final; in the beneficiary's withdrawable balance |
+| `reversed` | Taken back by a refund. Excluded from `totals`, counted in `totals.reversed` |
+| `owed` | A customer refund recorded and not yet paid |
+
+`beneficiary.name` is the business name (a vendor's store, an agency's magazin) or an agent's
+name. `null` for the two platform accounts and, deliberately, for the customer.
+
+### `notes` — read the numbers right
+
+| Note | Meaning |
+|---|---|
+| `commission_rate_may_change` | Projected: the vendor's plan rate is read again when the money moves |
+| `agent_not_assigned` | The agent's share is inside the agency line until an agent accepts |
+| `vendor_net_negative` | The costs exceed the items: **the split will refuse this order** (`EARNINGS_INVALID_SPLIT`). Escalate |
+| `fee_not_charged_to_vendor` | A parcel created after payment: its fee was never deducted from the vendor |
+| `legacy_agency_on_order` | An order paid before delivery fees were deferred: the agency was paid at payment |
+
+### `reconciliation` — the check
+
+`charged` is what the customer paid (online, plus any delivery fee handed to the rider in cash);
+`distributed` is the sum of every non-reversed line. **On a normal order `difference` is 0**,
+projected or allocated — the splits are built to add up exactly. A non-zero `difference` is a real
+finding worth escalating. `complete` is `false` while any section is `none` / `unavailable` or a
+line is reversed; the difference then means little.
 
 ---
 

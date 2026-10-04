@@ -1,5 +1,7 @@
 # Permissions and administrator levels
 
+⚠ **Re-measured against source 2026-10-04 (`npm run authz:matrix`): 132 permissions across 22 families, tier totals 132 / 110 / 42.** This session added one name, `money.splits.read` (one order's money split, `GET /money/orders/:orderId/split` — [the changelog](../FRONTEND-CHANGELOG-money-split.md)), held by **every** tier, Support included, unflagged. The other three since the 2026-10-02 note below arrived from concurrent work on 2026-10-04 (the new `catalog` family's `catalog.categories.read` and `catalog.categories.manage`, and role closure's `users.close`); their own sections carry them. Re-derive rather than quoting.
+
 ⚠ **Re-measured against source 2026-10-02: 128 permissions across 21 families, tier totals 128 / 106 / 40.** One new name, `agencies.cod_limit.set` (`financial`), granted by name in the tier-2 money block and therefore **not** to Support — it guards `PUT /agencies/:agencyId/cod-limit` and `POST …/cod-limit/release` ([the changelog](../FRONTEND-CHANGELOG-cod-limits.md)). Measured with `TIER_GRANTS` from `src/modules/authorization/domain/tier-grants.ts`.
 
 ⚠ **Re-measured against source 2026-09-30: 127 permissions across 21 families, tier totals 127 / 105 / 39.** Two new names, both in `developer_tools` and therefore **tier 1 only** (the family rule; tiers 2 and 3 are unchanged): `developer_tools.payments.read` and `developer_tools.payments.set` (**destructive**), for the payment-routing switch at `GET` / `PUT /dev-tools/payments` (jovi-mall ADR-A08; [dev-tools.md](dev-tools.md#put-dev-toolspayments)). Like `developer_tools.maintenance.set`, the switch is **not** behind `dev_tools.enabled`. The permission and a fail-closed audit row are its gates. `npm run authz:matrix` prints this matrix.
@@ -264,6 +266,7 @@ Full contract in [cod.md](cod.md).
 | `money.payouts.destination.read` | read | ● | ● | · | financial | Reveal the full payout destination (account or mobile number) on one payout request — every reveal is recorded in the audit trail |
 | `money.payments.read` | read | ● | ● | ● | — | View gateway payment and refund settlements |
 | `money.statements.send` | read | ● | ● | ● | — | Download or email an account holder's full statement of orders, fees, COD, payouts, credits and plans — every request is recorded in the audit trail |
+| `money.splits.read` | read | ● | ● | ● | — | View who gets what from one order — vendor, platform commission and bargain fee, agency, agent — and why |
 
 **Payout review is two stages and only one of them moves money** (ADR-024). `money.payouts.triage`
 opens `POST /money/payouts/:payoutId/triage`, the pre-screen: a reviewer endorses the request as
@@ -706,6 +709,9 @@ question arrives as a ticket, so refusing it to the tier that answers tickets es
 - `money.statements.send` (account statements). *"Send me my statement"* arrives as a ticket.
   It is bounded by the audit row, committed before anything is read, and by jovi-mall choosing
   the recipient (the account's verified email only); the file never carries a payout account number.
+- `money.splits.read` (one order's money split, 2026-10-04). *"Why did I receive this amount?"*
+  is the per-order version of the statement question. Read-only, moves nothing, not audited — it
+  carries no payout destination and names no customer.
 - The three COD reads and `money.payouts.read`, so a reviewer can see the queue and the cash
   position they are being asked to pre-screen against.
 - `cod.triage` and `money.payouts.triage` — the pre-screens themselves, and the latter is the

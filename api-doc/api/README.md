@@ -404,13 +404,13 @@ everywhere:
 
 **This was stated service-wide as *"an unrecognised query parameter is silently dropped on every
 list endpoint"*, and that is not true of all of them** (BR-022, corrected 2026-09-12). The claim
-was inferred from `listQuery` not being `.strict()`, which is true — but **11 query schemas are
+was inferred from `listQuery` not being `.strict()`, which is true — but **12 query schemas are
 hand-rolled and strict**, and a client written against the general rule breaks on them. Separate
 the two axes; they behave differently and only the first varies by endpoint:
 
 | Axis | Behaviour |
 |---|---|
-| An unrecognised **key** — `categoryKey` instead of `category` | **Usually dropped silently**, `200`, unfiltered. **Refused with `400` on the 12 routes below.** |
+| An unrecognised **key** — `categoryKey` instead of `category` | **Usually dropped silently**, `200`, unfiltered. **Refused with `400` on the 13 routes below.** |
 | A recognised key with an out-of-range **value** — `?category=__nope__` | **Always `400 VALIDATION_ERROR`, everywhere**, and the message names the permitted set |
 
 **The second axis is the useful guarantee and it holds service-wide.** A misspelt *value* is never
@@ -432,6 +432,7 @@ by grep, and re-derivable the same way:
 | `GET /content/articles/:articleId/preview` | `locale` (**required**) |
 | `GET /content/authors` | **nothing, and refuses any.** Not paginated — `?page=1&limit=20` is a `400` |
 | `GET /money/earnings/accounts` | its documented query |
+| `GET /money/earnings/platform/summary` | `from`, `to` (both optional) |
 | `GET /shipments/:shipmentId/tracking-events` | its documented query |
 | `GET /shipments/:shipmentId/tracking-trail` | its documented query |
 | `GET /support/tickets/reference/orders` · `/products` | its documented query |

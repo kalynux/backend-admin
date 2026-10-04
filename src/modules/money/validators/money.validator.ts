@@ -10,6 +10,7 @@ import {
 } from '../../../core/validation/common.schemas';
 import { AUDIT_ACTION_NAMES, AuditAction } from '../../audit/domain/audit.catalog';
 import { AUDIT_STATUSES } from '../../audit/domain/audit.types';
+import { PLATFORM_LEDGER_ACCOUNTS } from '../domain/platform-earnings';
 
 /** Request shapes for `/api/v1/money`. */
 
@@ -66,11 +67,33 @@ export const LEDGER_SORT = {
  * without being able to separate them is how a ledger gets double-counted by eye.
  */
 export const ListPlatformLedgerQuerySchema = listQuery(LEDGER_SORT, '-createdAt', {
+    /**
+     * Which platform account (2026-10-04): `commission` (`platform`), `bargain_fee`
+     * (`platform_ai`), or `all` — the default, because "what moved on the marketplace's own
+     * money" used to silently mean commission only. An ENUM, unlike every other term here:
+     * this vocabulary is ours, not jovi-mall's (each row still names its own `owner.type`).
+     */
+    account: z.enum(PLATFORM_LEDGER_ACCOUNTS).optional(),
     entryType: platformTerm.optional(),
     reasonCode: platformTerm.optional(),
     sourceType: platformTerm.optional(),
     ...dateRangeFields(),
 }).superRefine(dateRangeRule({ maxDays: MONEY_MAX_RANGE_DAYS }));
+
+/**
+ * `GET /money/earnings/platform/summary` — what the marketplace earned in `[from, to)`.
+ * Both bounds optional; neither ⇒ since the beginning. No range cap: it is one grouped
+ * aggregation over two index ranges, not a page of rows.
+ */
+export const PlatformEarningsSummaryQuerySchema = z
+    .object({ ...dateRangeFields() })
+    .strict()
+    .superRefine(dateRangeRule());
+
+export type PlatformEarningsSummaryQuery = z.infer<typeof PlatformEarningsSummaryQuerySchema>;
+
+/** `GET /money/orders/:orderId/split`. */
+export const OrderIdParamSchema = idParam('orderId', 'order');
 
 /**
  * `GET /money/earnings/accounts` — delegated (D-7), so no sort of ours.

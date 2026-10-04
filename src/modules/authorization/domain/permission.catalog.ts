@@ -455,6 +455,20 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'money', action: 'read', phase: 11,
         summary: "Download or email an account holder's full statement of orders, fees, COD, payouts, credits and plans — every request is recorded in the audit trail",
     },
+    /**
+     * One order's money split — who gets what (vendor, platform commission, bargain fee, agency,
+     * agent, customer refunds) and on what basis, allocated or projected (owner request
+     * 2026-10-04: "so we can explain to a vendor why they are getting the amount they see").
+     *
+     * Held by every tier INCLUDING Support, on the same reasoning as `money.statements.send`:
+     * the question arrives as a vendor's ticket, and this is one order's slice of what a
+     * statement already shows them. Not `financial` — it moves nothing — and not audited: it
+     * discloses no payout destination and no customer identity beyond an id.
+     */
+    'money.splits.read': {
+        family: 'money', action: 'read', phase: 11,
+        summary: 'View who gets what from one order — vendor, platform commission and bargain fee, agency, agent — and why',
+    },
 
     // ═══ ORDERS ═══ 2 legacy endpoints + the list/search/refund surface (Ph. 6) ═
     'orders.read': {
