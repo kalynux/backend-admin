@@ -1,5 +1,7 @@
 # Permissions and administrator levels
 
+⚠ **Re-measured against source 2026-10-05 (`npm run authz:matrix`): 136 permissions across 23 families, tier totals 136 / 114 / 45.** Three are new from the review-moderation work, in a new `reviews` family ([§ reviews](#reviews), [the changelog](../FRONTEND-CHANGELOG-reviews.md)): `reviews.read`, `reviews.moderate` and `reviews.delete` (**destructive**), all three held by **every** tier, Support included, by owner decision. Support's `reviews.delete` is the one named exception to "Support holds nothing destructive" (`TIER_3_DESTRUCTIVE_ALLOWLIST`). The fourth, `money.earnings.pause`, arrived the same day from concurrent work on earnings pauses; its own section carries it. Re-derive rather than quoting.
+
 ⚠ **Re-measured against source 2026-10-04 (`npm run authz:matrix`): 132 permissions across 22 families, tier totals 132 / 110 / 42.** This session added one name, `money.splits.read` (one order's money split, `GET /money/orders/:orderId/split` — [the changelog](../FRONTEND-CHANGELOG-money-split.md)), held by **every** tier, Support included, unflagged. The other three since the 2026-10-02 note below arrived from concurrent work on 2026-10-04 (the new `catalog` family's `catalog.categories.read` and `catalog.categories.manage`, and role closure's `users.close`); their own sections carry them. Re-derive rather than quoting.
 
 ⚠ **Re-measured against source 2026-10-02: 128 permissions across 21 families, tier totals 128 / 106 / 40.** One new name, `agencies.cod_limit.set` (`financial`), granted by name in the tier-2 money block and therefore **not** to Support — it guards `PUT /agencies/:agencyId/cod-limit` and `POST …/cod-limit/release` ([the changelog](../FRONTEND-CHANGELOG-cod-limits.md)). Measured with `TIER_GRANTS` from `src/modules/authorization/domain/tier-grants.ts`.
@@ -31,9 +33,9 @@ Design records: [`../../docs/ADR-003-GRANULAR-PERMISSIONS.md`](../../docs/ADR-00
 
 | Level (`tier`) | Label | Holds | Shape of the job |
 |---|---|---|---|
-| **1** | Developer | 132 of 132 | Everything, including the developer tools and every escalation-flagged action |
-| **2** | Admin | 110 of 132 | The operational tier — runs the platform day to day, including the money |
-| **3** | Support | 42 of 132 | Ticket work, the lookups needed to answer a ticket, sending an account holder their statement, editorial write on articles and bylines, resetting the customer bot's memory of a chat, and **pre-screening** a declared COD handover or a payout request. Nothing destructive, publishing stays a level above, and the one `financial` permission it holds cannot send money anywhere |
+| **1** | Developer | 136 of 136 | Everything, including the developer tools and every escalation-flagged action |
+| **2** | Admin | 114 of 136 | The operational tier — runs the platform day to day, including the money |
+| **3** | Support | 45 of 136 | Ticket work, the lookups needed to answer a ticket, sending an account holder their statement, editorial write on articles and bylines, resetting the customer bot's memory of a chat, **moderating reviews** (hide, put back, delete), and **pre-screening** a declared COD handover or a payout request. Nothing destructive except deleting a review (the one named exception), publishing stays a level above, and the one `financial` permission it holds cannot send money anywhere |
 
 A level is an administrator's **entire** authorization state. `tier` appears on the profile
 returned by `GET /auth/me`.
@@ -186,7 +188,7 @@ record were one decision, not two. See [ADR-020](../../docs/ADR-020-ADMIN-DATA-D
 ## The matrix
 
 ● granted  ·  not granted  ·  **†** = catalogued policy with **no endpoint built yet**
-(**4** of 132 permissions — down from 27, and the four that remain each have a written reason
+(**4** of 136 permissions — down from 27, and the four that remain each have a written reason
 below. The policy is decided ahead of the surface, deliberately.)
 
 ### `agents`
@@ -267,6 +269,7 @@ Full contract in [cod.md](cod.md).
 | `money.payments.read` | read | ● | ● | ● | — | View gateway payment and refund settlements |
 | `money.statements.send` | read | ● | ● | ● | — | Download or email an account holder's full statement of orders, fees, COD, payouts, credits and plans — every request is recorded in the audit trail |
 | `money.splits.read` | read | ● | ● | ● | — | View who gets what from one order — vendor, platform commission and bargain fee, agency, agent — and why |
+| `money.earnings.pause` | write | ● | ● | · | financial | Pause or resume the payout of an order’s or booking’s earnings — paused money is never released (2026-10-05) |
 
 **Payout review is two stages and only one of them moves money** (ADR-024). `money.payouts.triage`
 opens `POST /money/payouts/:payoutId/triage`, the pre-screen: a reviewer endorses the request as
@@ -448,6 +451,24 @@ a category belongs to no vendor, and a merge rewrites many vendors' products at 
 
 `catalog.categories.manage` is **destructive**, so `allInFamily('catalog')` leaves it out and
 tier 2 names it by hand. A merge has no undo.
+
+### `reviews`
+
+Ratings and reviews of products and deliveries (2026-10-05, [reviews.md](reviews.md)). Every
+review publishes the moment it is written; these are the after-the-fact moderation rights.
+
+| Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
+|---|---|:-:|:-:|:-:|---|---|
+| `reviews.read` | read | ● | ● | ● | — | List and open product and delivery reviews, with who wrote them and what was done to them |
+| `reviews.moderate` | write | ● | ● | ● | — | Hide a published review, or put a hidden one back |
+| `reviews.delete` | write | ● | ● | ● | destructive | Delete a review for good — its author may then write a new one |
+
+**Support holds `reviews.delete`, and that is a deliberate, named exception** (owner decision,
+2026-10-05). The grant table refuses any destructive permission to tier 3, except names on
+`TIER_3_DESTRUCTIVE_ALLOWLIST`, and `reviews.delete` is the only one there. The line it
+draws: Support may remove words somebody published, but may never destroy a record that
+money, identity or history hangs off. `allInFamily('reviews')` gives tier 2 read and moderate,
+and `reviews.delete` is named by hand for every tier.
 
 > **The `customers` family is gone** (Phase 5 Part D, [ADR-017](../../docs/ADR-017-PHASE-17-CLOSEOUT.md)
 > D-1). `customers.read` and `customers.suspend` were catalogued, **granted**, and backed no

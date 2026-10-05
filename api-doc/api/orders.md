@@ -347,6 +347,8 @@ cannot be written through Mongoose at all.
 | `note.added` | A vendor note was appended |
 | `entitlement.revoked` | A digital entitlement was revoked |
 | `entitlement.restored` | A digital entitlement was restored |
+| `earnings.paused` | The order's earnings were paused (2026-10-05) — `metadata.reason`, `metadata.note`; see [money.md § Earnings pauses](./money.md) |
+| `earnings.resumed` | The order's earnings were resumed; their hold continues where it stopped — `metadata.note`, `metadata.pausedReason` |
 | `system.action` | An automated action with no more specific type |
 
 ⚠ **This service still validates the token by SHAPE, not membership** (ADR-005 D-17): the

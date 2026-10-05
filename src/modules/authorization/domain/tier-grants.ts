@@ -81,6 +81,18 @@ const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
     'catalog.categories.read',
 
     /**
+     * Review moderation — all three, by the owner's decision (2026-10-05): every review now
+     * publishes the moment it is written, and "somebody wrote something abusive about my
+     * shop / my delivery" arrives as a support ticket. Hiding it is the remedy and should
+     * not wait for an Admin. `reviews.delete` is `destructive` and Support holds it anyway
+     * — deliberately, by name, through `TIER_3_DESTRUCTIVE_ALLOWLIST` below; the
+     * fail-closed audit row is what bounds it.
+     */
+    'reviews.read',
+    'reviews.moderate',
+    'reviews.delete',
+
+    /**
      * Resetting the customer bot's memory of one person's chat. It is the only `users.*` write
      * at this tier, and it is here by the owner's decision (2026-09-22): "the bot is confused
      * by what it remembers" arrives as a ticket, and this is the remedy.
@@ -308,6 +320,9 @@ const ADMIN: readonly PermissionName[] = union(
     allInFamily('users'),
     allInFamily('vendors'),
     allInFamily('catalog'),
+    // `reviews.read` + `reviews.moderate`. `reviews.delete` is destructive, so it is named
+    // in the sensitive block below.
+    allInFamily('reviews'),
     // `allInFamily('customers')` was here. Deleted with the family at Phase 5 Part D
     // (ADR-017 D-1) — it was the tier-2 half of a grant that backed no route.
     allInFamily('shipments'),
@@ -357,6 +372,9 @@ const ADMIN: readonly PermissionName[] = union(
         'money.payouts.destination.read',
         'orders.disputes.resolve',
         'orders.refund',
+        // Pausing / resuming an order's or booking's earnings (owner, 2026-10-05). Beside
+        // `orders.refund` because they close the same ticket: refund the customer, or resume.
+        'money.earnings.pause',
         'content.articles.delete',
         'content.authors.delete',
         'shipments.cancel',
@@ -392,6 +410,10 @@ const ADMIN: readonly PermissionName[] = union(
         // Destructive (a merge rewrites many vendors' products and cannot be undone), so the
         // family sweep above leaves it out. Curating the shared list is operational work.
         'catalog.categories.manage',
+
+        // Destructive (no undelete), so `allInFamily('reviews')` leaves it out. Support holds
+        // it too, and the nesting assertion requires an Admin to hold whatever Support does.
+        'reviews.delete',
 
         // Named by hand because it is flagged `destructive`, so `allInFamily('audit')`
         // refuses to expand it. Granted to Admin because running a compliance export is
@@ -451,6 +473,26 @@ export const TIER_GRANTS: Readonly<Record<AdminTier, readonly PermissionName[]>>
  */
 const TIER_3_FINANCIAL_ALLOWLIST: readonly PermissionName[] = ['money.payouts.triage'];
 
+/**
+ * The ONE destructive permission tier 3 may hold, named — the same shape as the financial
+ * allowlist above, and for the same reason: the rule "Support never does anything
+ * unrecoverable" guards every other destructive name, and dropping it to admit one would
+ * silently unguard the rest.
+ *
+ * `reviews.delete` is here by the owner's decision (2026-10-05: "Support can do all three").
+ * Every review now publishes the moment it is written, so an abusive one is live until
+ * somebody acts, and the ticket reporting it lands with Support. The flag stays honest —
+ * there is no undelete, and a deleted review frees its author to write again — and what
+ * bounds it is the fail-closed audit row each delete commits before it happens.
+ *
+ * ── The line this draws ───────────────────────────────────────────────────────
+ * **Support may remove words somebody published about a shop or a delivery. Support may
+ * never destroy a platform record that money, identity or history hangs off.** A review is
+ * a customer's opinion; its star leaves the average either way. Anything that fails that
+ * test does not belong on this list. `test-authz.ts` pins a copy of it.
+ */
+const TIER_3_DESTRUCTIVE_ALLOWLIST: readonly PermissionName[] = ['reviews.delete'];
+
 export function assertGrantTableValid(): void {
     const problems: string[] = [];
 
@@ -483,7 +525,7 @@ export function assertGrantTableValid(): void {
             if (tier === 3 && spec.financial && !TIER_3_FINANCIAL_ALLOWLIST.includes(name)) {
                 problems.push(`${label} grants the financial permission "${name}"`);
             }
-            if (tier === 3 && spec.destructive) {
+            if (tier === 3 && spec.destructive && !TIER_3_DESTRUCTIVE_ALLOWLIST.includes(name)) {
                 problems.push(`${label} grants the destructive permission "${name}"`);
             }
             // Developer tools re-run side effects against live data or reveal how the

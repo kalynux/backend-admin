@@ -469,6 +469,23 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'money', action: 'read', phase: 11,
         summary: 'View who gets what from one order — vendor, platform commission and bargain fee, agency, agent — and why',
     },
+    /**
+     * Pause or resume the release of one order's or booking's earnings (owner, 2026-10-05).
+     *
+     * Paused money is never paid out. The system pauses on its own when a seller cancels a
+     * paid order, when a paid booking is cancelled from the status menu, and when a card
+     * payment is disputed; an administrator lifts those after refunding or deciding no refund
+     * is owed, and may pause any order or booking by hand. Resuming continues the hold where
+     * it stopped — the paused time never counts.
+     *
+     * `financial`: resuming is what lets money reach a seller, which is exactly the kind of
+     * decision the flag fences off. So it is named into the tier-2 block by hand and refused
+     * to Support, like `orders.refund`, whose ticket it usually resolves.
+     */
+    'money.earnings.pause': {
+        family: 'money', action: 'write', phase: 11, financial: true,
+        summary: 'Pause or resume the payout of an order’s or booking’s earnings — paused money is never released',
+    },
 
     // ═══ ORDERS ═══ 2 legacy endpoints + the list/search/refund surface (Ph. 6) ═
     'orders.read': {
@@ -1030,6 +1047,32 @@ export const PERMISSION_CATALOG = Object.freeze({
     'catalog.categories.manage': {
         family: 'catalog', action: 'write', phase: 6, destructive: true,
         summary: 'Rename, merge or delete a shared product category (a merge moves every product)',
+    },
+
+    // ═══ REVIEWS ═══ ratings and reviews of products and deliveries (2026-10-05) ═══
+    // Every review publishes the moment it is written (owner decision); moderation is AFTER
+    // the fact. All three are granted to all three tiers by the owner's decision — Support
+    // included, delete included — so the two writes are named by hand in every tier.
+    'reviews.read': {
+        family: 'reviews', action: 'read', phase: 6,
+        summary: 'List and open product and delivery reviews, with who wrote them and what was done to them',
+    },
+    /**
+     * Unpublish and republish. Not flagged: both are reversible, and the review keeps its
+     * slot either way. The reason an administrator gives is never shown to the author.
+     */
+    'reviews.moderate': {
+        family: 'reviews', action: 'write', phase: 6,
+        summary: 'Hide a published review, or put a hidden one back',
+    },
+    /**
+     * ⚠ `destructive`: there is no undelete, and a deleted review frees its author to write a
+     * new one about the same product or delivery — which unpublish does not. So no family
+     * sweep may hand it out; every tier that holds it names it.
+     */
+    'reviews.delete': {
+        family: 'reviews', action: 'write', phase: 6, destructive: true,
+        summary: 'Delete a review for good — its author may then write a new one',
     },
 
     // ═══ CUSTOMERS ═══ DELETED at Phase 5 Part D — ADR-017 D-1 ═══════════════

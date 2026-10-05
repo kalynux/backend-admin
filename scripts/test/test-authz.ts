@@ -275,8 +275,31 @@ t.assert('Support holds triage and none of the money writes it precedes', () =>
     && !grantedTo(3).has('money.payouts.reject' as never)
     && !grantedTo(3).has('money.payouts.destination.read' as never));
 
-t.assert('tier 3 holds no destructive permission', () =>
-    TIER_GRANTS[3].every((name) => permissionSpec(name).destructive !== true));
+/**
+ * The destructive permissions tier 3 may hold, pinned BY NAME — a copy of
+ * `TIER_3_DESTRUCTIVE_ALLOWLIST` in `tier-grants.ts`, duplicated on purpose exactly as the
+ * financial one above is.
+ *
+ * `reviews.delete` is the owner's decision (2026-10-05): every review publishes the moment
+ * it is written, so the ticket about an abusive one lands with Support and the remedy should
+ * not wait for an Admin. The line: **Support may remove words somebody published; Support may
+ * never destroy a record that money, identity or history hangs off.**
+ */
+const TIER_3_DESTRUCTIVE_ALLOWLIST = ['reviews.delete'];
+
+t.assert('tier 3 holds no destructive permission beyond the named allowlist', () =>
+    TIER_GRANTS[3].every(
+        (name) => permissionSpec(name).destructive !== true || TIER_3_DESTRUCTIVE_ALLOWLIST.includes(name),
+    ));
+
+t.assert('every name on the tier-3 destructive allowlist is actually granted to tier 3', () =>
+    TIER_3_DESTRUCTIVE_ALLOWLIST.every((name) => grantedTo(3).has(name as never)));
+
+t.assert('the tier-3 destructive allowlist admits nothing financial or escalating', () =>
+    TIER_3_DESTRUCTIVE_ALLOWLIST.every((name) => {
+        const spec = permissionSpec(name as never);
+        return spec.financial !== true && spec.escalation !== true;
+    }));
 
 t.assert('only tier 1 holds an escalation permission', () =>
     ([2, 3] as AdminTier[]).every((tier) =>

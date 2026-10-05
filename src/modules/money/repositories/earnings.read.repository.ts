@@ -238,6 +238,8 @@ export interface EarningsAllocationReadModel extends Document {
     /** COD: the money is physical cash the platform has not necessarily received yet. */
     requires_cash_settlement?: boolean;
     cash_settled_at?: Date | null;
+    /** Set while the order's or booking's earnings are PAUSED (2026-10-05) — never released then. */
+    paused_at?: Date | null;
     created_at: Date;
     updated_at: Date;
 }
@@ -271,6 +273,7 @@ const ALLOCATION_PROJECTION = {
     reversed_at: 1,
     requires_cash_settlement: 1,
     cash_settled_at: 1,
+    paused_at: 1,
     created_at: 1,
     updated_at: 1,
 } as const;

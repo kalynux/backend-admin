@@ -118,6 +118,12 @@ apiV1.use('/vendors', vendorRoutes);
 import { categoryRoutes } from '../modules/categories/routes/category.routes';
 apiV1.use('/categories', categoryRoutes);
 
+// Ratings and reviews of products and deliveries (2026-10-05). Every review publishes on
+// submission; this is after-the-fact moderation. The list is a direct read, and unpublish /
+// republish / delete are delegated — each recomputes the ratings it moves in jovi-mall.
+import { reviewRoutes } from '../modules/reviews/routes/review.routes';
+apiV1.use('/reviews', reviewRoutes);
+
 // The delivery network — agencies and delivery agents, two prefixes and one domain.
 //
 // It refines the read half of the split above rather than repeating it. The rule

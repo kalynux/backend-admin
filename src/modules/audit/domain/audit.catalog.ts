@@ -1187,6 +1187,29 @@ export const AUDIT_CATALOG = Object.freeze({
         summary: 'Deleted an unused product category',
     },
 
+    // ═══ REVIEWS — after-the-fact moderation, delegated to jovi-mall (2026-10-05) ═══
+    // Every review publishes on submission. These three are the only things an administrator
+    // can do to one, and jovi-mall keeps only the LAST action on the review itself — so this
+    // trail is the review's only complete moderation history.
+    'reviews.unpublish': {
+        permission: 'reviews.moderate',
+        target: 'review',
+        transport: 'delegated',
+        summary: 'Hid a published review (its star left the rating)',
+    },
+    'reviews.republish': {
+        permission: 'reviews.moderate',
+        target: 'review',
+        transport: 'delegated',
+        summary: 'Put a hidden review back on public view',
+    },
+    'reviews.delete': {
+        permission: 'reviews.delete',
+        target: 'review',
+        transport: 'delegated',
+        summary: 'Deleted a review for good — its author may write a new one',
+    },
+
     // ═══ ORDERS — delegated to jovi-mall (Phase 10) ═══════════════════════════
     // Four mutations. The reads — a list, a detail, a timeline, an eligibility verdict —
     // are not here: they are not actions.
@@ -1405,6 +1428,27 @@ export const AUDIT_CATALOG = Object.freeze({
      * activity feed — the `billing.subscriptions.assign_*` split. The payload names the
      * period, format and channel; never a figure.
      */
+    // ═══ MONEY — earnings pauses (2026-10-05) ═════════════════════════════════
+    // Paused money is never paid out. Delegated to jovi-mall, which holds the pause and the
+    // hold arithmetic. One action per verb per target type, so the trail filed against a
+    // BOOKING never claims to be about an order. The note is in the payload.
+    'money.earnings.pause_order': {
+        permission: 'money.earnings.pause', target: 'order', transport: 'delegated',
+        summary: 'Paused the earnings of an order — none of its money will be paid out until resumed',
+    },
+    'money.earnings.resume_order': {
+        permission: 'money.earnings.pause', target: 'order', transport: 'delegated',
+        summary: 'Resumed the earnings of an order — its hold continues where it stopped',
+    },
+    'money.earnings.pause_booking': {
+        permission: 'money.earnings.pause', target: 'booking', transport: 'delegated',
+        summary: 'Paused the earnings of a booking — none of its money will be paid out until resumed',
+    },
+    'money.earnings.resume_booking': {
+        permission: 'money.earnings.pause', target: 'booking', transport: 'delegated',
+        summary: 'Resumed the earnings of a booking — its hold continues where it stopped',
+    },
+
     'money.statements.send_vendor': {
         permission: 'money.statements.send', target: 'vendor', transport: 'external',
         summary: "Generated a vendor's account statement (downloaded or emailed to them)",

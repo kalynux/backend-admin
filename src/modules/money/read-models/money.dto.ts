@@ -152,7 +152,11 @@ export interface AllocationDto {
      */
     release: {
         completedAt: string | null;
-        /** `completedAt + HOLD_DAYS`. `null` means the source has not completed at all. */
+        /**
+         * `completedAt + HOLD_DAYS`. `null` means the hold has not started. Since 2026-10-05
+         * `completedAt` is the DELIVERY date for an order (the courier finishing its last parcel),
+         * not the customer's confirmation; for a booking it is still the service's completion.
+         */
         holdReleaseAt: string | null;
         releasedAt: string | null;
         reversedAt: string | null;
@@ -160,6 +164,12 @@ export interface AllocationDto {
         requiresCashSettlement: boolean;
         /** `null` with `requiresCashSettlement: true` is exactly "the cash is not here". */
         cashSettledAt: string | null;
+        /**
+         * When this row's order or booking was PAUSED (2026-10-05), or null. Paused money is
+         * never released; on resume `holdReleaseAt` moves later by the paused time. The pause
+         * itself (reason, who, note) is at `GET /money/earnings/pauses/:kind/:id`.
+         */
+        pausedAt: string | null;
     };
     createdAt: string | null;
     updatedAt: string | null;
@@ -189,6 +199,7 @@ export function toAllocationDto(
             // the field existed, not a guess: COD settlement gating postdates the split.
             requiresCashSettlement: row.requires_cash_settlement ?? false,
             cashSettledAt: toIso(row.cash_settled_at),
+            pausedAt: toIso(row.paused_at),
         },
         createdAt: toIso(row.created_at),
         updatedAt: toIso(row.updated_at),

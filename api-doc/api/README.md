@@ -39,6 +39,7 @@ the dashboard's behalf and returns the result in its own envelope.
 | [users.md](users.md) | `/users` — platform user directory, suspension, login identifiers |
 | [vendors.md](vendors.md) | `/vendors` — vendor directory, KYC, catalogue, suspension, settings |
 | [categories.md](categories.md) | `/categories` — the shared product-category list: usage, rename, merge, delete |
+| [reviews.md](reviews.md) | `/reviews` — product and delivery reviews: list, hide (unpublish), show again (republish), delete |
 | [agencies.md](agencies.md) | `/agencies` — delivery agencies, verification, rosters, contracts |
 | [agents.md](agents.md) | `/agents` — delivery agents, KYC, tracking, COD threshold, bans, transfer |
 | [verification.md](verification.md) | **The evidence behind a KYC verdict**, for all three parties — identity scans, the selfie, the geocoded addresses, the sketches. ⚠ Read the "the backend grades nothing" section before building the badge: there is deliberately no `estimatedVerdict` field, and the required/optional rules are the dashboard's |
@@ -433,6 +434,7 @@ by grep, and re-derivable the same way:
 | `GET /content/authors` | **nothing, and refuses any.** Not paginated — `?page=1&limit=20` is a `400` |
 | `GET /money/earnings/accounts` | its documented query |
 | `GET /money/earnings/platform/summary` | `from`, `to` (both optional) |
+| `GET /money/earnings/pauses` | `kind` (`order`/`booking`), `page`, `limit` (2026-10-05) |
 | `GET /shipments/:shipmentId/tracking-events` | its documented query |
 | `GET /shipments/:shipmentId/tracking-trail` | its documented query |
 | `GET /support/tickets/reference/orders` · `/products` | its documented query |

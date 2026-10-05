@@ -397,3 +397,37 @@ export const SettleDeliveryFeeRefundSchema = z
 
 export type ListDeliveryFeeRefundsQuery = z.infer<typeof ListDeliveryFeeRefundsQuerySchema>;
 export type SettleDeliveryFeeRefundBody = z.infer<typeof SettleDeliveryFeeRefundSchema>;
+
+// ── Earnings pauses (2026-10-05) ────────────────────────────────────────────
+
+/**
+ * `kind` IS pinned — unlike the read vocabularies above, this service writes against it: it
+ * names the record a pause is filed on, and the audit action is chosen from it.
+ */
+export const PAUSE_KINDS = ['order', 'booking'] as const;
+
+export const PauseTargetParamSchema = z
+    .object({ kind: z.enum(PAUSE_KINDS), id: objectId })
+    .strict();
+
+/**
+ * Pausing requires a note — the next administrator reads it when deciding whether to resume,
+ * and a pause nobody can explain is one nobody dares lift. Bounds mirror jovi-mall's
+ * `PauseEarningsBodySchema` exactly, so a body this accepts is never a wrapped 400.
+ */
+export const PauseEarningsSchema = z
+    .object({ note: z.string().trim().min(3).max(500) })
+    .strict();
+
+export const ResumeEarningsSchema = z
+    .object({ note: z.string().trim().min(1).max(500).optional() })
+    .strict();
+
+export const ListEarningsPausesQuerySchema = z
+    .object({ ...paginationFields, kind: z.enum(PAUSE_KINDS).optional() })
+    .strict();
+
+export type PauseTargetParams = z.infer<typeof PauseTargetParamSchema>;
+export type PauseEarningsBody = z.infer<typeof PauseEarningsSchema>;
+export type ResumeEarningsBody = z.infer<typeof ResumeEarningsSchema>;
+export type ListEarningsPausesQuery = z.infer<typeof ListEarningsPausesQuerySchema>;

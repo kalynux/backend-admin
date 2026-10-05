@@ -126,6 +126,22 @@ export class VendorProductReadRepository extends PlatformReadRepository<VendorPr
     }
 
     /**
+     * Titles for a page of product ids, batched — one query, never one per row. Used by the
+     * review list (2026-10-05) to name what each review is about.
+     *
+     * Soft-deleted products are INCLUDED on purpose: a review outlives its product, and an
+     * administrator looking at it still needs to know what it was written about.
+     */
+    async findTitlesByIds(ids: ObjectId[]): Promise<Map<string, string | null>> {
+        if (ids.length === 0) return new Map();
+        const rows = await this.findBy({ _id: { $in: ids } } as Filter<VendorProductReadModel>, {
+            projection: { _id: 1, title: 1 },
+            limit: ids.length,
+        });
+        return new Map(rows.map((row) => [row._id.toString(), row.title ?? null]));
+    }
+
+    /**
      * How many of this vendor's products each agency is responsible for — **one
      * aggregation for the whole page**, not one count per row.
      *

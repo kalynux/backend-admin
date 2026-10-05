@@ -47,6 +47,7 @@
     "test:list-strictness": "ts-node scripts/test/test-list-strictness.ts",
     "test:messaging": "ts-node scripts/test/test-messaging.ts",
     "test:categories": "ts-node scripts/test/test-categories.ts",
+    "test:reviews": "ts-node scripts/test/test-reviews.ts",
     "//verify": [
       "Every verify:* runs through `node --max-old-space-size=4096 -r ts-node/register`,",
       "never a bare `ts-node` (F-4, fixed 2026-08-20).",

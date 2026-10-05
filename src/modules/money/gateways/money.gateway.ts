@@ -662,3 +662,115 @@ export async function settleDeliveryFeeRefund(
         },
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Earnings pauses (2026-10-05) — jovi-mall holds the pause and the hold arithmetic
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** jovi-mall's pause record, as it serves it. Admin actor ids resolve in THIS service's database. */
+export interface PlatformEarningsPause {
+    active: boolean;
+    reason: 'seller_cancelled_paid_order' | 'booking_cancelled_unrefunded' | 'card_dispute' | 'admin' | null;
+    note: string | null;
+    paused_at: string | null;
+    paused_by_user_id: string | null;
+    paused_by_source: 'platform' | 'admin';
+    paused_by_name: string | null;
+    resumed_at: string | null;
+    resumed_by_user_id: string | null;
+    resumed_by_source: 'platform' | 'admin';
+    resumed_by_name: string | null;
+    resume_note: string | null;
+}
+
+export type PauseKind = 'order' | 'booking';
+
+export interface PlatformPauseView {
+    kind: PauseKind;
+    id: string;
+    pause: PlatformEarningsPause | null;
+}
+
+/** One row of jovi-mall's queue of paused money. */
+export interface PlatformActivePause {
+    kind: PauseKind;
+    id: string;
+    reference: string | null;
+    vendorId: string | null;
+    amount: number | null;
+    currency: string | null;
+    pause: PlatformEarningsPause;
+}
+
+/** Every order and booking whose earnings are paused now. DELEGATED: the pause is jovi-mall's record. */
+export async function listEarningsPauses(
+    query: { kind?: PauseKind; page: number; limit: number },
+    context: ActorContext,
+): Promise<PlatformPage<PlatformActivePause>> {
+    const result = await platformRequest<PlatformActivePause[]>({
+        method: 'GET',
+        path: '/earnings/pauses',
+        query: { kind: query.kind, page: query.page, limit: query.limit },
+        actor: context.actor,
+        requestId: context.requestId,
+    });
+    return toPage<PlatformActivePause>(result);
+}
+
+/** The pause record of one order or booking (`pause: null` when it was never paused). */
+export async function earningsPause(kind: PauseKind, id: string, context: ActorContext): Promise<PlatformPauseView> {
+    const result = await platformRequest<PlatformPauseView>({
+        method: 'GET',
+        path: `/earnings/pauses/${kind}/${id}`,
+        actor: context.actor,
+        requestId: context.requestId,
+    });
+    return result.data;
+}
+
+const PAUSE_ACTIONS: Readonly<Record<PauseKind, { pause: AuditAction; resume: AuditAction }>> = {
+    order: { pause: 'money.earnings.pause_order', resume: 'money.earnings.resume_order' },
+    booking: { pause: 'money.earnings.pause_booking', resume: 'money.earnings.resume_booking' },
+};
+
+function pauseState(result: PlatformPauseView | null): Record<string, unknown> | null {
+    const p = result?.pause;
+    if (!p) return null;
+    return { active: p.active, reason: p.reason, pausedAt: p.paused_at, resumedAt: p.resumed_at };
+}
+
+/**
+ * Pause (`verb: 'pause'`) or resume an order's or booking's earnings. Audited fail-closed:
+ * the intent row commits before jovi-mall is asked, filed against the order or the booking.
+ * `before` is the caller's own read of the pause, so the trail shows what was lifted.
+ */
+export async function setEarningsPause(
+    verb: 'pause' | 'resume',
+    kind: PauseKind,
+    id: string,
+    note: string | null,
+    audit: { label: string | null; before: PlatformEarningsPause | null },
+    context: ActorContext,
+): Promise<PlatformPauseView> {
+    return auditedDelegation(
+        PAUSE_ACTIONS[kind][verb],
+        context,
+        { type: kind, id, label: audit.label },
+        { note },
+        audit.before
+            ? { active: audit.before.active, reason: audit.before.reason, pausedAt: audit.before.paused_at }
+            : null,
+        pauseState,
+        async () => {
+            const result = await platformRequest<PlatformPauseView>({
+                method: 'POST',
+                path: `/earnings/pauses/${kind}/${id}/${verb}`,
+                // `note` is required to pause and optional to resume; absent rather than null.
+                body: note !== null ? { note } : {},
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return { result: result.data };
+        },
+    );
+}

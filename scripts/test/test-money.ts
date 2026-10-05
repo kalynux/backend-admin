@@ -47,6 +47,9 @@ import {
     ListAllocationsQuerySchema,
     ListDeliveryFeeRefundsQuerySchema,
     SettleDeliveryFeeRefundSchema,
+    PauseEarningsSchema,
+    ResumeEarningsSchema,
+    PauseTargetParamSchema,
     ListEarningsAccountsQuerySchema,
     ListPaymentsQuerySchema,
     ListPayoutActivityQuerySchema,
@@ -1236,7 +1239,7 @@ t.section('10. The route manifest');
 
 const moneyRoutes = routeManifest().filter((route) => route.fullPath.startsWith('/api/v1/money'));
 
-t.assert('twenty-two routes are declared on /money (17 + three delivery-fee refund routes, ADR-A11 W-G2, + platform summary and order split, 2026-10-04)', () => moneyRoutes.length === 22);
+t.assert('twenty-six routes are declared on /money (17 + three delivery-fee refund routes, ADR-A11 W-G2, + platform summary and order split, 2026-10-04, + four earnings-pause routes, 2026-10-05)', () => moneyRoutes.length === 26);
 
 /**
  * The triage route is the ONE write on this surface a Support administrator can reach, and
@@ -1826,6 +1829,61 @@ t.section('14. One order\'s money split (2026-10-04)');
         const start = ctrl.indexOf('static orderSplit');
         const body = ctrl.slice(start, ctrl.indexOf('\n    static ', start + 10));
         return body.includes('hydrateOwnerNames(owners)') && body.includes('beneficiary: { ...line.beneficiary, name:');
+    });
+}
+
+// ─── Earnings pauses (2026-10-05) ───────────────────────────────────────────
+{
+    const route = (suffix: string, method: string) =>
+        moneyRoutes.find((r) => r.fullPath === `/api/v1/money${suffix}` && r.method === method);
+    const list = route('/earnings/pauses', 'get');
+    const one = route('/earnings/pauses/:kind/:id', 'get');
+    const pause = route('/earnings/pauses/:kind/:id/pause', 'post');
+    const resume = route('/earnings/pauses/:kind/:id/resume', 'post');
+
+    t.assert('pauses: the queue and the record are READS under money.earnings.read, unaudited', () =>
+        [list, one].every((r) => r !== undefined && r.access.kind === 'permission'
+            && r.access.permissions.length === 1 && r.access.permissions[0] === 'money.earnings.read'
+            && r.audit === null));
+    t.assert('pauses: pausing and resuming stand behind money.earnings.pause ALONE', () =>
+        [pause, resume].every((r) => r !== undefined && r.access.kind === 'permission'
+            && r.access.permissions.length === 1 && r.access.permissions[0] === 'money.earnings.pause'));
+    t.assert('pauses: each verb records the order OR the booking action, never the other verb', () =>
+        pause?.audit?.kind === 'records'
+        && [...pause.audit.actions].sort().join() === 'money.earnings.pause_booking,money.earnings.pause_order'
+        && resume?.audit?.kind === 'records'
+        && [...resume.audit.actions].sort().join() === 'money.earnings.resume_booking,money.earnings.resume_order');
+    t.assert('pauses: the four audit actions are delegated, filed against an order or a booking', () =>
+        (['pause_order', 'resume_order'] as const).every((a) => {
+            const spec = auditSpec(`money.earnings.${a}`);
+            return spec.transport === 'delegated' && spec.target === 'order' && spec.permission === 'money.earnings.pause';
+        })
+        && (['pause_booking', 'resume_booking'] as const).every((a) => {
+            const spec = auditSpec(`money.earnings.${a}`);
+            return spec.transport === 'delegated' && spec.target === 'booking' && spec.permission === 'money.earnings.pause';
+        }));
+    t.assert('money.earnings.pause is financial, held by tier 2, refused to Support (it lets money reach a seller)', () =>
+        permissionSpec('money.earnings.pause').financial === true
+        && TIER_GRANTS[2].includes('money.earnings.pause' as never)
+        && !TIER_GRANTS[3].includes('money.earnings.pause' as never));
+
+    t.assert('pause body: a note is REQUIRED (3..500) — a pause nobody can explain is one nobody dares lift', () =>
+        !PauseEarningsSchema.safeParse({}).success
+        && !PauseEarningsSchema.safeParse({ note: 'ab' }).success
+        && PauseEarningsSchema.safeParse({ note: 'refund owed' }).success
+        && !PauseEarningsSchema.safeParse({ note: 'x'.repeat(501) }).success);
+    t.assert('pause/resume bodies are .strict() — no reason or actor smuggled in', () =>
+        !PauseEarningsSchema.safeParse({ note: 'abc', reason: 'admin' }).success
+        && !ResumeEarningsSchema.safeParse({ pausedBy: 'x' }).success
+        && ResumeEarningsSchema.safeParse({}).success);
+    t.assert('pause target: only order or booking, with an ObjectId', () =>
+        PauseTargetParamSchema.safeParse({ kind: 'order', id: 'a'.repeat(24) }).success
+        && PauseTargetParamSchema.safeParse({ kind: 'booking', id: 'b'.repeat(24) }).success
+        && !PauseTargetParamSchema.safeParse({ kind: 'shipment', id: 'a'.repeat(24) }).success
+        && !PauseTargetParamSchema.safeParse({ kind: 'order', id: 'nope' }).success);
+    t.assert("pause body bounds equal jovi-mall's PauseEarningsBodySchema (3..500)", () => {
+        const v = read(JOVI, 'modules', 'earnings', 'validators', 'admin-earnings.validator.ts');
+        return /PauseEarningsBodySchema = z\s*\.object\(\{ note: z\.string\(\)\.trim\(\)\.min\(3\)\.max\(500\) \}\)/.test(v);
     });
 }
 

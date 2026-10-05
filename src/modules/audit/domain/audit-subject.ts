@@ -26,6 +26,8 @@ const SUBJECT_CLASS: Readonly<Record<AuditTargetType, AuditSubjectClass>> = Obje
     // these: they can already read the records themselves, and seeing what was done to
     // a record they support is the point of a support role.
     order: 'platform_record',
+    // A service booking — the order's counterpart for bookable services (2026-10-05).
+    booking: 'platform_record',
     shipment: 'platform_record',
     remittance: 'platform_record',
     deposit: 'platform_record',
@@ -37,6 +39,9 @@ const SUBJECT_CLASS: Readonly<Record<AuditTargetType, AuditSubjectClass>> = Obje
     // A shared category is platform catalogue data, and Support can read the list itself
     // (`catalog.categories.read`) — so it may read what was done to it.
     category: 'platform_record',
+    // A review is platform data about a product or a delivery, and Support both reads and
+    // moderates reviews — so it may read what was done to one.
+    review: 'platform_record',
     // An uploaded file belongs to a vendor, agency, agent or customer — platform data,
     // not this service's machinery, so it classifies with the records rather than with
     // `internal`. Note this governs who may READ the audit row, which is a separate

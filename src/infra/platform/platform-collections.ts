@@ -151,6 +151,10 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'A merge rewrites every product holding the category and records aliases the duplicate check reads; a second writer would do neither',
     },
+    [COLLECTIONS.REVIEW]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'Every unpublish / republish / delete recomputes the rating aggregates and nudges an agent\'s trust score; a second writer would flip the status and fire neither',
+    },
     [COLLECTIONS.PRODUCT_VARIANT]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'The line an order item actually names; its media and price are what a dispute screen has to show (BR-017)',

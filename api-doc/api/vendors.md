@@ -426,12 +426,46 @@ can only be built where they live:
 
 So: a **record** whose projection needs machinery this service may not own is delegated.
 
+> **2026-10-05 — everything the vendor's editor shows is now on this read, additively.**
+> `description`, `seo`, `vectorisation`, `options`, `shipping`, `pickup`, `digital`,
+> `media.files`, and per variant `optionValues`, `bargain`, `bargainable`, `dimensions`,
+> `files`, `digital`, `service`. Nothing was renamed or removed. Source of truth:
+> `AdminProductDetailDto` in jovi-mall's `admin-product-detail.resolver.ts`.
+
 ### Response `200`
 
 Every list field, plus:
 
 ```jsonc
 {
+  "vendorId": "665a…",
+  "tags": ["fresh", "local"],
+  "description": "Vine-ripened tomatoes from Foumbot.",   // null when the vendor wrote none
+  "seo": { "title": "Fresh tomatoes — Douala", "description": null },
+  "vectorisation": { "enabled": true, "status": "completed" },
+
+  "options": [
+    { "id": "6614…", "name": "Weight", "position": 1,
+      "values": [ { "id": "6615…", "value": "1 kg" }, { "id": "6616…", "value": "5 kg" } ] }
+  ],
+
+  "shipping": {                       // the product-level defaults; null when never saved
+    "weightG": 1000, "lengthCm": 30, "widthCm": 20, "heightCm": 12,
+    "originZipCode": null, "handlingDays": 1, "shippingEnabled": true
+  },
+
+  "pickup": {                         // null on digital/service, or physical not configured
+    "source": "agency_storage",       // or "vendor_address"
+    "vendorAddressId": null,
+    "agencyAddressId": "6617…",       // null = the agency's primary depot
+    "address": { "label": "Bonaberi depot", "formattedAddress": "Rue 9, Douala, Littoral",
+                 "addressLine1": "Rue 9", "addressLine2": null, "city": "Douala",
+                 "state": "Littoral", "country": null, "coordinates": null },
+    "isPrimaryFallback": false
+  },
+
+  "digital": null,                    // digital products: { "isActive": true }
+
   "media": {
     "images": [
       { "id": "6612…", "key": "products/2026/07/tomatoes-1.jpg",
@@ -439,7 +473,8 @@ Every list field, plus:
         "access": "public",
         "mimeType": "image/jpeg", "size": 148213, "originalName": "tomatoes.jpg" }
     ],
-    "primaryImage": { /* images[0], or null */ }
+    "primaryImage": { /* images[0], or null */ },
+    "files": [ /* every FileDetail on the product itself — unfiltered */ ]
   },
 
   "pricing": {
@@ -474,6 +509,14 @@ Every list field, plus:
     {
       "id": "6613…", "name": "1 kg", "sku": "TOM-1KG", "status": "active",
       "amount": 4500, "compareAtAmount": 5200,
+      "optionValues": [ { "optionId": "6614…", "optionName": "Weight",
+                          "valueId": "6615…", "value": "1 kg" } ],
+      "bargain": { "minPrice": 4500, "maxPrice": 5500 },
+      "bargainable": true,
+      "dimensions": { "weightG": 1000, "lengthCm": 30, "widthCm": 20, "heightCm": 12 },
+      "files": [ /* this variant's own FileDetail rows — unfiltered */ ],
+      "digital": null,
+      "service": null,
       "inventory": { "tracked": true, "available": 42, "reserved": 6, "sellable": 36,
                      "lowStockThreshold": 10, "allowOversell": false },
       "storage": { "basis": "per_sku_monthly", "storageBasedEnabled": true,
@@ -497,6 +540,14 @@ Every list field, plus:
 | `inventory.sellable` | `available − reserved`, floored at 0 |
 | Product-level `inventory` | Summed across **active** variants. `tracked` is `false` if **any** of them is infinite-stock: a product one of whose units is uncounted has no honest total. `lowStockThreshold` is `null` at product level because the alert is per SKU — read it off the variant rows |
 | `deliveryAgency.status` | The agency's own status, so a listing pointing at a deactivated agency is visible as such |
+| `description` | The plain-text description the storefront renders. `null` when the vendor wrote none. The formatted copy used for WhatsApp/Telegram sharing is not carried — it is the same words |
+| `seo.title` · `seo.description` | The search-engine overrides; each `null` when unset, in which case the storefront uses the title and description |
+| `vectorisation` | The vendor's AI-search opt-in (`enabled`) and the pipeline state (`status`, an open vocabulary). **Bargaining is only live when `enabled` is true** — this is what explains a variant with a `bargain` and `bargainable: false` |
+| `options` | Position order, each with its values. `[]` on a product with none (simple mode, digital, service) |
+| `shipping` | The product-level size and weight defaults — what a variant uses when it states none of its own — plus `handlingDays`, `originZipCode` and `shippingEnabled`. `null` when the vendor never saved any. Each measurement is independently `null` |
+| **`pickup`** | **Where the delivery agency collects the product.** `agency_storage` means the agency **hosts** the stock — the depot belongs to `deliveryAgency`, and `address` is that depot. `vendor_address` means the vendor's own address. `isPrimaryFallback: true` means no depot was named, or the one named was deleted, and the primary depot stands in. `address: null` means the stored address no longer exists. The same resolver the vendor's editor uses |
+| `digital` | Digital products only: `{ isActive }`, the product-wide download switch. `null` otherwise |
+| **`media.files`** | **Every file attached to the product itself**, in the vendor's order and **unfiltered** — any type, quota-blocked included (`access` says which). `media.images` is the default variant's customer-facing gallery and, by design, omits the product's own pictures whenever that variant has its own; `media.files` plus `variants[].files` is all the media the listing holds |
 
 ### `storage` — a published rate, not an invoice
 
@@ -531,6 +582,16 @@ administrator opens this screen to understand, and hiding the archived unit make
 one archived variant look like a product with none. Check `status`.
 
 `[]` on a product with no variants — never `null`.
+
+| Field | Notes |
+|---|---|
+| `optionValues` | The option values that make this variant, ordered by the option's `position`. `optionName` is `null` if the option row is gone. `[]` with no options |
+| `bargain` | The haggling window: `minPrice` **is** `amount`, `maxPrice` is the ceiling a buyer may negotiate up to. Unrelated to `compareAtAmount`. `null` when none is configured — and never set on a service variant |
+| `bargainable` | `vectorisation.enabled && bargain != null`. A configured window on a product with AI search off is kept but **inert** |
+| `dimensions` | The variant's **own** `weightG` / `lengthCm` / `widthCm` / `heightCm`, each independently `null`. The whole object is `null` when the vendor set none, and the product's `shipping` defaults then apply |
+| `files` | Every file attached to this variant itself, unfiltered. `[]` is the normal case — the customer then sees the product's gallery |
+| `digital` | Digital variants only: `{ asset, maxDownloads, expiresAfterDays }`. `asset` is `{ id, originalName, mimeType, size }` with **no URL** (downloads are entitlement-gated), `null` until uploaded. `null` limits mean unlimited / never expires |
+| `service` | Service variants only: `durationMinutes` (what `amount` is priced per), `bufferBeforeMinutes`, `bufferAfterMinutes`, `bookingMode` (`calendar` · `manual` · `capacity`, open), `maxBookings` (`null` unless capacity), `peakHours` (`null`, or `{ daysOfWeek, startTime, endTime, priceType, value }` — `daysOfWeek` 0 = Sunday, `[]` = every day) |
 
 ### Errors
 

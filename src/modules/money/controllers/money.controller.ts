@@ -59,6 +59,10 @@ import {
     RejectPayoutBody,
     ResolveUnknownPayoutBody,
     TriagePayoutBody,
+    ListEarningsPausesQuery,
+    PauseEarningsBody,
+    PauseTargetParams,
+    ResumeEarningsBody,
 } from '../validators/money.validator';
 import { ledgerOwnerTypesOf, toPlatformEarnedSummaries } from '../domain/platform-earnings';
 
@@ -917,6 +921,54 @@ export class MoneyController {
             },
         );
     });
+}
+
+// ── Earnings pauses (2026-10-05) ─────────────────────────────────────────────
+// A static class would be the house style, but these four only call the gateway and the
+// order-number reader, so they sit beside the helpers rather than inside the long class.
+
+/** GET /api/v1/money/earnings/pauses — the queue of paused money. DELEGATED read. */
+export const listEarningsPauses = asyncHandler(async (req: Request, res: Response) => {
+    const query = req.query as unknown as ListEarningsPausesQuery;
+    sendPlatformPage(res, await gateway.listEarningsPauses(query, actorContextOf(req)));
+});
+
+/** GET /api/v1/money/earnings/pauses/:kind/:id — one order's or booking's pause record. */
+export const getEarningsPause = asyncHandler(async (req: Request, res: Response) => {
+    const { kind, id } = req.params as unknown as PauseTargetParams;
+    sendSuccess(res, await gateway.earningsPause(kind, id, actorContextOf(req)));
+});
+
+/** POST /api/v1/money/earnings/pauses/:kind/:id/pause — pause by hand, with a note. */
+export const pauseEarnings = asyncHandler(async (req: Request, res: Response) => {
+    const { kind, id } = req.params as unknown as PauseTargetParams;
+    const { note } = req.body as PauseEarningsBody;
+    sendSuccess(res, await setPause('pause', kind, id, note, req), { message: 'Earnings paused' });
+});
+
+/**
+ * POST /api/v1/money/earnings/pauses/:kind/:id/resume — lift any pause, whoever raised it.
+ * The hold continues where it stopped; the paused time never counts.
+ */
+export const resumeEarnings = asyncHandler(async (req: Request, res: Response) => {
+    const { kind, id } = req.params as unknown as PauseTargetParams;
+    const { note } = req.body as ResumeEarningsBody;
+    sendSuccess(res, await setPause('resume', kind, id, note ?? null, req), { message: 'Earnings resumed' });
+});
+
+async function setPause(
+    verb: 'pause' | 'resume',
+    kind: gateway.PauseKind,
+    id: string,
+    note: string | null,
+    req: Request,
+): Promise<gateway.PlatformPauseView> {
+    const context = actorContextOf(req);
+    // The current record first: it is the audit row's `before`, and it 404s an unknown id
+    // before any audit intent is written about a record that does not exist.
+    const current = await gateway.earningsPause(kind, id, context);
+    const label = kind === 'order' ? ((await orderNumbers.findNumbersByIds([id])).get(id) ?? null) : null;
+    return gateway.setEarningsPause(verb, kind, id, note, { label, before: current.pause }, context);
 }
 
 async function loadAllocationOr404(allocationId: string): Promise<EarningsAllocationReadModel> {

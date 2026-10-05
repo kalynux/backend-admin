@@ -158,6 +158,10 @@ export const COLLECTIONS = Object.freeze({
   ARTICLE: 'articles',
   ARTICLE_AUTHOR: 'article_authors',
 
+  // Reviews & ratings — products and deliveries (read for the moderation list, 2026-10-05).
+  // `review_aggregates` is not copied: nothing here reads it.
+  REVIEW: 'reviews',
+
   // COD (cash on delivery: collections, cash liabilities, reconciliation)
   CASH_COLLECTION: 'cash_collections',
   COD_CASH_ACCOUNT: 'cod_cash_accounts',

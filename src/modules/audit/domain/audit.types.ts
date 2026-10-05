@@ -62,6 +62,14 @@ export const AUDIT_TARGET_TYPES = [
     // An entry of the shared product-category list (2026-10-04). Its own type: a merge is
     // the row to find when a vendor asks why their product moved shelf.
     'category',
+    // A product or delivery review (2026-10-05). Its own type: "who hid my review, and when"
+    // is answered by filtering on it, and a review is no order, product or shipment.
+    'review',
+    // A service booking (2026-10-05). First audited write: pausing / resuming its earnings.
+    // Its own type rather than `order`: a booking is a different record in a different
+    // collection, and filing it under `order` would point an operator at an id that resolves
+    // to nothing there.
+    'booking',
     // This service's own records
     'administrator', 'admin_session', 'approval_request', 'audit_export',
     // Phase 12 operational targets. Both classify as `internal`: a flag flip and a worker

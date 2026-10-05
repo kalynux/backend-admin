@@ -1,6 +1,12 @@
 import { Router } from 'express';
 import { anyPermission, defineRoute, permission, records } from '../../../api/route-manifest';
-import { MoneyController } from '../controllers/money.controller';
+import {
+    MoneyController,
+    getEarningsPause,
+    listEarningsPauses,
+    pauseEarnings,
+    resumeEarnings,
+} from '../controllers/money.controller';
 /**
  * Imported for SIDE EFFECT, and the import is load-bearing.
  *
@@ -37,6 +43,10 @@ import {
     TriagePayoutSchema,
     SendPayoutSchema,
     TransactionIdParamSchema,
+    ListEarningsPausesQuerySchema,
+    PauseEarningsSchema,
+    PauseTargetParamSchema,
+    ResumeEarningsSchema,
 } from '../validators/money.validator';
 
 /**
@@ -451,6 +461,62 @@ defineRoute(router, {
     validate: { params: DeliveryFeeRefundIdParamSchema, body: SettleDeliveryFeeRefundSchema },
     audit: records('orders.delivery_fee_refund.settle'),
     handler: MoneyController.settleDeliveryFeeRefund,
+});
+
+// ── Earnings pauses (2026-10-05) ─────────────────────────────────────────────
+
+/**
+ * Paused money is never paid out. jovi-mall pauses on its own when a seller cancels a PAID
+ * order, when a paid booking is cancelled from the status menu (both also open a
+ * high-priority refund ticket), and when a card payment is disputed. An administrator lifts
+ * a pause once the customer is refunded or no refund is owed, and may pause any order or
+ * booking by hand. Resuming continues the hold where it stopped.
+ *
+ * Reads are DELEGATED (the pause record and its hold arithmetic are jovi-mall's) and behind
+ * `money.earnings.read`, the permission the rest of `/earnings` uses (tiers 1 + 2 — it comes
+ * from `allInFamily('money')` at tier 2, which Support does not hold). The two writes are
+ * `money.earnings.pause` (financial, tiers 1 + 2) and audited fail-closed against the order or
+ * the booking.
+ *
+ * `/earnings/pauses` is a literal sibling of `platform`, `accounts` and `allocations`, and
+ * `/earnings/pauses/:kind/:id` is two levels below, so nothing here shadows anything.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/earnings/pauses',
+    access: permission('money.earnings.read'),
+    validate: { query: ListEarningsPausesQuerySchema },
+    handler: listEarningsPauses,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/earnings/pauses/:kind/:id',
+    access: permission('money.earnings.read'),
+    validate: { params: PauseTargetParamSchema },
+    handler: getEarningsPause,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/earnings/pauses/:kind/:id/pause',
+    access: permission('money.earnings.pause'),
+    validate: { params: PauseTargetParamSchema, body: PauseEarningsSchema },
+    audit: records('money.earnings.pause_order', 'money.earnings.pause_booking'),
+    handler: pauseEarnings,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/earnings/pauses/:kind/:id/resume',
+    access: permission('money.earnings.pause'),
+    validate: { params: PauseTargetParamSchema, body: ResumeEarningsSchema },
+    audit: records('money.earnings.resume_order', 'money.earnings.resume_booking'),
+    handler: resumeEarnings,
 });
 
 export const moneyRoutes = router;

@@ -124,6 +124,16 @@ class RoleProfileRepository extends PlatformReadRepository<RoleProfileDocument> 
         });
         return new Map(rows.map((row) => [row._id.toString(), row.name ?? null]));
     }
+
+    /** The same, keyed by the OWNING `users._id` rather than the role entity's own id. */
+    async findNamesByUserIds(userIds: ObjectId[]): Promise<Map<string, string | null>> {
+        if (userIds.length === 0) return new Map();
+        const rows = await this.findBy({ user_id: { $in: userIds } } as Filter<RoleProfileDocument>, {
+            projection: { _id: 0, user_id: 1, name: 1 },
+            limit: userIds.length,
+        });
+        return new Map(rows.map((row) => [row.user_id.toString(), row.name ?? null]));
+    }
 }
 
 const REPOSITORIES: Readonly<Record<UserRoleName, RoleProfileRepository>> = Object.freeze(
@@ -168,6 +178,16 @@ export function isUserRoleName(value: string): value is UserRoleName {
  */
 export async function findCustomerNamesByIds(ids: ObjectId[]): Promise<Map<string, string | null>> {
     return REPOSITORIES.customer.findNamesByIds(ids);
+}
+
+/**
+ * Customer display names keyed by **`users._id`** — the id space a review's author lives in
+ * (`reviews.author_user_id`, 2026-10-05). Customer-only for the reason the function above
+ * gives: vendors and agencies have a business name elsewhere, and the review list resolves
+ * those through the owning modules' own resolvers.
+ */
+export async function findCustomerNamesByUserIds(userIds: ObjectId[]): Promise<Map<string, string | null>> {
+    return REPOSITORIES.customer.findNamesByUserIds(userIds);
 }
 
 /**

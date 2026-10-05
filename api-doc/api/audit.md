@@ -90,10 +90,12 @@ naming the valid values, rather than a filter that silently matches nothing.
 #### `targetType` values
 
 `user`, `vendor`, `agency`, `agent`, `customer`, `order`, `shipment`, `remittance`, `deposit`,
-`discrepancy`, `payout`, `ticket`, `article`, `plan`, `file`, `administrator`, `admin_session`,
-`approval_request`, `audit_export`, `feature_flag`, `worker`, `maintenance_window`, `none`
+`discrepancy`, `payout`, `ticket`, `article`, `plan`, `category`, `review`, `booking`, `file`,
+`administrator`, `admin_session`, `approval_request`, `audit_export`, `feature_flag`, `worker`,
+`maintenance_window`, `payment_settings`, `none`
 
-**23 values.** An unrecognised value stored in a row falls back to `none`, which classifies as
+**27 values** (re-measured against `AUDIT_TARGET_TYPES` 2026-10-05; this list said 23 and was
+missing `category`, `payment_settings` and the two added that day, `review` and `booking`). An unrecognised value stored in a row falls back to `none`, which classifies as
 `internal` — so an unclassifiable row is withheld from Support rather than leaked to them.
 
 ### Example request

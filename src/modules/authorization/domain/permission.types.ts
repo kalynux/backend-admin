@@ -51,6 +51,12 @@ export type PermissionFamily =
      * and merging one rewrites MANY vendors' products at once.
      */
     | 'catalog'
+    /**
+     * Ratings and reviews (2026-10-05) — of products AND of deliveries. Its own family
+     * rather than `catalog`: a delivery review is about an agent and an agency, not about
+     * anything in the catalogue, and it feeds an agent's trust score.
+     */
+    | 'reviews'
     // `customers` was here and is DELETED (Phase 5 Part D, ADR-017 D-1). Its two permissions
     // were granted and backed no route, and the `users` family already covers customers
     // role-agnostically. A family must hold at least one permission (`test-authz.ts` § 1), so
@@ -77,7 +83,7 @@ export type PermissionFamily =
 
 export const PERMISSION_FAMILIES: readonly PermissionFamily[] = [
     'agents', 'agencies', 'billing', 'cod', 'money', 'orders', 'support', 'content',
-    'files', 'messaging', 'users', 'vendors', 'catalog', 'shipments', 'administrators',
+    'files', 'messaging', 'users', 'vendors', 'catalog', 'reviews', 'shipments', 'administrators',
     'notifications', 'system', 'developer_tools', 'permissions', 'approvals', 'audit',
     'employees',
 ] as const;

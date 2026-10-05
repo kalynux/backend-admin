@@ -595,6 +595,43 @@ Every list field, plus:
 
 # Payouts — where money leaves the platform
 
+## Earnings pauses — `/money/earnings/pauses` (2026-10-05)
+
+**Paused money is never paid out.** The platform pauses an order's or booking's earnings on its own
+in three situations, and an administrator may pause any order or booking by hand:
+
+| `pause.reason` | When | Also |
+|---|---|---|
+| `seller_cancelled_paid_order` | the seller cancelled an order the customer had already paid | a HIGH-priority `ORDER_REFUND` support ticket is opened |
+| `booking_cancelled_unrefunded` | a paid booking was cancelled from the seller's **status menu** | a HIGH-priority `BOOKING_CANCELLATION` ticket is opened |
+| `card_dispute` | the customer disputed the card payment with their bank | lifts **itself** when the dispute is won (or lost — the earnings are then reversed) |
+| `admin` | an administrator paused it | — |
+
+**Closing a refund ticket:** refund the customer (`orders.refund` — this reverses the earnings), or,
+if no refund is owed, **resume** the earnings. Resuming continues the hold where it stopped: the
+paused time never counts. Since 2026-10-05 the hold is **3 days from delivery**
+(the courier finishing the order's last parcel).
+
+| Route | Permission | Audit |
+|---|---|---|
+| `GET /money/earnings/pauses` — the queue, newest pause first. Query `kind?` (`order`/`booking`), `page`, `limit` | `money.earnings.read` (tiers 1 + 2) | — |
+| `GET /money/earnings/pauses/:kind/:id` — one record; `pause: null` if never paused | `money.earnings.read` | — |
+| `POST /money/earnings/pauses/:kind/:id/pause` — body `{ "note": string (3–500) }` | `money.earnings.pause` (financial — tiers 1 + 2, **never Support**) | `money.earnings.pause_order` / `pause_booking`, fail-closed |
+| `POST /money/earnings/pauses/:kind/:id/resume` — body `{ "note"?: string (1–500) }` | `money.earnings.pause` | `money.earnings.resume_order` / `resume_booking`, fail-closed |
+
+All four are **delegated** to jovi-mall, which holds the pause record and the hold arithmetic.
+
+**Queue row:** `{ kind, id, reference, vendorId, amount, currency, pause }` — `reference` is the order
+number (`ORD-…`) or booking number (`BKG-…`); `amount` is what the customer paid.
+
+**`pause`:** `{ active, reason, note, paused_at, paused_by_user_id, paused_by_source, paused_by_name,
+resumed_at, resumed_by_user_id, resumed_by_source, resumed_by_name, resume_note }`. A pause the
+platform raised has `paused_by_user_id: null` and `paused_by_name: "system"`; one an administrator
+raised has `paused_by_source: "admin"` and their id and name.
+
+**Errors:** `404 EARNINGS_PAUSE_TARGET_NOT_FOUND` (unknown id), `409 EARNINGS_ALREADY_PAUSED` (pause
+twice — the first pause's reason is kept), `409 EARNINGS_NOT_PAUSED` (resume something not paused).
+
 ## `GET /money/payouts`
 
 The queue.
