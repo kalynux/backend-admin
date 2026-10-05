@@ -178,6 +178,20 @@ a Campay payment takes the manual path (`gatewayRefundSupported: false` on refun
 payout's `transferGateway` and be chosen as the payout aggregator on the Payments screen, once its
 flag is on and its `payoutAvailable` says so. No dashboard change is needed.
 
+**Update (2026-10-05) — `PAWAPAY` is a gateway value** (ADR-A08 § PawaPay). It appears as a row in
+the Payments screen's `aggregators[]` (collects MTN and ORANGE by push; can pay out once
+`PAWAPAY_PAYOUTS_ENABLED` is on), as `gateway` on payments, top-ups and plan purchases, and as
+`transferGateway` on payouts. **No dashboard change is needed** if the rule above is
+followed. Two things an administrator may notice:
+
+- A PawaPay payment's provider reference is a **UUID** (PawaPay requires the merchant to mint one),
+  not a `jm_…` string. Our `jm_…` reference is on the PawaPay record too, as **Client reference ID**
+  and as metadata **jmRef**; the PawaPay dashboard's search needs the full value.
+- On the integrations screen (`GET /api/v1/system/integrations`), the `pawapay` row's
+  `callbackKeysLoaded` is `0` until the first PawaPay call. If payments sit pending while it stays
+  `0`, or the jovi-mall log shows `[PAWAPAYWebhook] refused: missing_signature`, signed callbacks are
+  not switched on in the PawaPay dashboard.
+
 Payouts stuck in `processing` are now re-checked by a reconciliation sweep (jovi-mall `9ab91fa`)
 against the aggregator stored on the payout, so fewer of them need an administrator. What the
 sweep cannot settle still does.
