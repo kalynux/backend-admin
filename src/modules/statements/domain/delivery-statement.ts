@@ -12,6 +12,7 @@ import {
 } from '../repositories/statement.read.repository';
 import { agencyEarningBreakdown, AgencyEarningBreakdown, collectionCashBreakdown } from './money-breakdown';
 import { allocationStatusLabel, col, idOf, loadNames, sumOf } from './statement-common';
+import { reversalLabel, reversalsFor } from './earnings-reversals';
 import { StatementSection, SummaryLine } from './statement.types';
 
 /**
@@ -31,6 +32,9 @@ const deposits = new StatementDepositRepository();
 const remittances = new StatementRemittanceRepository();
 const reserves = new StatementReserveHoldRepository();
 
+/** What a shipment is resolved from: an allocation, or a clawback line (which may name no source). */
+type SourceRef = { source_type: string | null; source_id: ObjectId | null };
+
 export interface DeliveryStatementParts {
     sections: StatementSection[];
     summary: SummaryLine[];
@@ -44,9 +48,11 @@ export async function deliveryStatement(
     range: Range,
 ): Promise<DeliveryStatementParts> {
     const field = ownerType === 'agency' ? 'agency_id' : 'agent_id';
-    const [created, reversed, cashRows, depositRows, remittanceRows, reserveRows] = await Promise.all([
+    const [created, { reversals, writeOffs }, cashRows, depositRows, remittanceRows, reserveRows] = await Promise.all([
         allocations.createdFor(ownerType, ownerId, range),
-        allocations.reversedFor(ownerType, ownerId, range),
+        // From `earnings_adjustments` (REFUND-FLOW-PLAN § 6.1): partial claws included, a full one
+        // counted once. A delivery share is clawed only by a lost dispute (C-1, C-3).
+        reversalsFor(ownerType, ownerId, range),
         collections.collectedFor(field, ownerId, range),
         deposits.createdFor(field, ownerId, range),
         ownerType === 'agency' ? remittances.declaredFor(ownerId, range) : Promise.resolve([]),
@@ -54,13 +60,18 @@ export async function deliveryStatement(
     ]);
 
     const earnings = created.filter((a) => a.source_type === 'shipment' || a.source_type === 'cod_collection');
+    const reversed: SourceRef[] = reversals.map((r) => ({ source_type: r.sourceType, source_id: r.sourceId }));
     const sourceCollections = await collections.byIds(
-        [...earnings, ...reversed].filter((a) => a.source_type === 'cod_collection').map((a) => a.source_id),
+        [...earnings, ...reversed].filter((a) => a.source_type === 'cod_collection' && a.source_id).map((a) => a.source_id as ObjectId),
     );
     const collectionById = new Map([...sourceCollections, ...cashRows].map((c) => [idOf(c._id), c]));
 
-    const shipmentIdOf = (a: AllocationRow): ObjectId | null =>
-        a.source_type === 'shipment' ? a.source_id : collectionById.get(idOf(a.source_id))?.shipment_id ?? null;
+    const shipmentIdOf = (a: SourceRef): ObjectId | null =>
+        !a.source_id
+            ? null
+            : a.source_type === 'shipment'
+              ? a.source_id
+              : collectionById.get(idOf(a.source_id))?.shipment_id ?? null;
 
     const shipmentIds = [
         ...[...earnings, ...reversed].map(shipmentIdOf),
@@ -233,12 +244,22 @@ export async function deliveryStatement(
     const adjustmentsSection: StatementSection = {
         key: 'adjustments',
         title: 'Adjustments to your earnings',
-        description: 'Earnings reversed in this period (for example after the order was fully refunded).',
-        columns: [col.at('at', 'Reversed'), col.text('order', 'Order', 18), col.money('amount', 'Amount')],
-        rows: reversed.map((a) => ({
-            at: a.reversed_at ?? null,
-            order: orderOfShipment(shipmentIdOf(a))?.order_number ?? null,
-            amount: -a.amount,
+        description:
+            'Earnings taken back in this period — in full or in part — for example after a lost payment dispute. ' +
+            '"Owed back" is the part your balance could not cover, recovered from your next earnings.',
+        columns: [
+            col.at('at', 'Date'),
+            col.text('kind', 'Adjustment', 22),
+            col.text('order', 'Order', 18),
+            col.money('amount', 'Amount'),
+            col.money('owed', 'Owed back'),
+        ],
+        rows: reversals.map((r) => ({
+            at: r.at,
+            kind: reversalLabel(r),
+            order: orderOfShipment(shipmentIdOf({ source_type: r.sourceType, source_id: r.sourceId }))?.order_number ?? null,
+            amount: -r.amount,
+            owed: r.toDebt,
         })),
         totals: ['amount'],
     };
@@ -300,7 +321,7 @@ export async function deliveryStatement(
     // ── Summary ────────────────────────────────────────────────────────────────
     const own = (a: AllocationRow) => a.amount;
     const earned = sumOf(earnings, own);
-    const reversedTotal = sumOf(reversed, own);
+    const reversedTotal = sumOf(reversals, (r) => r.amount);
     const unsplit = earnings.filter((a) => bd(a).codFee === null).length;
 
     const summary: SummaryLine[] =
@@ -310,7 +331,7 @@ export async function deliveryStatement(
                   { label: 'COD handling fees', value: sumOf(earnings, (a) => bd(a).codFee), kind: 'money' },
                   { label: "Agents' shares", value: -sumOf(earnings, (a) => bd(a).agentCut), kind: 'money', indent: true },
                   { label: 'Agency net earnings', value: earned, kind: 'money' },
-                  { label: 'Earnings reversed', value: -reversedTotal, kind: 'money' },
+                  { label: 'Earnings clawed back', value: -reversedTotal, kind: 'money' },
                   { label: 'Net earnings in period', value: earned - reversedTotal, kind: 'money' },
                   { label: 'Deliveries credited', value: earnings.length, kind: 'int' },
                   { label: 'COD cash collected by agents', value: sumOf(cashRows, (c) => c.expected_amount), kind: 'money' },
@@ -327,7 +348,7 @@ export async function deliveryStatement(
               ]
             : [
                   { label: 'Your share of delivery fees', value: earned, kind: 'money' },
-                  { label: 'Earnings reversed', value: -reversedTotal, kind: 'money' },
+                  { label: 'Earnings clawed back', value: -reversedTotal, kind: 'money' },
                   { label: 'Net earnings in period', value: earned - reversedTotal, kind: 'money' },
                   { label: 'Deliveries credited', value: earnings.length, kind: 'int' },
                   { label: 'COD cash you collected', value: sumOf(cashRows, (c) => c.expected_amount), kind: 'money' },
@@ -337,6 +358,11 @@ export async function deliveryStatement(
                       kind: 'money',
                   },
               ];
+
+    if (writeOffs.length > 0) {
+        // Informational, outside the net arithmetic: forgiving a debt is not an earning.
+        summary.push({ label: 'Refund debt written off by the platform', value: sumOf(writeOffs, (w) => w.amount), kind: 'money' });
+    }
 
     const notes = [
         'Earnings are dated when they were credited: at delivery for a prepaid order, at cash collection for cash on delivery.',

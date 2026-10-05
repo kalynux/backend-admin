@@ -332,6 +332,11 @@ export interface PaymentSettingsView {
     collectionAggregator: string;
     payoutAggregator: string;
     stripeEnabled: boolean;
+    /**
+     * The refund transfer fee in percent (0–20, default 2; REFUND-FLOW-PLAN R-3). Optional in the
+     * type only because a jovi-mall older than the refund flow sends no such key.
+     */
+    refundFeePercent?: number;
     providers: Record<string, { enabled: boolean }>;
     version: number;
     updatedAt: string | null;
@@ -384,6 +389,7 @@ export interface SetPaymentSettingsInput {
     collectionAggregator?: string;
     payoutAggregator?: string;
     stripeEnabled?: boolean;
+    refundFeePercent?: number;
     providers?: Record<string, { enabled: boolean }>;
     expectedVersion: number;
     reason: string;
@@ -490,6 +496,7 @@ export async function setPaymentSettings(
                 collectionAggregator: input.collectionAggregator ?? null,
                 payoutAggregator: input.payoutAggregator ?? null,
                 stripeEnabled: input.stripeEnabled ?? null,
+                refundFeePercent: input.refundFeePercent ?? null,
                 providers: input.providers ?? null,
                 expectedVersion: input.expectedVersion,
                 reason: input.reason,

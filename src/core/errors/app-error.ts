@@ -164,6 +164,15 @@ export const DEFAULT_MESSAGES: Partial<Record<ErrorCode, string>> = {
     [ERROR_CODES.PAYOUT_NOT_PENDING]: 'This payout request has already been resolved',
     [ERROR_CODES.PAYOUT_NOT_PROCESSING]:
         'Only a payout whose transfer outcome is unknown (processing) can be resolved this way',
+    [ERROR_CODES.REFUND_REQUEST_STATUS_CONFLICT]: 'This refund request is not in a status that allows this action',
+    [ERROR_CODES.REFUND_SECOND_APPROVER_REQUIRED]:
+        'The destination number was typed by you — another administrator must approve this refund',
+    [ERROR_CODES.REFUND_USE_REFUND_QUEUE]:
+        'A refund of 2,000,000 or more needs a second administrator — raise it from the refund queue instead',
+    [ERROR_CODES.EARNINGS_CLAWBACK_WRITE_OFF_EXCEEDS_DEBT]:
+        'This is more than the owner currently owes back',
+    [ERROR_CODES.EARNINGS_PAUSE_HELD_BY_REFUND]:
+        'A refund of this order or booking is still in progress — its earnings resume when the refund is finished or rejected',
     [ERROR_CODES.CONTRACT_NOT_FOUND]: 'No agent–agency contract with this id',
     [ERROR_CODES.TICKET_NOT_FOUND]: 'No support ticket with this id',
     [ERROR_CODES.TICKET_ALREADY_ASSIGNED]: 'This ticket is already held by an administrator',

@@ -48,6 +48,7 @@
     "test:messaging": "ts-node scripts/test/test-messaging.ts",
     "test:categories": "ts-node scripts/test/test-categories.ts",
     "test:reviews": "ts-node scripts/test/test-reviews.ts",
+    "test:refunds": "ts-node scripts/test/test-refunds.ts",
     "//verify": [
       "Every verify:* runs through `node --max-old-space-size=4096 -r ts-node/register`,",
       "never a bare `ts-node` (F-4, fixed 2026-08-20).",

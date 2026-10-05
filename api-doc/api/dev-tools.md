@@ -477,6 +477,7 @@ Which aggregator collects and which pays out, what each one can do, and how each
       "collectionAggregator": "NOTCHPAY",
       "payoutAggregator": "NOTCHPAY",
       "stripeEnabled": false,
+      "refundFeePercent": 2,
       "providers": { "MTN": { "enabled": true }, "ORANGE": { "enabled": true }, "MOOV": { "enabled": false }, "CARD": { "enabled": false } },
       "version": 3,
       "updatedAt": "2026-09-30T10:00:00.000Z",
@@ -548,7 +549,7 @@ belong to jovi-mall.
 ## `PUT /dev-tools/payments`
 
 The manual failover switch: the collection aggregator, the payout aggregator, Stripe, and which
-providers are offered.
+providers are offered — and, since 2026-10-05, the **refund transfer fee** (`refundFeePercent`).
 
 | | |
 |---|---|
@@ -565,6 +566,7 @@ attempted, keep the gateway stored on their row. So a switch strands nothing tha
 | `collectionAggregator` | string | Optional. An uppercase **name**, e.g. `MYCOOLPAY`. Not pinned to a list here, so a new aggregator works the day jovi-mall ships it. jovi-mall refuses unknown ones |
 | `payoutAggregator` | string | Optional. Same rules |
 | `stripeEnabled` | boolean | Optional. Stripe's own switch, independent of the collection aggregator |
+| `refundFeePercent` | number, 0–20 | Optional (🆕 2026-10-05, REFUND-FLOW-PLAN R-3). The fee, **in percent**, taken off every refund paid by transfer or outside the platform — **never off a card refund**. Default **2**; decimals allowed. `fee = round(gross × rate / 100)`; the customer receives the rest. It changes **new** refund requests only — a request fixes its `feeRate` when it is created. Shown on the GET as `settings.refundFeePercent` (absent against a jovi-mall older than the refund flow) |
 | `providers` | `{ [NAME]: { enabled: boolean } }` | Optional and **partial**, merged per provider |
 | `expectedVersion` | integer ≥ 0 | **Required.** The `settings.version` you read. Send `0` when no document exists yet. If it no longer matches, the answer is `409`: reload and decide again |
 | `reason` | string, 10–500 | **Required.** Recorded on the settings document and in the audit row |

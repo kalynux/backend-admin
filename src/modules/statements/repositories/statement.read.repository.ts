@@ -101,6 +101,71 @@ export class StatementAllocationRepository extends PlatformReadRepository<Alloca
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// earnings_adjustments — refund clawbacks and write-offs (REFUND-FLOW-PLAN § 6.1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One `earnings_adjustments` row. `refund_clawback` is money a refund took back from this owner
+ * (from a held share, its reserve slice, available, or — when nothing covered it — debt);
+ * `write_off` is debt the platform forgave. `clawback_recovery` (debt paid down by a later
+ * inflow) is NOT read: it moves money from one of the owner's pots to another and changes no
+ * earning, so counting it would count the clawback twice.
+ */
+export interface AdjustmentRow extends Document {
+    _id: ObjectId;
+    refund_key: string;
+    /** `null` on a vendor charge beyond its shares (C-1 delivery money) and on a write-off. */
+    allocation_id: ObjectId | null;
+    source_type: 'order' | 'booking' | 'cod_collection' | 'shipment' | null;
+    source_id: ObjectId | null;
+    beneficiary_type: string;
+    beneficiary_id: ObjectId | null;
+    amount: number;
+    currency?: string;
+    taken_from?: { pending?: number; reserve?: number; available?: number; debt?: number } | null;
+    kind: 'refund_clawback' | 'write_off' | 'clawback_recovery';
+    created_at: Date;
+}
+
+export class StatementAdjustmentRepository extends PlatformReadRepository<AdjustmentRow> {
+    constructor() {
+        super(COLLECTIONS.EARNINGS_ADJUSTMENT, {
+            _id: 1, refund_key: 1, allocation_id: 1, source_type: 1, source_id: 1, beneficiary_type: 1,
+            beneficiary_id: 1, amount: 1, currency: 1, 'taken_from.pending': 1, 'taken_from.reserve': 1,
+            'taken_from.available': 1, 'taken_from.debt': 1, kind: 1, created_at: 1,
+        });
+    }
+
+    /** This owner's clawbacks and write-offs recorded in the period. */
+    clawbacksFor(type: string, id: string, range: Range): Promise<AdjustmentRow[]> {
+        return this.findBy(
+            {
+                beneficiary_type: type,
+                beneficiary_id: oid(id),
+                kind: { $in: ['refund_clawback', 'write_off'] },
+                created_at: inRange(range),
+            } as Filter<AdjustmentRow>,
+            { sort: { created_at: 1, _id: 1 } },
+        );
+    }
+
+    /**
+     * Which of these allocations a clawback has EVER touched, whatever the period. A reversed
+     * allocation in that set is already told by its adjustment rows (a partial claw last month
+     * and the final one this month are two rows) — listing its `reversed_at` too would count it
+     * twice. One with no clawback row was reversed before the clawback ledger existed.
+     */
+    async clawedAllocationIds(allocationIds: ObjectId[]): Promise<Set<string>> {
+        if (allocationIds.length === 0) return new Set();
+        const rows = await this.findBy({
+            allocation_id: { $in: uniq(allocationIds) },
+            kind: 'refund_clawback',
+        } as Filter<AdjustmentRow>);
+        return new Set(rows.filter((r) => r.allocation_id).map((r) => r.allocation_id!.toHexString()));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // orders · customers · order_timelines · payment_transactions · refund_transactions
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -234,6 +299,12 @@ export class StatementPaymentRepository extends PlatformReadRepository<PaymentRo
     }
 }
 
+/**
+ * A `refund_transactions` row. Since the refund flow (REFUND-FLOW-PLAN § 11.5) `gateway` and
+ * `paymentTransactionId` may be ABSENT (COD and externally-settled refunds), and `refundAmount`
+ * stays the GROSS while `feeAmount` / `netAmount` say what the platform kept and what the
+ * customer received. Everything here reads them as optional.
+ */
 export interface RefundRow extends Document {
     _id: ObjectId;
     orderId?: ObjectId | null;
@@ -242,7 +313,10 @@ export interface RefundRow extends Document {
     currency: string;
     reason?: string;
     status: string;
-    gateway?: string;
+    gateway?: string | null;
+    channel?: string | null;
+    feeAmount?: number | null;
+    netAmount?: number | null;
     initiatedByRole?: string;
     createdAt: Date;
     completedAt?: Date | null;
@@ -252,7 +326,7 @@ export class StatementRefundRepository extends PlatformReadRepository<RefundRow>
     constructor() {
         super(COLLECTIONS.REFUND_TRANSACTION, {
             _id: 1, orderId: 1, bookingId: 1, refundAmount: 1, currency: 1, reason: 1, status: 1,
-            gateway: 1, initiatedByRole: 1, createdAt: 1, completedAt: 1,
+            gateway: 1, channel: 1, feeAmount: 1, netAmount: 1, initiatedByRole: 1, createdAt: 1, completedAt: 1,
         });
     }
 
@@ -632,6 +706,11 @@ export interface BookingRow extends Document {
     userId?: ObjectId | null;
     startAt?: Date | null;
     status: string;
+    /**
+     * jovi-mall's booking payment status, shown as written. Since the refund flow (2026-10-05)
+     * `refund_pending` means "a refund REQUEST is open on this booking" (`refund_requests`),
+     * no longer "a support ticket waits for a manual payout".
+     */
     paymentStatus?: string;
     paymentMethod?: string | null;
     paidAt?: Date | null;

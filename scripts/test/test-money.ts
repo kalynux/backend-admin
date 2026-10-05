@@ -64,7 +64,10 @@ import {
     REFUND_SORT,
     RejectPayoutSchema,
     ResolveUnknownPayoutSchema,
+    ClawbackOwnerParamSchema,
+    WriteOffClawbackSchema,
 } from '../../src/modules/money/validators/money.validator';
+import { buildDebtorFilter } from '../../src/modules/money/repositories/earnings-account.read.repository';
 import * as payoutWrites from '../../src/modules/money/domain/payout-dual-control';
 import {
     buildAllocationFilter,
@@ -99,6 +102,7 @@ import {
     ownerKey,
     toAllocationDetailDto,
     toAllocationDto,
+    toEarningsAccountDto,
     toLedgerEntryDto,
     toPaymentDetailDto,
     toPaymentDto,
@@ -1239,7 +1243,7 @@ t.section('10. The route manifest');
 
 const moneyRoutes = routeManifest().filter((route) => route.fullPath.startsWith('/api/v1/money'));
 
-t.assert('twenty-six routes are declared on /money (17 + three delivery-fee refund routes, ADR-A11 W-G2, + platform summary and order split, 2026-10-04, + four earnings-pause routes, 2026-10-05)', () => moneyRoutes.length === 26);
+t.assert('twenty-eight routes are declared on /money (17 + three delivery-fee refund routes, ADR-A11 W-G2, + platform summary and order split, 2026-10-04, + four earnings-pause routes, 2026-10-05, + the clawback list and write-off, REFUND-FLOW-PLAN § 6)', () => moneyRoutes.length === 28);
 
 /**
  * The triage route is the ONE write on this surface a Support administrator can reach, and
@@ -1677,6 +1681,38 @@ t.section('12. Delivery-fee refunds owed to customers (jovi-mall ADR-A11 W-G2)')
         const keys = [...block.matchAll(/^ {2}([a-zA-Z]+)\??:/gm)].map((m) => m[1]);
         return keys.length >= 10 && keys.every((k) => k in dto);
     });
+    // REFUND-FLOW-PLAN § 7: a row whose money sits in a refund REQUEST is settled in the queue.
+    const linked = toDeliveryFeeRefundDto({ ...(owed as object), refund_request_id: oid(OTHER_OID) } as never, 'WM-1');
+    t.assert('refund DTO: a row linked to a refund request is NOT settleable here, and names the request', () =>
+        linked.settleable === false && linked.refundRequestId === OTHER_OID && linked.rejectedRefundRequestId === null);
+    const rejected = toDeliveryFeeRefundDto(
+        { ...(owed as object), refund_request_id: null, rejected_refund_request_id: oid(OTHER_OID) } as never, 'WM-1');
+    const blocked = toDeliveryFeeRefundDto(owed, 'WM-1', { id: OTHER_OID, status: 'awaiting_approval' });
+    t.assert('refund DTO: NOT settleable while a refund of the whole ORDER is open, and names it', () =>
+        blocked.settleable === false && blocked.orderRefundRequest?.id === OTHER_OID && dto.orderRefundRequest === null);
+    t.assert("refund DTO: jovi-mall refuses the settle while an order refund is open (the rule mirrored)", () =>
+        read(JOVI, 'modules', 'delivery-fee-proposals', 'services', 'delivery-fee-refund-admin.service.ts')
+            .includes("findOpenForSource('order', row.order_id.toString())"));
+    t.assert('the delivery-fee list, detail and order block all look up the order\'s open refund request', () => {
+        const controller = readCode(...MONEY_DIR, 'controllers', 'money.controller.ts');
+        const orders = readCode(SRC, 'modules', 'orders', 'controllers', 'order.controller.ts');
+        return (controller.match(/refundRequests\.openForOrders\(/g) ?? []).length === 2
+            && orders.includes('refundRequests.openForOrders([orderId])');
+    });
+    t.assert('resume refuses a pause a refund still holds — BEFORE the audited delegation', () => {
+        const controller = readCode(...MONEY_DIR, 'controllers', 'money.controller.ts');
+        const body = controller.slice(controller.indexOf('export const resumeEarnings'), controller.indexOf('async function setPause'));
+        const guard = body.indexOf('findHoldingEarningsPause(');
+        const call = body.indexOf('setPause(');
+        return guard > 0 && call > guard && body.includes('ERROR_CODES.EARNINGS_PAUSE_HELD_BY_REFUND')
+            && body.includes('refundRequestId') && body.includes('refundRequestStatus');
+    });
+    t.assert('refund DTO: after the request was REJECTED the row is settleable again, with the history kept', () =>
+        rejected.settleable === true && rejected.refundRequestId === null && rejected.rejectedRefundRequestId === OTHER_OID);
+    t.assert("refund DTO: settleable is jovi-mall's own rule (manual_required AND no linked request)", () => {
+        const joviDto = read(JOVI, 'modules', 'delivery-fee-proposals', 'dto', 'delivery-fee-proposal.dto.ts');
+        return joviDto.includes("settleable: r.status === 'manual_required' && !r.refund_request_id");
+    });
     const settled = toDeliveryFeeRefundDto({
         ...(owed as object), status: 'completed',
         settlement: { method: 'cash', reference: null, note: null, settled_by_user_id: 'ad01', settled_by_source: 'admin', settled_by_name: 'Awa', settled_at: new Date() },
@@ -1884,6 +1920,115 @@ t.section('14. One order\'s money split (2026-10-04)');
     t.assert("pause body bounds equal jovi-mall's PauseEarningsBodySchema (3..500)", () => {
         const v = read(JOVI, 'modules', 'earnings', 'validators', 'admin-earnings.validator.ts');
         return /PauseEarningsBodySchema = z\s*\.object\(\{ note: z\.string\(\)\.trim\(\)\.min\(3\)\.max\(500\) \}\)/.test(v);
+    });
+}
+
+// ─── Refund debt — clawback (REFUND-FLOW-PLAN § 6, 2026-10-05) ──────────────
+t.section('15. Refund debt: the clawback list, the write-off, and COD/external refund rows');
+{
+    const route = (suffix: string, method: string) =>
+        moneyRoutes.find((r) => r.fullPath === `/api/v1/money${suffix}` && r.method === method);
+    const list = route('/earnings/clawbacks', 'get');
+    const writeOff = route('/earnings/clawbacks/:ownerType/:ownerId/write-off', 'post');
+
+    t.assert('clawbacks: the debtor list is a READ under money.earnings.read, unaudited', () =>
+        list !== undefined && list.access.kind === 'permission'
+        && list.access.permissions.join() === 'money.earnings.read' && list.audit === null);
+    t.assert('clawbacks: write-off stands behind money.earnings.clawback.write_off ALONE, audited per owner type', () =>
+        writeOff !== undefined && writeOff.access.kind === 'permission'
+        && writeOff.access.permissions.join() === 'money.earnings.clawback.write_off'
+        && writeOff.audit?.kind === 'records'
+        && [...writeOff.audit.actions].sort().join()
+            === 'money.earnings.clawback.write_off_agency,money.earnings.clawback.write_off_agent,money.earnings.clawback.write_off_vendor');
+    t.assert('write-off: financial, tiers 1 + 2, never Support', () =>
+        permissionSpec('money.earnings.clawback.write_off').financial === true
+        && TIER_GRANTS[2].includes('money.earnings.clawback.write_off' as never)
+        && !TIER_GRANTS[3].includes('money.earnings.clawback.write_off' as never));
+    t.assert('write-off: four-eyes at ≥ 2,000,000 (the payout line), approved by the same permission', () => {
+        const spec = permissionSpec('money.earnings.clawback.write_off').dualControl;
+        return spec !== undefined
+            && spec.approverPermission === 'money.earnings.clawback.write_off'
+            && spec.when({ amount: 2_000_000 }) && !spec.when({ amount: 1_999_999 })
+            && !spec.when({ amount: '2000000' });
+    });
+    t.assert('write-off: importing the routes registers its dual-control handler', () =>
+        dualControlHandlerFor('money.earnings.clawback.write_off') !== undefined);
+    t.assert('write-off: the audit actions are delegated and filed against the OWNER', () =>
+        (['vendor', 'agency', 'agent'] as const).every((type) => {
+            const spec = auditSpec(`money.earnings.clawback.write_off_${type}`);
+            return spec.transport === 'delegated' && spec.target === type
+                && spec.permission === 'money.earnings.clawback.write_off';
+        }));
+    t.assert('write-off body: .strict(), whole positive amount, a reason of at least 10 characters', () =>
+        WriteOffClawbackSchema.safeParse({ amount: 5000, reason: 'owner left the platform' }).success
+        && !WriteOffClawbackSchema.safeParse({ amount: 0, reason: 'owner left the platform' }).success
+        && !WriteOffClawbackSchema.safeParse({ amount: 12.5, reason: 'owner left the platform' }).success
+        && !WriteOffClawbackSchema.safeParse({ amount: 5000, reason: 'short' }).success
+        && !WriteOffClawbackSchema.safeParse({ amount: 5000, reason: 'owner left the platform', ownerId: 'x' }).success);
+    t.assert('write-off owner: vendor, agency or agent — never the platform singletons', () =>
+        ClawbackOwnerParamSchema.safeParse({ ownerType: 'vendor', ownerId: 'a'.repeat(24) }).success
+        && !ClawbackOwnerParamSchema.safeParse({ ownerType: 'platform', ownerId: 'a'.repeat(24) }).success);
+    t.assert('write-off: the pre-flight refuses more than is owed, before any queue or call', () => {
+        const source = readCode(SRC, 'modules', 'money', 'domain', 'clawback-write-off.ts');
+        const body = source.slice(source.indexOf('export async function writeOff'));
+        return /amount > owed/.test(source)
+            && body.indexOf('loadDebtCovering(') < body.indexOf('dualControlRequired(')
+            && /EARNINGS_CLAWBACK_WRITE_OFF_EXCEEDS_DEBT/.test(source);
+    });
+    t.assert('write-off: the handler re-checks the debt against current state and acts as the APPROVER', () => {
+        const source = readCode(SRC, 'modules', 'money', 'domain', 'clawback-write-off.ts');
+        const handler = source.slice(source.indexOf('registerDualControlHandler('));
+        return handler.includes('loadDebtCovering(ownerType, ownerId, amount)')
+            && handler.includes('actor: approver')
+            && handler.includes('approval._id.toString()');
+    });
+    t.assert('the debtor filter is clawback_balance > 0, optionally one owner type', () => {
+        const all = buildDebtorFilter() as Record<string, unknown>;
+        const vendors = buildDebtorFilter('vendor') as Record<string, unknown>;
+        return JSON.stringify(all) === '{"clawback_balance":{"$gt":0}}' && vendors.owner_type === 'vendor';
+    });
+    t.assert('the debt is read through a projection naming only owner, currency, debt and time', () => {
+        const source = readCode(SRC, 'modules', 'money', 'repositories', 'earnings-account.read.repository.ts');
+        const block = source.slice(source.indexOf('const DEBT_PROJECTION'), source.indexOf('} as const;'));
+        return /clawback_balance: 1/.test(block) && !/available_balance|pending_balance|requested_balance/.test(block);
+    });
+    t.assert('the accounts DTO carries clawback (0 when the owner owes nothing), never summed into the others', () => {
+        const row = { ownerType: 'vendor', ownerId: OID, pending: 1, available: 0, reserve: 0, requested: 0, currency: 'XAF', updatedAt: '2026-10-05T00:00:00.000Z' };
+        const owes = toEarningsAccountDto(row, NO_NAMES, new Map([[`vendor:${OID}`, 4_900]]));
+        const clear = toEarningsAccountDto(row, NO_NAMES);
+        return owes.clawback === 4_900 && clear.clawback === 0 && owes.pending === 1;
+    });
+    t.assert('an allocation reports clawedAmount (0 on a legacy row), and amount is unchanged', () => {
+        const dto = toAllocationDto(MINIMAL_ALLOCATION, NO_NAMES);
+        const clawed = toAllocationDto({ ...(MINIMAL_ALLOCATION as unknown as Record<string, unknown>), clawed_amount: 40 } as never, NO_NAMES);
+        return dto.clawedAmount === 0 && clawed.clawedAmount === 40 && clawed.amount === 100;
+    });
+
+    // refund_transactions rows with no payment and no gateway (COD, external) — § 11.5.
+    const COD_REFUND = {
+        _id: oid(OID), vendorId: oid(OID), userId: oid(OTHER_OID), refundAmount: 5000, currency: 'XAF',
+        status: 'completed', initiatedBy: oid(OID), initiatedByRole: 'support',
+        channel: 'external', feeAmount: 100, netAmount: 4900, refundRequestId: oid(OTHER_OID),
+        createdAt: new Date('2026-10-05T00:00:00.000Z'),
+    } as never;
+    t.assert('a COD/external refund row with no paymentTransactionId and no gateway maps with nulls, no undefined', () => {
+        const dto = toRefundDto(COD_REFUND);
+        return dto.paymentTransactionId === null && dto.gateway === null && dto.channel === 'external'
+            && dto.feeAmount === 100 && dto.netAmount === 4900 && dto.amount === 5000
+            && dto.refundRequestId === OTHER_OID && undefinedPaths(dto).length === 0;
+    });
+    t.assert('a legacy refund row reads channel/fee/net/refundRequestId as null', () => {
+        const dto = toRefundDto(MINIMAL_REFUND);
+        return dto.channel === null && dto.feeAmount === null && dto.netAmount === null && dto.refundRequestId === null;
+    });
+    t.assert('the refund list filters by channel and by refund request', () => {
+        const filter = JSON.stringify(buildRefundFilter({ channel: 'payout', refundRequestId: OID } as never));
+        return filter.includes('"channel":"payout"') && filter.includes('refundRequestId');
+    });
+    t.assert('the refund projection reads channel, feeAmount, netAmount and refundRequestId', () => {
+        const source = readCode(SRC, 'modules', 'money', 'repositories', 'payment-transaction.read.repository.ts');
+        const block = source.slice(source.indexOf('const REFUND_TRANSACTION_PROJECTION'));
+        return ['channel: 1', 'feeAmount: 1', 'netAmount: 1', 'refundRequestId: 1'].every((k) => block.includes(k));
     });
 }
 

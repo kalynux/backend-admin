@@ -91,6 +91,9 @@ export const COLLECTIONS = Object.freeze({
   // Payments
   PAYMENT_TRANSACTION: 'payment_transactions',
   REFUND_TRANSACTION: 'refund_transactions',
+  // The refund REQUEST — the money-out lifecycle (REFUND-FLOW-PLAN § 11.1). `refund_transactions`
+  // stays the ledger of money returned, written once the money has arrived.
+  REFUND_REQUEST: 'refund_requests',
   USER_PAYMENT_METHOD: 'user_payment_methods',
 
   // Delivery-fee changes after checkout (jovi-mall ADR-A11 W-E/W-E2): the proposals that move a
@@ -153,6 +156,8 @@ export const COLLECTIONS = Object.freeze({
   EARNINGS_LEDGER: 'earnings_ledgers',
   EARNINGS_RESERVE_HOLD: 'earnings_reserve_holds',
   PAYOUT_REQUEST: 'payout_requests',
+  // Append-only refund clawbacks, debt recoveries and write-offs (REFUND-FLOW-PLAN § 11.3).
+  EARNINGS_ADJUSTMENT: 'earnings_adjustments',
 
   // Blog / editorial (the marketing site's article pages)
   ARTICLE: 'articles',

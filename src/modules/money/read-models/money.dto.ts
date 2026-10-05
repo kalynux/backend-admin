@@ -92,7 +92,7 @@ export interface LedgerEntryDto {
     id: string;
     accountId: string | null;
     owner: MoneyOwnerRef;
-    /** `hold` · `release` · `reversal` · `reserve_hold` · `reserve_release`. */
+    /** `hold` · `release` · `reversal` · `reserve_hold` · `reserve_release` · `clawback` · `clawback_recovery` · `clawback_write_off` (the last three since the refund flow, 2026-10-05). */
     entryType: string;
     /**
      * The positive magnitude moved. **Never signed** — direction is `entryType`'s job, and
@@ -135,6 +135,13 @@ export interface AllocationDto {
     source: { type: string; id: string | null };
     beneficiary: MoneyOwnerRef;
     amount: number;
+    /**
+     * How much of `amount` refunds have clawed back, cumulatively (REFUND-FLOW-PLAN § 6.1).
+     * `amount` itself is never edited, so NET_FORMULA keeps reading it; what is left to release
+     * is `amount − clawedAmount`, and the row turns `reversed` when nothing is left. `0` on a row
+     * written before the field existed.
+     */
+    clawedAmount: number;
     currency: string;
     status: string;
     /**
@@ -184,6 +191,7 @@ export function toAllocationDto(
         source: { type: row.source_type, id: toId(row.source_id) },
         beneficiary: toOwnerRef(row.beneficiary_type, toId(row.beneficiary_id), names),
         amount: row.amount,
+        clawedAmount: row.clawed_amount ?? 0,
         currency: row.currency,
         status: row.status,
         snapshots: {
@@ -518,9 +526,21 @@ export interface RefundDto {
     currency: string;
     reason: string | null;
     status: string;
-    gateway: string;
+    /**
+     * `null` since the refund flow (REFUND-FLOW-PLAN § 11.5) on a COD or externally-settled
+     * refund — no gateway refunded anything. Branch on `channel`, not on this.
+     */
+    gateway: string | null;
     gatewayRefundRef: string | null;
-    /** Who ASKED for it — `vendor` · `admin` · `customer`. Not who approved it. */
+    /** `card_refund` · `payout` · `external`; `null` on a row written before the refund flow. */
+    channel: string | null;
+    /** The refund request this row completed; `null` on a legacy row. */
+    refundRequestId: string | null;
+    /** The 2% the platform kept (D-2). `amount` stays the GROSS — what analytics deduct. */
+    feeAmount: number | null;
+    /** What the customer actually received: `amount − feeAmount`. `null` on a legacy row. */
+    netAmount: number | null;
+    /** Who ASKED for it — `vendor` · `admin` · `support` · `customer`. Not who approved it. */
     initiatedBy: { id: string | null; role: string };
     createdAt: string | null;
     /**
@@ -542,8 +562,12 @@ export function toRefundDto(row: RefundTransactionReadModel): RefundDto {
         currency: row.currency,
         reason: row.reason ?? null,
         status: row.status,
-        gateway: row.gateway,
+        gateway: row.gateway ?? null,
         gatewayRefundRef: row.gatewayRefundRef ?? null,
+        channel: row.channel ?? null,
+        refundRequestId: toId(row.refundRequestId),
+        feeAmount: row.feeAmount ?? null,
+        netAmount: row.netAmount ?? null,
         initiatedBy: { id: toId(row.initiatedBy), role: row.initiatedByRole },
         createdAt: toIso(row.createdAt),
         completedAt: toIso(row.completedAt),
@@ -574,13 +598,21 @@ export interface EarningsAccountDto {
     available: number;
     reserve: number;
     requested: number;
+    /**
+     * Refund DEBT — what this owner owes BACK to the platform (`clawback_balance`,
+     * REFUND-FLOW-PLAN § 6.1), read directly. ⚠ The OPPOSITE direction from the four above —
+     * never add it to them. When it is above 0, `available` is 0 (jovi-mall nets eagerly).
+     */
+    clawback: number;
     currency: string;
     updatedAt: string | null;
 }
 
+/** `debts` is keyed by `debtKey(ownerType, ownerId)`; an owner missing from it owes 0. */
 export function toEarningsAccountDto(
     row: PlatformEarningsAccount,
     names: MoneyOwnerNames,
+    debts: ReadonlyMap<string, number> = new Map(),
 ): EarningsAccountDto {
     return {
         owner: toOwnerRef(row.ownerType, row.ownerId, names),
@@ -588,7 +620,29 @@ export function toEarningsAccountDto(
         available: row.available,
         reserve: row.reserve,
         requested: row.requested,
+        clawback: row.ownerId ? debts.get(`${row.ownerType}:${row.ownerId}`) ?? 0 : 0,
         currency: row.currency,
         updatedAt: row.updatedAt ?? null,
+    };
+}
+
+/** One row of `GET /money/earnings/clawbacks` — an owner who owes the platform. */
+export interface ClawbackDebtDto {
+    owner: MoneyOwnerRef;
+    /** What the owner owes back now. Paid down automatically by every later inflow (§ 6.1 #5). */
+    clawback: number;
+    currency: string;
+    updatedAt: string | null;
+}
+
+export function toClawbackDebtDto(
+    row: { owner_type: string; owner_id?: { toString(): string } | null; clawback_balance?: number; currency: string; updated_at?: Date | null },
+    names: MoneyOwnerNames,
+): ClawbackDebtDto {
+    return {
+        owner: toOwnerRef(row.owner_type, toId(row.owner_id), names),
+        clawback: row.clawback_balance ?? 0,
+        currency: row.currency,
+        updatedAt: toIso(row.updated_at),
     };
 }

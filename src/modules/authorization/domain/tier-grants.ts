@@ -131,6 +131,15 @@ const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
     'shipments.tracking.read',
     'orders.read',
     'orders.disputes.read',
+    /**
+     * The refund queue (REFUND-FLOW-PLAN § 7). Support reads it and RAISES requests from a
+     * refund ticket; a request is `awaiting_approval` and sends nothing. `orders.refund.request`
+     * is `financial` because opening one pauses the seller's earnings (C-4), so it is admitted
+     * by name through `TIER_3_FINANCIAL_ALLOWLIST` below. Approving, settling and writing off
+     * stay tier 1 + 2.
+     */
+    'orders.refund.read',
+    'orders.refund.request',
     'shipments.read',
     /**
      * Push a stuck delivery to an agent or an agency — including `force: true`, which skips
@@ -375,6 +384,13 @@ const ADMIN: readonly PermissionName[] = union(
         // Pausing / resuming an order's or booking's earnings (owner, 2026-10-05). Beside
         // `orders.refund` because they close the same ticket: refund the customer, or resume.
         'money.earnings.pause',
+        // The refund queue (REFUND-FLOW-PLAN § 7). `orders.refund` above approves, rejects,
+        // retries and resolves. `request` is held by Support too (named there); repeated here
+        // like `money.payouts.triage`, because the nesting assertion requires it.
+        'orders.refund.request',
+        'orders.refund.settle_external',
+        // Forgiving a refund debt (C-6). Four-eyes at ≥ 2,000,000 via its `dualControl` spec.
+        'money.earnings.clawback.write_off',
         'content.articles.delete',
         'content.authors.delete',
         'shipments.cancel',
@@ -471,7 +487,17 @@ export const TIER_GRANTS: Readonly<Record<AdminTier, readonly PermissionName[]>>
  * direction, the money never leaves, and the owner can simply request again. Anything that
  * fails that test does not belong on this list.
  */
-const TIER_3_FINANCIAL_ALLOWLIST: readonly PermissionName[] = ['money.payouts.triage'];
+const TIER_3_FINANCIAL_ALLOWLIST: readonly PermissionName[] = [
+    'money.payouts.triage',
+    /**
+     * Raising a refund request (REFUND-FLOW-PLAN § 7). Financial because opening one PAUSES the
+     * seller's earnings (C-4) — Support may HOLD money, never send it. The request is
+     * `awaiting_approval`; approving (`orders.refund`), settling outside the platform
+     * (`orders.refund.settle_external`) and writing off a debt are tier 1 + 2 only. The hold is
+     * the reversible direction: a rejection lifts it, and nothing leaves the platform.
+     */
+    'orders.refund.request',
+];
 
 /**
  * The ONE destructive permission tier 3 may hold, named — the same shape as the financial

@@ -118,6 +118,52 @@ const LARGE_PAYOUT: DualControlSpec = {
 };
 
 /**
+ * Approving a customer refund at or above the payout four-eyes line takes two administrators
+ * (REFUND-FLOW-PLAN § 7).
+ *
+ * The SAME number as `LARGE_PAYOUT`, deliberately: "a lot of money leaving the platform" is
+ * one definition whichever direction it leaves in, and two thresholds would drift. The
+ * amount is the refund request's `gross_amount` read off the ROW — never a body field — for
+ * the reason `LARGE_PAYOUT` gives (`refunds/domain/refund-dual-control.ts`).
+ *
+ * ── What it is NOT ────────────────────────────────────────────────────────────
+ * It is not the R-7 "typed number" rule. That one is jovi-mall's (`409
+ * REFUND_SECOND_APPROVER_REQUIRED`: the approver must not be the administrator who typed the
+ * destination) and applies at ANY amount. A large refund to a typed number therefore meets
+ * both: a second administrator to approve it here, and that approver must not be its requester.
+ *
+ * Only the approve verb consults this spec. `orders.refund` also governs reject, retry and
+ * resolve-unknown (none queued: none sends money that an approval did not already allow) and
+ * the legacy `POST /orders/:orderId/refund`, which predates the refund queue and does not
+ * consult it — see `refunds.md` § Four-eyes.
+ */
+const LARGE_REFUND: DualControlSpec = {
+    when: (payload) => typeof payload.amount === 'number' && payload.amount >= 2_000_000,
+    approverPermission: 'orders.refund',
+    describe: (payload) =>
+        `Approve refund request ${String(payload.refundId)} — `
+        + `${String(payload.currency)} ${Number(payload.amount).toLocaleString()} `
+        + `to the customer of ${String(payload.sourceKind)} ${String(payload.sourceLabel ?? payload.sourceId)}`
+        + (payload.destinationSource === 'typed' ? ' (destination number TYPED by an administrator)' : ''),
+};
+
+/**
+ * Forgiving a refund debt at or above the four-eyes line takes two administrators (C-6).
+ *
+ * Unlike the two specs above, the amount IS a body field — and that is correct here rather
+ * than a hole: a write-off has no row holding "the amount to forgive"; the administrator
+ * chooses it, and the number in the payload is exactly what the approver signs for. What the
+ * handler re-checks is that the owner still owes at least that much.
+ */
+const LARGE_WRITE_OFF: DualControlSpec = {
+    when: (payload) => typeof payload.amount === 'number' && payload.amount >= 2_000_000,
+    approverPermission: 'money.earnings.clawback.write_off',
+    describe: (payload) =>
+        `Write off ${String(payload.currency ?? '')} ${Number(payload.amount).toLocaleString()} of refund debt `
+        + `owed by ${String(payload.ownerType)} ${String(payload.ownerId)}: ${String(payload.reason)}`,
+};
+
+/**
  * Frozen at runtime, not only at compile time.
  *
  * `as const satisfies` is erased by the compiler, so without `Object.freeze` a permission
@@ -486,6 +532,20 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'money', action: 'write', phase: 11, financial: true,
         summary: 'Pause or resume the payout of an order’s or booking’s earnings — paused money is never released',
     },
+    /**
+     * Forgive what an owner owes back after a refund (REFUND-FLOW-PLAN § 6.4, owner decision
+     * C-6). A refund recovers released earnings from future earnings; when there will be none
+     * (the account is closed, the owner left), an administrator writes the debt off and the
+     * platform absorbs the loss.
+     *
+     * `financial` and named into the tier-2 block by hand; never Support. Four-eyes at
+     * ≥ 2,000,000 (`LARGE_WRITE_OFF`), the payout line.
+     */
+    'money.earnings.clawback.write_off': {
+        family: 'money', action: 'write', phase: 11, financial: true,
+        dualControl: LARGE_WRITE_OFF,
+        summary: 'Write off a refund debt an owner owes the platform — the platform absorbs the loss',
+    },
 
     // ═══ ORDERS ═══ 2 legacy endpoints + the list/search/refund surface (Ph. 6) ═
     'orders.read': {
@@ -504,9 +564,49 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'orders', action: 'write', phase: 6,
         summary: 'Manually change an order’s state to unblock it',
     },
+    /**
+     * Since the refund queue (REFUND-FLOW-PLAN § 7) this is also the APPROVER's permission:
+     * approve, reject, retry a failed transfer and resolve a transfer stuck in `sending`.
+     * Approving is four-eyes at ≥ 2,000,000 (`LARGE_REFUND`).
+     */
     'orders.refund': {
         family: 'orders', action: 'write', phase: 6, financial: true,
-        summary: 'Refund an order, in full or in part',
+        dualControl: LARGE_REFUND,
+        summary: 'Refund an order, in full or in part — approve, reject or retry a refund request',
+    },
+    /**
+     * The refund queue, read-only (REFUND-FLOW-PLAN § 7). Unflagged: a refund request is a
+     * record, and "where is my refund" is a Support question. The destination number is shown
+     * MASKED in the list and in full only on the detail, which the approver needs to compare
+     * against the proof picture. The proof pictures themselves are audited on every read.
+     */
+    'orders.refund.read': {
+        family: 'orders', action: 'read', phase: 6,
+        summary: 'View the refund queue, a refund request, and its proof pictures (every proof opened is recorded in the audit trail)',
+    },
+    /**
+     * Raise a refund request — `awaiting_approval`, never sent (REFUND-FLOW-PLAN § 7).
+     *
+     * ── Why `financial` when it moves nothing out ─────────────────────────────
+     * Opening a request PAUSES the order's or booking's earnings (owner decision C-4): the
+     * vendor's money is held until the refund is decided. Holding somebody's money is a
+     * financial act by this catalog's own definition, so it is flagged honestly and Support
+     * holds it through a NAMED exemption (`TIER_3_FINANCIAL_ALLOWLIST`), on the same line as
+     * `money.payouts.triage`: **Support may hold, never send.** Approving — the act that lets
+     * money leave — is `orders.refund`, which Support does not hold.
+     */
+    'orders.refund.request': {
+        family: 'orders', action: 'write', phase: 6, financial: true,
+        summary: 'Raise a refund request for an approver — holds the seller’s earnings, never sends money',
+    },
+    /**
+     * Record that a refund was paid OUTSIDE the platform, with a picture proof (R-7b). It
+     * completes the request: earnings are clawed back and the customer is told. Never from
+     * `sending` — the transfer may already be in flight.
+     */
+    'orders.refund.settle_external': {
+        family: 'orders', action: 'write', phase: 6, financial: true,
+        summary: 'Record a refund as paid outside the platform, with a picture proof — completes it',
     },
 
     // ═══ SUPPORT ═══ 18 legacy ticket endpoints ═══════════════════════════════

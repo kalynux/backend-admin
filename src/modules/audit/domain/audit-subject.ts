@@ -28,6 +28,9 @@ const SUBJECT_CLASS: Readonly<Record<AuditTargetType, AuditSubjectClass>> = Obje
     order: 'platform_record',
     // A service booking — the order's counterpart for bookable services (2026-10-05).
     booking: 'platform_record',
+    // A refund request — Support reads the queue and raises requests, so it may read what was
+    // done to one.
+    refund: 'platform_record',
     shipment: 'platform_record',
     remittance: 'platform_record',
     deposit: 'platform_record',

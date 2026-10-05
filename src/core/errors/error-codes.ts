@@ -345,6 +345,35 @@ export const ERROR_CODES = Object.freeze({
      */
     PAYOUT_NOT_PROCESSING: 'PAYOUT_NOT_PROCESSING',
 
+    // ── REFUND QUEUE (REFUND-FLOW-PLAN § 7) ───────────────────────────────────
+    //
+    // ⚠ The SAME names jovi-mall answers for the same conditions, on purpose. jovi-mall's
+    // reach a client as `PLATFORM_OPERATION_REJECTED` + `details.platformCode`; these are raised
+    // HERE in the two moments no call is made — the pre-flight (so a doomed approval is never
+    // queued for a second administrator) and the dual-control handler's re-check. A client
+    // branches on `error.code`, or on `details.platformCode` when the code is
+    // `PLATFORM_OPERATION_REJECTED`; the same string means the same condition either way.
+    /** The request is not in a status this verb may act on. `details.status` is the current one. */
+    REFUND_REQUEST_STATUS_CONFLICT: 'REFUND_REQUEST_STATUS_CONFLICT',
+    /** R-7: the destination number was TYPED, and the approver is the administrator who typed it. */
+    REFUND_SECOND_APPROVER_REQUIRED: 'REFUND_SECOND_APPROVER_REQUIRED',
+    /**
+     * The LEGACY `POST /orders/:orderId/refund` was asked for 2,000,000 or more. That route
+     * creates AND approves in one call, so it has no second administrator — the four-eyes line
+     * lives on `POST /refunds`. Refused HERE before anything is written (jovi-mall answers the
+     * same name as a backstop). `details.ceiling`, `details.requested`, `details.queue`.
+     */
+    REFUND_USE_REFUND_QUEUE: 'REFUND_USE_REFUND_QUEUE',
+    /** C-6: a write-off larger than what the owner owes right now (or they owe nothing). */
+    EARNINGS_CLAWBACK_WRITE_OFF_EXCEEDS_DEBT: 'EARNINGS_CLAWBACK_WRITE_OFF_EXCEEDS_DEBT',
+    /**
+     * Resuming an earnings pause a refund still holds: a refund request on the order/booking is
+     * open, or a completed one has not finished recovering its earnings. Raised HERE on the
+     * pre-flight (before the audit row); jovi-mall answers the same name as the backstop.
+     * `details.refundRequestId`, `details.refundRequestStatus`.
+     */
+    EARNINGS_PAUSE_HELD_BY_REFUND: 'EARNINGS_PAUSE_HELD_BY_REFUND',
+
     // ── ADMIN ACCOUNT ─────────────────────────────────────────────────────────
     ADMIN_ACCOUNT_NOT_FOUND: 'ADMIN_ACCOUNT_NOT_FOUND',
     ADMIN_SESSION_NOT_FOUND: 'ADMIN_SESSION_NOT_FOUND',

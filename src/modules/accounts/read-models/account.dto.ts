@@ -741,6 +741,13 @@ export function toEarningActivity(
         reversal: { direction: 'out', description: 'Earning reversed (refund)' },
         reserve_hold: { direction: 'internal', description: 'Moved to the COD reserve' },
         reserve_release: { direction: 'internal', description: 'Returned from the COD reserve to available balance' },
+        // The refund flow (REFUND-FLOW-PLAN § 6, 2026-10-05). A `clawback` takes back part of a
+        // share a customer refund returned; a `clawback_recovery` is later income applied to the
+        // debt a clawback left (`clawback_balance`) — money leaving available either way. A
+        // `clawback_write_off` forgives that debt: no balance moves, so it is internal.
+        clawback: { direction: 'out', description: 'Earning taken back for a customer refund' },
+        clawback_recovery: { direction: 'out', description: 'Applied to an outstanding refund debt' },
+        clawback_write_off: { direction: 'internal', description: 'Refund debt written off by the platform' },
     };
     const { direction, description } = byType[row.entry_type] ?? { direction: 'internal', description: 'Earnings movement' };
 

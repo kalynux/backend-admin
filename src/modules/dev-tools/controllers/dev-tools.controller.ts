@@ -169,6 +169,9 @@ export class DevToolsController {
             ? 'Payment routing was already in that state — nothing changed.'
             : `Payment routing updated (${result.changed.join(', ')}). `
               + `Collections: ${result.settings.collectionAggregator}, payouts: ${result.settings.payoutAggregator}. `
+              + (result.changed.includes('refundFeePercent') && result.settings.refundFeePercent !== undefined
+                  ? `Refund fee: ${result.settings.refundFeePercent}% (new refund requests only). `
+                  : '')
               + `Other jovi-mall instances converge within ${result.convergenceSeconds}s.`;
 
         sendSuccess(res, result, {

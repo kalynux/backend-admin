@@ -57,7 +57,7 @@ export interface EarningsLedgerReadModel extends Document {
     owner_type: string;
     /** `null` for the platform singleton — the marketplace's own commission account. */
     owner_id?: ObjectId | null;
-    /** `hold` · `release` · `reversal` · `reserve_hold` · `reserve_release`. */
+    /** `hold` · `release` · `reversal` · `reserve_hold` · `reserve_release` · `clawback` · `clawback_recovery` · `clawback_write_off` (the last three since the refund flow, 2026-10-05). */
     entry_type: string;
     /** The positive magnitude moved. `entry_type` says which direction. */
     amount: number;
@@ -229,6 +229,8 @@ export interface EarningsAllocationReadModel extends Document {
     /** The commission rate applied at split time. The other half of the same snapshot. */
     commission_percent_snapshot: number;
     amount: number;
+    /** Cumulative refund clawback (REFUND-FLOW-PLAN § 6.1); absent on a legacy row → 0. */
+    clawed_amount?: number;
     currency: string;
     status: string;
     completed_at?: Date | null;
@@ -265,6 +267,7 @@ const ALLOCATION_PROJECTION = {
     gross_snapshot: 1,
     commission_percent_snapshot: 1,
     amount: 1,
+    clawed_amount: 1,
     currency: 1,
     status: 1,
     completed_at: 1,

@@ -159,7 +159,7 @@ export const RefundOrderSchema = z.object({
      * Absent means the full remaining refundable balance — NOT the vendor's policy cap.
      * An administrator asking to "refund this order" means the order.
      */
-    amount: z.number().positive().max(1_000_000_000).optional(),
+    amount: z.number().int().positive().max(1_000_000_000).optional(),
     reason: reasonText('A reason is required to refund an order'),
     /**
      * Acknowledges going beyond the VENDOR's commercial terms — the return window, the
@@ -170,6 +170,11 @@ export const RefundOrderSchema = z.object({
      * `true`, which on this particular field would silently override a vendor's policy.
      */
     overridePolicy: boolFlag.optional(),
+    /**
+     * C-1: under the vendor's "customer pays, reimbursed if defective" return-shipping setting,
+     * also return the delivery money. Passed through; it never widens a money invariant.
+     */
+    itemDefective: boolFlag.optional(),
 }).strict();
 
 export type OrderSearchQuery = z.infer<typeof SearchOrdersQuerySchema>;

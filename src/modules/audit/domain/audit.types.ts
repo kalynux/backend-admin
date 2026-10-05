@@ -70,6 +70,10 @@ export const AUDIT_TARGET_TYPES = [
     // collection, and filing it under `order` would point an operator at an id that resolves
     // to nothing there.
     'booking',
+    // A customer refund REQUEST (REFUND-FLOW-PLAN § 7). Its own type rather than `order`: a
+    // request may be about an order, a booking or a billing purchase, and the queue's actions
+    // (approve, reject, settle) are about the request. The source rides as `related_target_*`.
+    'refund',
     // This service's own records
     'administrator', 'admin_session', 'approval_request', 'audit_export',
     // Phase 12 operational targets. Both classify as `internal`: a flag flip and a worker

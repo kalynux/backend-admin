@@ -327,6 +327,10 @@ export const ListRefundsQuerySchema = listQuery(REFUND_SORT, '-createdAt', {
     orderId: objectId.optional(),
     bookingId: objectId.optional(),
     paymentTransactionId: objectId.optional(),
+    /** `card_refund` · `payout` · `external` — a COD or external refund has no `gateway`. */
+    channel: platformTerm.optional(),
+    /** The refund request (`/refunds/:refundId`) a row completed. */
+    refundRequestId: objectId.optional(),
     ...dateRangeFields(),
 }).superRefine(dateRangeRule({ maxDays: MONEY_MAX_RANGE_DAYS }));
 
@@ -426,6 +430,42 @@ export const ResumeEarningsSchema = z
 export const ListEarningsPausesQuerySchema = z
     .object({ ...paginationFields, kind: z.enum(PAUSE_KINDS).optional() })
     .strict();
+
+// ── Refund debt — clawback (REFUND-FLOW-PLAN § 6, 2026-10-05) ────────────────
+
+/** Owner types that can owe a refund debt — PINNED: this service writes against it (write-off). */
+export const CLAWBACK_OWNER_TYPES = ['vendor', 'agency', 'agent'] as const;
+
+export const CLAWBACK_SORT = {
+    amount: 'clawback_balance',
+    updatedAt: 'updated_at',
+} as const;
+
+/** `GET /money/earnings/clawbacks` — owners who owe something back, largest first. */
+export const ListClawbacksQuerySchema = listQuery(CLAWBACK_SORT, '-amount', {
+    ownerType: z.enum(CLAWBACK_OWNER_TYPES).optional(),
+});
+
+export const ClawbackOwnerParamSchema = z
+    .object({ ownerType: z.enum(CLAWBACK_OWNER_TYPES), ownerId: objectId })
+    .strict();
+
+/**
+ * Forgive part or all of a debt (C-6). Here, unlike mark-paid, the `amount` IS the act's
+ * parameter — there is no row holding "what to forgive" — so the approver signs for exactly this
+ * number, and the handler re-checks the owner still owes at least that much. `.strict()` still:
+ * a misspelt key on a money write is a 400, never a silently dropped field.
+ */
+export const WriteOffClawbackSchema = z
+    .object({
+        amount: z.number().int().positive(),
+        reason: reasonText('Say why this debt is written off — at least 10 characters', { min: 10, max: 500 }),
+    })
+    .strict();
+
+export type ListClawbacksQuery = z.infer<typeof ListClawbacksQuerySchema>;
+export type ClawbackOwnerParams = z.infer<typeof ClawbackOwnerParamSchema>;
+export type WriteOffClawbackBody = z.infer<typeof WriteOffClawbackSchema>;
 
 export type PauseTargetParams = z.infer<typeof PauseTargetParamSchema>;
 export type PauseEarningsBody = z.infer<typeof PauseEarningsSchema>;

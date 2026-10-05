@@ -27,6 +27,10 @@ import {
     VendorSaleBreakdown,
 } from './money-breakdown';
 import { maskPhone } from './statement-masking';
+import { reversalLabel, reversalsFor } from './earnings-reversals';
+
+/** What an order is resolved from: an allocation, or a clawback line (which may name no source). */
+type SourceRef = { source_type: string | null; source_id: ObjectId | null };
 import { allocationStatusLabel, col, idOf, loadNames, NameBook, sumOf } from './statement-common';
 import { StatementRow, StatementSection, SummaryLine } from './statement.types';
 
@@ -92,19 +96,23 @@ export interface VendorStatementParts {
 }
 
 export async function vendorStatement(vendorId: string, range: Range): Promise<VendorStatementParts> {
-    const [created, reversed, refundRows] = await Promise.all([
+    const [created, { reversals, writeOffs }, refundRows] = await Promise.all([
         allocations.createdFor('vendor', vendorId, range),
-        allocations.reversedFor('vendor', vendorId, range),
+        // Refund clawbacks from `earnings_adjustments` — partial claws included, a full claw
+        // counted once (REFUND-FLOW-PLAN § 6.1). See `earnings-reversals.ts`.
+        reversalsFor('vendor', vendorId, range),
         refunds.forVendor(vendorId, range),
     ]);
+    // The reversal lines as source refs, so the order resolution below reads them like allocations.
+    const reversed: SourceRef[] = reversals.map((r) => ({ source_type: r.sourceType, source_id: r.sourceId }));
 
     const sales = created.filter((a) => a.source_type === 'order' || a.source_type === 'cod_collection');
     const bookingIncome = created.filter((a) => a.source_type === 'booking');
     const deliveryCredits = created.filter((a) => a.source_type === 'shipment');
 
     // ── Resolve every source to its order ──────────────────────────────────────
-    const codSourceIds = [...sales, ...reversed].filter((a) => a.source_type === 'cod_collection').map((a) => a.source_id);
-    const shipmentSourceIds = [...deliveryCredits, ...reversed].filter((a) => a.source_type === 'shipment').map((a) => a.source_id);
+    const codSourceIds = [...sales, ...reversed].filter((a) => a.source_type === 'cod_collection' && a.source_id).map((a) => a.source_id as ObjectId);
+    const shipmentSourceIds = [...deliveryCredits, ...reversed].filter((a) => a.source_type === 'shipment' && a.source_id).map((a) => a.source_id as ObjectId);
     const [codRows, creditShipments, siblings] = await Promise.all([
         collections.byIds(codSourceIds),
         shipments.byIds(shipmentSourceIds),
@@ -113,7 +121,8 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
     const collectionById = new Map(codRows.map((c) => [idOf(c._id), c]));
     const shipmentById = new Map(creditShipments.map((s) => [idOf(s._id), s]));
 
-    const orderIdOf = (a: AllocationRow): ObjectId | null => {
+    const orderIdOf = (a: SourceRef): ObjectId | null => {
+        if (!a.source_id) return null;
         if (a.source_type === 'order') return a.source_id;
         if (a.source_type === 'cod_collection') return collectionById.get(idOf(a.source_id))?.order_id ?? null;
         if (a.source_type === 'shipment') return shipmentById.get(idOf(a.source_id))?.order_id ?? null;
@@ -402,7 +411,8 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
         key: 'adjustments',
         title: 'Adjustments to your earnings',
         description:
-            'Changes to money already credited: earnings reversed after a full refund (−), and delivery fees returned to ' +
+            'Changes to money already credited: earnings clawed back by a refund — in full or in part, from what was ' +
+            'still held or already released (−) — and delivery fees returned to ' +
             'you when a shipment earned less than was reserved, e.g. a return (+).',
         columns: [
             col.at('at', 'Date'),
@@ -412,12 +422,12 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
             col.text('status', 'Status', 20),
         ],
         rows: [
-            ...reversed.map((a) => ({
-                at: a.reversed_at ?? null,
-                kind: 'Earnings reversed',
-                order: orderNo(orderIdOf(a)),
-                amount: -a.amount,
-                status: 'Reversed',
+            ...reversals.map((r) => ({
+                at: r.at,
+                kind: reversalLabel(r),
+                order: orderNo(orderIdOf({ source_type: r.sourceType, source_id: r.sourceId })),
+                amount: -r.amount,
+                status: r.toDebt > 0 ? `${r.toDebt} owed back` : 'Reversed',
             })),
             ...deliveryCredits.map((a) => ({
                 at: a.created_at,
@@ -434,12 +444,15 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
         key: 'refunds',
         title: 'Refunds to customers',
         description:
-            'Refunds paid back to your customers in this period. What they did to your earnings is in the adjustments ' +
-            'table: a full refund reverses earnings that were still held.',
+            'Refunds paid back to your customers in this period. "Refunded" is what the refund was worth; "Customer received" ' +
+            'is that minus the refund transfer fee the platform keeps (none on a card refund). What a refund did to your ' +
+            'earnings is in the adjustments table.',
         columns: [
             col.at('at', 'Requested'),
             col.text('reference', 'Order / booking', 18),
             col.money('amount', 'Refunded'),
+            col.money('net', 'Customer received'),
+            col.text('channel', 'Paid by', 12),
             col.text('status', 'Status', 10),
             col.text('initiatedBy', 'Initiated by', 12),
             col.text('reason', 'Reason', 28),
@@ -449,12 +462,15 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
             at: r.createdAt,
             reference: r.orderId ? orderNo(r.orderId) : r.bookingId ? `Booking ${idOf(r.bookingId)}` : null,
             amount: r.refundAmount,
+            // A row from before the refund flow has no fee: the customer received the whole amount.
+            net: r.netAmount ?? r.refundAmount - (r.feeAmount ?? 0),
+            channel: refundChannelLabel(r.channel ?? null, r.gateway ?? null),
             status: r.status,
             initiatedBy: r.initiatedByRole ?? null,
             reason: r.reason ?? null,
             completedAt: r.completedAt ?? null,
         })),
-        totals: ['amount'],
+        totals: ['amount', 'net'],
     };
 
     const bookingById = new Map(bookingRows.map((b) => [idOf(b._id), b]));
@@ -513,7 +529,7 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
     const total = (key: keyof VendorSaleBreakdown) => sumOf(sales, (a) => bd(a)[key] as number | null);
     const bookingNet = sumOf(bookingIncome, (a) => a.amount);
     const credited = sumOf(deliveryCredits, (a) => a.amount);
-    const reversedTotal = sumOf(reversed, (a) => a.amount);
+    const reversedTotal = sumOf(reversals, (r) => r.amount);
 
     const summary: SummaryLine[] = [
         { label: 'Total sales (gross)', value: total('gross'), kind: 'money' },
@@ -528,10 +544,14 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
         { label: 'Net revenue from sales', value: total('net'), kind: 'money' },
         { label: 'Booking income (net)', value: bookingNet, kind: 'money' },
         { label: 'Delivery fees returned', value: credited, kind: 'money' },
-        { label: 'Earnings reversed', value: -reversedTotal, kind: 'money' },
+        { label: 'Earnings clawed back by refunds', value: -reversedTotal, kind: 'money' },
         { label: 'Net earnings in period', value: total('net') + bookingNet + credited - reversedTotal, kind: 'money' },
         { label: 'Orders with money received', value: receivedAtByOrder.size, kind: 'int' },
         { label: 'Refunds paid to customers', value: sumOf(refundRows.filter((r) => r.status === 'completed'), (r) => r.refundAmount), kind: 'money' },
+        // Informational, outside the net arithmetic: forgiving a refund debt is not an earning.
+        ...(writeOffs.length > 0
+            ? [{ label: 'Refund debt written off by the platform', value: sumOf(writeOffs, (w) => w.amount), kind: 'money' as const }]
+            : []),
         // Informational, outside the net arithmetic above: delivery the customers paid on the
         // orders behind this period's movements. It went to the delivery side, never to the shop.
         { label: 'Delivery paid by customers (to agencies)', value: sumOf(touchedOrders, (o) => customerDeliveryOf(o)), kind: 'money' },
@@ -557,8 +577,19 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
         sections: [salesSection, ordersSection, linesSection, deliveriesSection, codSection, adjustmentsSection, refundsSection, bookingsSection, timelineSection],
         summary,
         notes,
-        currency: created[0]?.currency ?? reversed[0]?.currency ?? null,
+        currency: created[0]?.currency ?? reversals[0]?.currency ?? null,
     };
+}
+
+/**
+ * How a refund left, in words. `channel` is new with the refund flow (REFUND-FLOW-PLAN § 11.5);
+ * a row from before it carries only `gateway`, and a COD or external row carries no gateway.
+ */
+export function refundChannelLabel(channel: string | null, gateway: string | null): string | null {
+    if (channel === 'card_refund') return 'Card';
+    if (channel === 'payout') return 'Mobile money';
+    if (channel === 'external') return 'Outside the platform';
+    return gateway;
 }
 
 /** Who paid a delivery, in words. `null`/absent predates customer-paid delivery and IS the shop. */

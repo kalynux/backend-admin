@@ -123,8 +123,13 @@ function asState(result: unknown): Record<string, unknown> | null {
 
     const refund = result as Partial<PlatformRefundResult>;
     if (typeof refund.refundId === 'string') {
+        // `refundId` is now the refund REQUEST's id (jovi-mall keeps the old name as an alias).
         state.refundId = refund.refundId;
+        state.refundRequestId = refund.refundRequestId ?? refund.refundId;
+        state.refundStatus = refund.status ?? null;
         state.amount = refund.amount ?? null;
+        state.feeAmount = refund.feeAmount ?? null;
+        state.netAmount = refund.netAmount ?? null;
         state.currency = refund.currency ?? null;
         state.totalRefunded = refund.totalRefunded ?? null;
         state.fullyRefunded = refund.fullyRefunded ?? null;
@@ -162,12 +167,30 @@ export interface PlatformDispatchResult {
     shipmentsAssigned: number;
 }
 
+/**
+ * jovi-mall's `AdminRefundResultDto` (`orders/admin-refund.service.ts`). Since the refund flow
+ * (REFUND-FLOW-PLAN § 4) the legacy route OPENS A REFUND REQUEST, created and approved in one
+ * call when there is somewhere to send the money — so `status` is the REQUEST's and is no
+ * longer always `completed`: `completed` (card) · `sending` (mobile-money transfer) ·
+ * `awaiting_approval` (COD / no paying number — waits in the refund queue for a typed number) ·
+ * `failed` · `approved` · `waiting_for_cash`.
+ */
 export interface PlatformRefundResult {
+    /** @deprecated alias of `refundRequestId` (it used to be a `refund_transactions` id). */
     refundId: string;
-    status: 'completed';
+    refundRequestId: string;
+    status: string;
+    /** GROSS — what the order loses. Same as `grossAmount`. */
     amount: number;
+    grossAmount: number;
+    feeAmount: number;
+    netAmount: number;
     currency: string;
+    paymentChannel: string;
+    channel: string | null;
+    transferFailureReason: string | null;
     totalRefunded: number;
+    /** True only once the refund COMPLETED and squared the order. */
     fullyRefunded: boolean;
     /** False when the refund went beyond what the vendor's own policy would have allowed. */
     withinVendorPolicy: boolean;
@@ -193,6 +216,10 @@ export interface PlatformRefundEligibility {
         returnShippingPayer: string | null;
     };
     overrides: string[];
+    /** A refund request already open on the order — a second one is refused until it closes. */
+    openRefundRequest?: { id: string; status: string } | null;
+    /** At or above this, the legacy refund route refuses: use the refund queue (four-eyes). */
+    legacyRouteCeiling?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -303,21 +330,27 @@ export async function dispatch(
 }
 
 /**
- * Refund an order, in full or in part.
+ * Refund an order, in full or in part — the LEGACY door, below 2,000,000 only.
+ *
+ * Since the refund flow (REFUND-FLOW-PLAN § 4) jovi-mall answers this by OPENING A REFUND
+ * REQUEST, approved in the same call when there is somewhere to send the money (card →
+ * `completed`; mobile money with the payer's number → `sending`); COD, or no paying number on
+ * record, waits in the refund queue as `awaiting_approval` for a typed number, its proof and a
+ * second administrator. The answer's `refundId` is now that REQUEST's id.
  *
  * `overridePolicy` waives the VENDOR's commercial terms and nothing else. Every money
- * invariant is jovi-mall's and holds regardless: an amount above the remaining refundable
- * balance is `REFUND_AMOUNT_EXCEEDS_MAX`, a COD order is `REFUND_ORDER_IS_COD`, and a
- * gateway with no refund API is `REFUND_GATEWAY_NOT_SUPPORTED` — the last of which is an
- * EXPECTED outcome (only Stripe implements one) and arrives as a 4xx carrying its
- * `platformCode`, never a 502.
+ * invariant is jovi-mall's and holds regardless (`REFUND_AMOUNT_EXCEEDS_MAX`,
+ * `REFUND_ALREADY_OPEN` with `details.refundRequestId`, …). Without the flag, a refund that
+ * exceeds the vendor's policy is **422 `REFUND_POLICY_OVERRIDE_REQUIRED`** carrying exactly
+ * which gates it would cross.
  *
- * Without the flag, a refund that exceeds the vendor's policy is refused with
- * **422 `REFUND_POLICY_OVERRIDE_REQUIRED`** carrying exactly which gates it would cross.
+ * ⛔ The 2,000,000 line is refused by the CONTROLLER before this is called
+ * (`REFUND_USE_REFUND_QUEUE`): this route has no second administrator. jovi-mall answers the
+ * same code as a backstop.
  */
 export async function refund(
     orderId: string,
-    input: { amount?: number; reason: string; overridePolicy?: boolean },
+    input: { amount?: number; reason: string; overridePolicy?: boolean; itemDefective?: boolean },
     before: OrderSnapshot,
     context: ActorContext,
 ): Promise<PlatformRefundResult> {
@@ -325,13 +358,24 @@ export async function refund(
         'orders.refund',
         context,
         { id: orderId, label: labelOf(before) },
-        { amount: input.amount ?? null, reason: input.reason, overridePolicy: input.overridePolicy ?? false },
+        {
+            amount: input.amount ?? null,
+            reason: input.reason,
+            overridePolicy: input.overridePolicy ?? false,
+            itemDefective: input.itemDefective ?? null,
+        },
         before,
         async () => {
             const result = await platformRequest<PlatformRefundResult>({
                 method: 'POST',
                 path: `/orders/${orderId}/refund`,
-                body: input,
+                // Optional keys OMITTED rather than sent undefined/null.
+                body: {
+                    ...(input.amount !== undefined && { amount: input.amount }),
+                    reason: input.reason,
+                    ...(input.overridePolicy !== undefined && { overridePolicy: input.overridePolicy }),
+                    ...(input.itemDefective !== undefined && { itemDefective: input.itemDefective }),
+                },
                 actor: context.actor,
                 requestId: context.requestId,
             });

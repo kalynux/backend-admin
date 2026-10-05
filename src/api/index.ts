@@ -254,6 +254,13 @@ apiV1.use('/billing', billingRoutes);
 import { moneyRoutes } from '../modules/money/routes/money.routes';
 apiV1.use('/money', moneyRoutes);
 
+// Refunds — the refund QUEUE (REFUND-FLOW-PLAN § 7). A separate prefix from `/money/refunds`,
+// which lists `refund_transactions` (money that already went back); this mount is the request
+// lifecycle before it does. Reads `refund_requests` directly; every write, the eligibility
+// verdict and the proof bytes are delegated to jovi-mall `/api/internal/admin/refunds/*`.
+import { refundRoutes } from '../modules/refunds/routes/refund.routes';
+apiV1.use('/refunds', refundRoutes);
+
 // Accounts — what ONE party holds, is owed, and owes (Phase 11).
 //
 // The third money mount, and the only one whose subject is a PARTY rather than a record.

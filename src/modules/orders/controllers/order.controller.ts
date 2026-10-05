@@ -11,6 +11,9 @@ import { toAuditEntryDto } from '../../audit/domain/audit.dto';
 import { AuditRepository } from '../../audit/repositories/audit.repository';
 import { ListAuditQuery } from '../../audit/validators/audit.validator';
 import * as gateway from '../gateways/order.gateway';
+import { REFUND_FOUR_EYES_THRESHOLD } from '../../refunds/domain/refund-vocabulary';
+import { RefundTransactionReadRepository } from '../../money/repositories/payment-transaction.read.repository';
+import { RefundRequestReadRepository } from '../../refunds/repositories/refund-request.read.repository';
 import { OrderReadModel, OrderReadRepository, OrderSearchResolution } from '../repositories/order.read.repository';
 import {
     CustomerRefReadRepository,
@@ -139,18 +142,19 @@ async function readOrderDetail(orderId: string): Promise<OrderDetailDto | null> 
     const order = await orders.findDetailById(orderId);
     if (!order) return null;
 
-    const [names, itemContext, payments, proposals, refunds] = await Promise.all([
+    const [names, itemContext, payments, proposals, refunds, openRefunds] = await Promise.all([
         hydrateNames([order]),
         hydrateItemContext(order),
         orderPayments.forOrder(orderId),
         feeProposals.forOrder(orderId),
         feeRefunds.forOrder(orderId),
+        refundRequests.openForOrders([orderId]),
     ]);
     return toOrderDetailDto(
         order,
         names,
         itemContext,
-        toOrderDeliveryFeeDto(order.order_number ?? null, payments, proposals, refunds),
+        toOrderDeliveryFeeDto(order.order_number ?? null, payments, proposals, refunds, openRefunds.get(orderId) ?? null),
     );
 }
 
@@ -493,17 +497,79 @@ export class OrderController {
         const body = req.body as RefundOrderBody;
         const order = await loadOr404(req.params.orderId);
 
+        await assertBelowLegacyRefundCeiling(req.params.orderId, body.amount, actorContextOf(req));
+
         const result = await gateway.refund(
             req.params.orderId,
-            { amount: body.amount, reason: body.reason, overridePolicy: body.overridePolicy },
+            {
+                amount: body.amount,
+                reason: body.reason,
+                overridePolicy: body.overridePolicy,
+                itemDefective: body.itemDefective,
+            },
             toAuditState(order),
             actorContextOf(req),
         );
 
-        sendSuccess(res, result, {
-            message: result.withinVendorPolicy
-                ? 'Refund completed'
-                : 'Refund completed — the vendor’s return policy was overridden',
-        });
+        sendSuccess(res, result, { message: legacyRefundMessage(result) });
     });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The legacy refund door's four-eyes line
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ⛔ `POST /orders/:orderId/refund` creates AND approves a refund request in one call — there is
+ * no second administrator on it. The four-eyes line (`LARGE_REFUND`, ≥ 2,000,000) lives on the
+ * refund queue's approve, so a refund at or above it is REFUSED here, before the audit row and
+ * before jovi-mall is asked, and pointed at `POST /api/v1/refunds`. jovi-mall refuses the same
+ * (`422 REFUND_USE_REFUND_QUEUE`) as a backstop; this side does not rely on it.
+ *
+ * An absent `amount` means "the most the money allows", which only jovi-mall can compute — so
+ * it is read from the (unaudited) eligibility verdict first. Its `legacyRouteCeiling` is used
+ * when present, so the two sides cannot disagree about where the line is drawn.
+ *
+ * CUMULATIVE per order, as jovi-mall's is: what the order already returned (its COMPLETED
+ * `refund_transactions`, read directly) plus this amount — so 1 999 999 followed by 1 999 999
+ * cannot slip past the line in pieces. An open request on the order is refused by jovi-mall
+ * (`REFUND_ALREADY_OPEN`), so completed refunds are the whole history that counts.
+ */
+const refundTransactions = new RefundTransactionReadRepository();
+const refundRequests = new RefundRequestReadRepository();
+
+async function assertBelowLegacyRefundCeiling(
+    orderId: string,
+    amount: number | undefined,
+    context: ReturnType<typeof actorContextOf>,
+): Promise<void> {
+    let requested = amount;
+    let ceiling = REFUND_FOUR_EYES_THRESHOLD;
+    if (requested === undefined) {
+        const eligibility = await gateway.refundEligibility(orderId, context);
+        requested = eligibility.maxRefundable;
+        if (typeof eligibility.legacyRouteCeiling === 'number' && eligibility.legacyRouteCeiling > 0) {
+            ceiling = Math.min(ceiling, eligibility.legacyRouteCeiling);
+        }
+    }
+    const alreadyRefunded = await refundTransactions.sumCompletedForOrder(orderId);
+    if (alreadyRefunded + requested >= ceiling) {
+        throw createAppError(ERROR_CODES.REFUND_USE_REFUND_QUEUE, 422, undefined, {
+            requested,
+            alreadyRefunded,
+            ceiling,
+            queue: '/api/v1/refunds',
+        });
+    }
+}
+
+/** jovi-mall's answer is a refund REQUEST now: say what actually happened to the money. */
+function legacyRefundMessage(result: gateway.PlatformRefundResult): string {
+    const what =
+        result.status === 'completed' ? 'Refund completed'
+            : result.status === 'awaiting_approval' ? 'Refund request opened — it waits in the refund queue for a destination number'
+                : result.status === 'failed' ? 'Refund request opened, but the transfer failed — retry or settle it from the refund queue'
+                    : result.status === 'waiting_for_cash' ? 'Refund approved — it is sent once the cash on delivery reaches the platform'
+                        : 'Refund approved and being sent';
+    return result.withinVendorPolicy ? what : `${what} — the vendor’s return policy was overridden`;
 }

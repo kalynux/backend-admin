@@ -30,6 +30,7 @@ import {
 import { PayoutRequestReadModel, PayoutRequestReadRepository } from '../repositories/payout-request.read.repository';
 import { DeliveryFeeRefundReadModel, DeliveryFeeRefundReadRepository } from '../repositories/delivery-fee.read.repository';
 import { toDeliveryFeeRefundDto } from '../read-models/delivery-fee.dto';
+import { RefundRequestReadRepository } from '../../refunds/repositories/refund-request.read.repository';
 import { OrderReadRepository } from '../../orders/repositories/order.read.repository';
 import {
     MoneyOwnerNames,
@@ -65,6 +66,10 @@ import {
     ResumeEarningsBody,
 } from '../validators/money.validator';
 import { ledgerOwnerTypesOf, toPlatformEarnedSummaries } from '../domain/platform-earnings';
+import * as clawbackWrites from '../domain/clawback-write-off';
+import { EarningsAccountDebtReadRepository } from '../repositories/earnings-account.read.repository';
+import { toClawbackDebtDto } from '../read-models/money.dto';
+import { ClawbackOwnerParams, ListClawbacksQuery, WriteOffClawbackBody } from '../validators/money.validator';
 
 /**
  * `/api/v1/money` — earnings, payouts and gateway settlements.
@@ -105,8 +110,10 @@ const payouts = new PayoutRequestReadRepository();
 const payments = new PaymentTransactionReadRepository();
 const refunds = new RefundTransactionReadRepository();
 const deliveryFeeRefunds = new DeliveryFeeRefundReadRepository();
+const refundRequests = new RefundRequestReadRepository();
 const orderNumbers = new OrderReadRepository();
 const auditEntries = new AuditRepository();
+const debtAccounts = new EarningsAccountDebtReadRepository();
 
 // The owner directories, for the display names a money row cannot carry. Owned by the
 // modules that own those collections — `delivery_agents` holds `legal_identity` and
@@ -404,12 +411,17 @@ export class MoneyController {
          * `/agencies` and `/agents` — exactly what the accounts mount's composed
          * authorization exists to prevent.
          */
-        const names = await hydrateOwnerNames(page.data);
+        // The refund DEBT is read directly (one column, no reconciliation) and joined here —
+        // jovi-mall's account list does not carry it. See `earnings-account.read.repository.ts`.
+        const [names, debts] = await Promise.all([
+            hydrateOwnerNames(page.data),
+            debtAccounts.debtFor(page.data),
+        ]);
 
         sendPlatformPage(
             res,
             page,
-            page.data.map((row) => toEarningsAccountDto(row, names)),
+            page.data.map((row) => toEarningsAccountDto(row, names, debts)),
             // Across the whole FILTERED result set, one entry per currency — the one
             // number on this screen a client cannot compute, because it cannot see past
             // the page it was handed.
@@ -834,6 +846,8 @@ export class MoneyController {
             orderId: query.orderId,
             bookingId: query.bookingId,
             paymentTransactionId: query.paymentTransactionId,
+            channel: query.channel,
+            refundRequestId: query.refundRequestId,
             from: query.from,
             to: query.to,
             page: query.page,
@@ -857,11 +871,19 @@ export class MoneyController {
     static listDeliveryFeeRefunds = asyncHandler(async (req: Request, res: Response) => {
         const query = req.query as unknown as ListDeliveryFeeRefundsQuery;
         const page = await deliveryFeeRefunds.search(query);
-        const numbers = await orderNumbers.findNumbersByIds(page.items.map((r) => r.order_id.toString()));
+        const orderIds = page.items.map((r) => r.order_id.toString());
+        const [numbers, openRefunds] = await Promise.all([
+            orderNumbers.findNumbersByIds(orderIds),
+            refundRequests.openForOrders(orderIds),
+        ]);
 
         sendPaginated(
             res,
-            page.items.map((r) => toDeliveryFeeRefundDto(r, numbers.get(r.order_id.toString()) ?? null)),
+            page.items.map((r) => toDeliveryFeeRefundDto(
+                r,
+                numbers.get(r.order_id.toString()) ?? null,
+                openRefunds.get(r.order_id.toString()) ?? null,
+            )),
             toPageMeta(page.total, page.page, page.limit),
         );
     });
@@ -869,8 +891,12 @@ export class MoneyController {
     /** GET /api/v1/money/delivery-fee-refunds/:refundId — one row, automatic ones included. */
     static getDeliveryFeeRefund = asyncHandler(async (req: Request, res: Response) => {
         const row = await loadDeliveryFeeRefundOr404(req.params.refundId);
-        const numbers = await orderNumbers.findNumbersByIds([row.order_id.toString()]);
-        sendSuccess(res, toDeliveryFeeRefundDto(row, numbers.get(row.order_id.toString()) ?? null));
+        const orderId = row.order_id.toString();
+        const [numbers, openRefunds] = await Promise.all([
+            orderNumbers.findNumbersByIds([orderId]),
+            refundRequests.openForOrders([orderId]),
+        ]);
+        sendSuccess(res, toDeliveryFeeRefundDto(row, numbers.get(orderId) ?? null, openRefunds.get(orderId) ?? null));
     });
 
     /**
@@ -953,6 +979,16 @@ export const pauseEarnings = asyncHandler(async (req: Request, res: Response) =>
 export const resumeEarnings = asyncHandler(async (req: Request, res: Response) => {
     const { kind, id } = req.params as unknown as PauseTargetParams;
     const { note } = req.body as ResumeEarningsBody;
+    // ⛔ A refund still holding the pause: refused here, before the audit row (jovi-mall refuses
+    // the same, 409 EARNINGS_PAUSE_HELD_BY_REFUND, as the backstop). Resuming would release money
+    // the refund is about to claw back; the pause lifts by itself when the refund ends.
+    const holding = await refundRequests.findHoldingEarningsPause(kind, id);
+    if (holding) {
+        throw createAppError(ERROR_CODES.EARNINGS_PAUSE_HELD_BY_REFUND, 409, undefined, {
+            refundRequestId: holding._id.toString(),
+            refundRequestStatus: holding.status,
+        });
+    }
     sendSuccess(res, await setPause('resume', kind, id, note ?? null, req), { message: 'Earnings resumed' });
 });
 
@@ -970,6 +1006,63 @@ async function setPause(
     const label = kind === 'order' ? ((await orderNumbers.findNumbersByIds([id])).get(id) ?? null) : null;
     return gateway.setEarningsPause(verb, kind, id, note, { label, before: current.pause }, context);
 }
+
+// ── Refund debt (REFUND-FLOW-PLAN § 6, 2026-10-05) ──────────────────────────
+
+/**
+ * GET /api/v1/money/earnings/clawbacks — every owner who owes the platform after a refund,
+ * largest first. A DIRECT read of `earnings_accounts.clawback_balance`. `meta.totals` is the
+ * whole filtered debt per currency — the number a page cannot give.
+ */
+export const listClawbacks = asyncHandler(async (req: Request, res: Response) => {
+    const query = req.query as unknown as ListClawbacksQuery;
+    const [page, totals] = await Promise.all([
+        debtAccounts.debtors({ ownerType: query.ownerType, page: query.page, limit: query.limit, sort: query.sort }),
+        debtAccounts.debtTotals(query.ownerType),
+    ]);
+    const names = await hydrateOwnerNames(
+        page.items.map((row) => ({ ownerType: row.owner_type, ownerId: row.owner_id ? row.owner_id.toString() : null })),
+    );
+    sendSuccess(res, page.items.map((row) => toClawbackDebtDto(row, names)), {
+        meta: { ...toPageMeta(page.total, page.page, page.limit), totals },
+    });
+});
+
+/**
+ * POST /api/v1/money/earnings/clawbacks/:ownerType/:ownerId/write-off — forgive refund debt.
+ * **200** with the owner's remaining debt, or **202** with a pending approval at ≥ 2,000,000.
+ */
+export const writeOffClawback = asyncHandler(async (req: Request, res: Response) => {
+    const { ownerType, ownerId } = req.params as unknown as ClawbackOwnerParams;
+    const body = req.body as WriteOffClawbackBody;
+
+    const outcome = await clawbackWrites.writeOff(
+        requireAdminIdentity(req),
+        ownerType,
+        ownerId,
+        { amount: body.amount, reason: body.reason },
+        actorContextOf(req),
+    );
+
+    if (outcome.kind === 'queued') {
+        sendSuccess(res, outcome.approval, {
+            status: 202,
+            message: outcome.created
+                ? 'This write-off is at or above the four-eyes threshold — submitted for a second administrator’s approval'
+                : 'An identical request is already awaiting approval',
+        });
+        return;
+    }
+
+    const names = await hydrateOwnerNames([{ ownerType, ownerId }]);
+    sendSuccess(
+        res,
+        outcome.account
+            ? toClawbackDebtDto(outcome.account, names)
+            : { owner: { type: ownerType, id: ownerId, name: names.get(ownerKey(ownerType, ownerId)) ?? null }, clawback: 0, currency: null, updatedAt: null },
+        { message: 'Refund debt written off — the platform absorbs the loss' },
+    );
+});
 
 async function loadAllocationOr404(allocationId: string): Promise<EarningsAllocationReadModel> {
     const row = await allocations.findById(allocationId);

@@ -1275,6 +1275,75 @@ export const AUDIT_CATALOG = Object.freeze({
         summary: 'Settled a delivery-fee refund owed to a customer — recorded the money as returned by hand, or as covered by a refund of the whole order',
     },
 
+    // ── The refund queue (REFUND-FLOW-PLAN § 7) ──────────────────────────────
+    // Every write is DELEGATED to jovi-mall `/api/internal/admin/refunds/*` and recorded
+    // FAIL-CLOSED: the intent row commits before the call and its failure is not caught.
+    // Filed against the REQUEST (`target: 'refund'`); the order or booking it is about rides as
+    // `related_target_*`. Names reuse the governing permission's family (`orders.`), as the
+    // catalog requires; the verb is the suffix.
+    'orders.refund.request': {
+        permission: 'orders.refund.request',
+        target: 'refund',
+        transport: 'delegated',
+        summary: 'Raised a refund request for approval — the seller’s earnings are held until it is decided',
+    },
+    /**
+     * Approving is the act that lets money leave. At ≥ 2,000,000 it is QUEUED for a second
+     * administrator (`LARGE_REFUND`); the approver's request then writes this row with
+     * `via_approval_id`.
+     */
+    'orders.refund.approve': {
+        permission: 'orders.refund',
+        target: 'refund',
+        transport: 'delegated',
+        summary: 'Approved a refund request — the platform sends the money (or waits for COD cash to reach it)',
+    },
+    'orders.refund.reject': {
+        permission: 'orders.refund',
+        target: 'refund',
+        transport: 'delegated',
+        summary: 'Rejected a refund request — the seller’s earnings are released from the refund hold',
+    },
+    'orders.refund.retry': {
+        permission: 'orders.refund',
+        target: 'refund',
+        transport: 'delegated',
+        summary: 'Retried a failed refund transfer — the same transfer reference is reused',
+    },
+    /** One action for both outcomes: one permission governs both, and the payload names which. */
+    'orders.refund.resolve_unknown': {
+        permission: 'orders.refund',
+        target: 'refund',
+        transport: 'delegated',
+        summary: 'Decided a refund transfer whose outcome was unknown — arrived, or failed',
+    },
+    'orders.refund.settle_external': {
+        permission: 'orders.refund.settle_external',
+        target: 'refund',
+        transport: 'delegated',
+        summary: 'Recorded a refund as paid outside the platform, with a picture proof',
+    },
+    /**
+     * A proof picture streamed to jovi-mall's PRIVATE `refund-proofs` tree. Filed against the
+     * FILE, whose id is only known from the answer; the payload never names the content.
+     */
+    'orders.refund.proof.upload': {
+        permission: 'orders.refund.request',
+        target: 'file',
+        transport: 'delegated',
+        summary: 'Uploaded a refund proof picture (the customer’s message giving a number, or a receipt)',
+    },
+    /**
+     * Opening a proof picture — a phone number and a personal conversation. `external` like
+     * `files.content.read`: the row IS the control, committed before the bytes are fetched.
+     */
+    'orders.refund.proof.read': {
+        permission: 'orders.refund.read',
+        target: 'file',
+        transport: 'external',
+        summary: 'Opened a refund proof picture',
+    },
+
     // ═══ SHIPMENTS — delegated to jovi-mall (Phase 10) ════════════════════════
     // Two mutations. There is deliberately no `shipments.status.set`: the declared
     // permissions are read, reassign and cancel, and driving the delivery lifecycle is the
@@ -1447,6 +1516,22 @@ export const AUDIT_CATALOG = Object.freeze({
     'money.earnings.resume_booking': {
         permission: 'money.earnings.pause', target: 'booking', transport: 'delegated',
         summary: 'Resumed the earnings of a booking — its hold continues where it stopped',
+    },
+
+    // ═══ MONEY — refund debt write-off (REFUND-FLOW-PLAN § 6.4, C-6) ═══════════
+    // One action per owner type, so each row lands on that owner's own activity feed — the
+    // `money.statements.send_*` split. Four-eyes at ≥ 2,000,000; the reason is in the payload.
+    'money.earnings.clawback.write_off_vendor': {
+        permission: 'money.earnings.clawback.write_off', target: 'vendor', transport: 'delegated',
+        summary: 'Wrote off refund debt a vendor owed the platform — the platform absorbs the loss',
+    },
+    'money.earnings.clawback.write_off_agency': {
+        permission: 'money.earnings.clawback.write_off', target: 'agency', transport: 'delegated',
+        summary: 'Wrote off refund debt an agency owed the platform — the platform absorbs the loss',
+    },
+    'money.earnings.clawback.write_off_agent': {
+        permission: 'money.earnings.clawback.write_off', target: 'agent', transport: 'delegated',
+        summary: 'Wrote off refund debt a delivery agent owed the platform — the platform absorbs the loss',
     },
 
     'money.statements.send_vendor': {

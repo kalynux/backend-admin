@@ -664,13 +664,88 @@ export async function settleDeliveryFeeRefund(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Refund debt write-off (REFUND-FLOW-PLAN § 6.4, C-6)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ClawbackOwnerType = 'vendor' | 'agency' | 'agent';
+
+/**
+ * jovi-mall's write-off answer — typed loosely ON PURPOSE: the contract (§ 11.3) fixes the route
+ * and the body but not the response. Nothing here reads it beyond the audit `after`; the
+ * controller answers from its own direct read of the account.
+ */
+export interface PlatformClawbackWriteOff {
+    clawbackBalance?: number;
+    writtenOff?: number;
+    [key: string]: unknown;
+}
+
+const WRITE_OFF_ACTIONS: Readonly<Record<ClawbackOwnerType, AuditAction>> = {
+    vendor: 'money.earnings.clawback.write_off_vendor',
+    agency: 'money.earnings.clawback.write_off_agency',
+    agent: 'money.earnings.clawback.write_off_agent',
+};
+
+/**
+ * Forgive refund debt — the platform absorbs the loss. jovi-mall writes a `write_off`
+ * `earnings_adjustments` row and a `clawback_write_off` ledger entry in one transaction and
+ * refuses more than is owed (`EARNINGS_CLAWBACK_WRITE_OFF_EXCEEDS_DEBT`).
+ *
+ * Audited FAIL-CLOSED against the OWNER (one action per owner type, so the row lands on that
+ * owner's own activity feed). On the four-eyes path the APPROVER performs it, with
+ * `viaApprovalId`.
+ */
+export async function writeOffClawback(
+    ownerType: ClawbackOwnerType,
+    ownerId: string,
+    input: { amount: number; reason: string },
+    audit: { label: string | null; before: Record<string, unknown> | null; currency: string | null },
+    context: ActorContext,
+    viaApprovalId: string | null = null,
+): Promise<PlatformClawbackWriteOff> {
+    return auditedDelegation(
+        WRITE_OFF_ACTIONS[ownerType],
+        context,
+        { type: ownerType, id: ownerId, label: audit.label },
+        { ownerType, ownerId, amount: input.amount, currency: audit.currency, reason: input.reason },
+        audit.before,
+        (result: PlatformClawbackWriteOff | null) =>
+            result && typeof result === 'object'
+                ? { clawbackBalance: result.clawbackBalance ?? null, writtenOff: result.writtenOff ?? input.amount }
+                : null,
+        async () => {
+            const result = await platformRequest<PlatformClawbackWriteOff>({
+                method: 'POST',
+                path: `/earnings/clawbacks/${ownerType}/${ownerId}/write-off`,
+                body: { amount: input.amount, reason: input.reason },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return { result: result.data };
+        },
+        viaApprovalId,
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Earnings pauses (2026-10-05) — jovi-mall holds the pause and the hold arithmetic
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** jovi-mall's pause record, as it serves it. Admin actor ids resolve in THIS service's database. */
 export interface PlatformEarningsPause {
     active: boolean;
-    reason: 'seller_cancelled_paid_order' | 'booking_cancelled_unrefunded' | 'card_dispute' | 'admin' | null;
+    /**
+     * `refund_in_progress` (2026-10-05, REFUND-FLOW-PLAN C-4): a refund REQUEST is open on it.
+     * Raised when the request is created; closed by itself when the refund completes (or lifted
+     * when it is rejected) — like `card_dispute`, an administrator need not resume it.
+     */
+    reason:
+        | 'seller_cancelled_paid_order'
+        | 'booking_cancelled_unrefunded'
+        | 'card_dispute'
+        | 'admin'
+        | 'refund_in_progress'
+        | null;
     note: string | null;
     paused_at: string | null;
     paused_by_user_id: string | null;

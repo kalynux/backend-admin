@@ -241,7 +241,7 @@ delegates — **both of them by default** since 2026-10-04.
 
 | Field | Notes |
 |---|---|
-| `entryType` | `hold` · `release` · `reversal` · `reserve_hold` · `reserve_release` |
+| `entryType` | `hold` · `release` · `reversal` · `reserve_hold` · `reserve_release` · 🆕 `clawback` (a refund took back part of a share — out) · `clawback_recovery` (an inflow to available paid a refund debt down — out of available) · `clawback_write_off` (an administrator forgave a refund debt — no balance moves). Since the refund flow, 2026-10-05 |
 | **`amount`** | **The positive magnitude moved — never signed.** Direction is `entryType`'s job. A client that subtracts on the sign alone gets `reserve_hold` backwards: it moves money *sideways* (pending → reserve), not in or out |
 | `balancesAfter` | The balances immediately after this entry. **What makes the ledger checkable** |
 
@@ -461,6 +461,7 @@ through that owner's directory and follow the link to
       "available": 480000,
       "reserve": 25000,
       "requested": 0,
+      "clawback": 0,
       "currency": "XAF",
       "updatedAt": "2026-08-16T09:12:04.000Z"
     }
@@ -479,6 +480,7 @@ through that owner's directory and follow the link to
 | `owner.name` | The **business** name where there is one — a Store, a Magazin — the contact name where there is not. **`null`, never `""`.** The same rule `billing.md` documents for `owner.name` on a subscription |
 | `owner.id` | `null` only for the platform singleton, which this list excludes — so in practice always present here |
 | `pending` · `available` · `reserve` · `requested` | Plain numbers in `currency` |
+| `clawback` | **Since 2026-10-05 (refund flow).** Refund **debt**: what the owner owes BACK after a refund recovered more than their held earnings. Read directly from `earnings_accounts.clawback_balance`; `0` when they owe nothing. ⚠ The **opposite** direction from the four above — never add it to them. While it is above 0, `available` is 0 (every inflow pays it down first). Not in `meta.totals`; the per-currency debt total is on [`GET /money/earnings/clawbacks`](#refund-debt--moneyearningsclawbacks-2026-10-05) |
 | `updatedAt` | ISO instant, `null` if the platform reports none |
 
 > ### ⚠️ Never sum the four balances together
@@ -543,6 +545,7 @@ ways: **why has this money not been released?**
       "source": { "type": "order", "id": "6670aabbccddeeff00112233" },
       "beneficiary": { "type": "vendor", "id": "6650aa11bb22cc33dd44ee55", "name": "Douala Fresh Market" },
       "amount": 25162,
+      "clawedAmount": 0,
       "currency": "XAF",
       "status": "held",
       "snapshots": { "gross": 27500, "commissionPercent": 8.5 },
@@ -564,6 +567,7 @@ ways: **why has this money not been released?**
 
 | Field | Notes |
 |---|---|
+| `clawedAmount` | **Since 2026-10-05 (refund flow).** How much of `amount` refunds have taken back, cumulatively. `amount` is never edited; what is left to release is `amount − clawedAmount`, and the row turns `reversed` when nothing is left (from `held` **or** `released`). `0` on a row from before |
 | `snapshots` | **The split's inputs, frozen at the moment it ran.** `amount` alone says what a beneficiary got; with the gross and the rate it says whether that was *right* |
 | `snapshots.gross` | On `order` and `cod_collection` rows: the **goods** gross. Since jovi-mall ADR-A11 (customer-paid delivery, 2026-10-03) it is **not** the order total or the COD cash expected, either of which may include delivery the customer paid. On a `shipment` row it is the delivery fee reserved |
 | **`release`** | **The reason this endpoint exists** — none of these four fields had an admin surface before |
@@ -598,7 +602,7 @@ Every list field, plus:
 ## Earnings pauses — `/money/earnings/pauses` (2026-10-05)
 
 **Paused money is never paid out.** The platform pauses an order's or booking's earnings on its own
-in three situations, and an administrator may pause any order or booking by hand:
+in four situations, and an administrator may pause any order or booking by hand:
 
 | `pause.reason` | When | Also |
 |---|---|---|
@@ -606,8 +610,13 @@ in three situations, and an administrator may pause any order or booking by hand
 | `booking_cancelled_unrefunded` | a paid booking was cancelled from the seller's **status menu** | a HIGH-priority `BOOKING_CANCELLATION` ticket is opened |
 | `card_dispute` | the customer disputed the card payment with their bank | lifts **itself** when the dispute is won (or lost — the earnings are then reversed) |
 | `admin` | an administrator paused it | — |
+| 🆕 `refund_in_progress` | a **refund request** is open on it (any status before `completed` — even a small partial refund; REFUND-FLOW-PLAN C-4) | lifts **itself**: closed when the refund completes (after the earnings were clawed back), resumed when the request is rejected. Find the request with `GET /refunds?sourceId=<id>&open=true`. Resuming it by hand while the refund still holds it is refused (`409 EARNINGS_PAUSE_HELD_BY_REFUND`) |
 
-**Closing a refund ticket:** refund the customer (`orders.refund` — this reverses the earnings), or,
+A **completed** refund also closes a `seller_cancelled_paid_order` or `booking_cancelled_unrefunded`
+pause on the same order or booking — the refund was what it was waiting for. `card_dispute` and
+`admin` are never closed by a refund. Label suggestion: `refund_in_progress` → "Refund in progress".
+
+**Closing a refund ticket:** refund the customer (raise a refund request at `POST /refunds` — completing it claws the earnings back), or,
 if no refund is owed, **resume** the earnings. Resuming continues the hold where it stopped: the
 paused time never counts. Since 2026-10-05 the hold is **3 days from delivery**
 (the courier finishing the order's last parcel).
@@ -630,7 +639,56 @@ platform raised has `paused_by_user_id: null` and `paused_by_name: "system"`; on
 raised has `paused_by_source: "admin"` and their id and name.
 
 **Errors:** `404 EARNINGS_PAUSE_TARGET_NOT_FOUND` (unknown id), `409 EARNINGS_ALREADY_PAUSED` (pause
-twice — the first pause's reason is kept), `409 EARNINGS_NOT_PAUSED` (resume something not paused).
+twice — the first pause's reason is kept), `409 EARNINGS_NOT_PAUSED` (resume something not paused),
+🆕 **`409 EARNINGS_PAUSE_HELD_BY_REFUND`** on resume (`details.refundRequestId`,
+`details.refundRequestStatus`): a refund request on this order/booking is **open**, or a completed one
+has **not finished recovering its earnings** (`earningsSettledAt: null`). Resuming would release
+money the refund is about to claw back; the refund lifts or closes the pause itself. Raised **here**
+before the audit row (jovi-mall answers the same as a backstop). Link to `GET /refunds/:refundId`.
+A stale `refund_in_progress` pause with no such request stays resumable.
+
+## Refund debt — `/money/earnings/clawbacks` (2026-10-05)
+
+A refund recovers the seller's (and, after a lost dispute, everyone's) earnings from what is still held, then from `available`; what neither covers becomes **debt** (`clawback_balance`), paid down automatically by the owner's next earnings (REFUND-FLOW-PLAN § 6). When there will be no next earnings — the owner left, the account is closed — an administrator writes it off and the platform absorbs the loss (owner decision C-6). The refund queue itself is [refunds.md](refunds.md).
+
+### `GET /money/earnings/clawbacks` — `money.earnings.read`
+
+Every owner who owes something now, largest first. A **direct** read.
+
+| Query | Notes |
+|---|---|
+| `ownerType` | `vendor` · `agency` · `agent` |
+| `sort` | `amount` (the debt) · `updatedAt`, `-` for descending. Default `-amount` |
+| `page`, `limit` | Standard pagination |
+
+```jsonc
+{
+  "success": true,
+  "data": [
+    { "owner": { "type": "vendor", "id": "665a…", "name": "Chez Awa" }, "clawback": 4900, "currency": "XAF", "updatedAt": "2026-10-05T11:00:00.000Z" }
+  ],
+  "meta": { "total": 3, "page": 1, "limit": 20, "pages": 1,
+            "totals": [ { "currency": "XAF", "clawback": 152000, "owners": 3 } ] }
+}
+```
+
+`meta.totals` is the whole filtered debt per currency, not the page's.
+
+### `POST /money/earnings/clawbacks/:ownerType/:ownerId/write-off` — `money.earnings.clawback.write_off`
+
+```json
+{ "amount": 4900, "reason": "Vendor closed their shop; nothing left to recover" }
+```
+
+`amount` whole and > 0, at most the current debt; `reason` 10–500 characters. Strict body.
+`ownerType` is `vendor` · `agency` · `agent`.
+
+- **`200`** — written off; `data` is the owner's remaining debt row (`clawback` may be `0`).
+- **`202`** — `amount ≥ 2 000 000`: `data` is the pending approval. A second administrator holding `money.earnings.clawback.write_off` commits it at `/approvals`; the debt is re-checked then.
+
+Errors: `409 EARNINGS_CLAWBACK_WRITE_OFF_EXCEEDS_DEBT` (`details.owed`, `details.requested`) — also raised when the owner owes nothing · `PLATFORM_OPERATION_REJECTED` with `details.platformCode` `EARNINGS_CLAWBACK_WRITE_OFF_EXCEEDS_DEBT` / `EARNINGS_CLAWBACK_NOTHING_OWED` if the debt moved in between.
+
+Audit: `money.earnings.clawback.write_off_vendor` · `_agency` · `_agent`, filed against the owner, fail-closed. Financial, tiers 1 + 2; never Support.
 
 ## `GET /money/payouts`
 
@@ -1154,6 +1212,8 @@ would mean nobody could check a refund without being able to issue one.
 | `orderId` | 24-hex |
 | `bookingId` | 24-hex |
 | `paymentTransactionId` | 24-hex |
+| `channel` | `card_refund` · `payout` · `external` (since 2026-10-05) |
+| `refundRequestId` | 24-hex — the [refund request](refunds.md) the row completed |
 | `from` / `to` | ISO-8601 instant, max 366 days |
 
 **The date range filters `createdAt`, not `completedAt`** — ranging on the completion instant
@@ -1177,6 +1237,10 @@ would silently drop exactly the `pending` and `failed` rows somebody opens this 
       "status": "completed",
       "gateway": "mtn_momo",
       "gatewayRefundRef": "MR260813.0950.B10233",
+      "channel": null,
+      "refundRequestId": null,
+      "feeAmount": null,
+      "netAmount": null,
       "initiatedBy": { "id": "665f…", "role": "admin" },
       "createdAt": "2026-08-13T09:48:00.000Z",
       "completedAt": "2026-08-13T09:50:00.000Z"
@@ -1188,7 +1252,12 @@ would silently drop exactly the `pending` and `failed` rows somebody opens this 
 
 | Field | Notes |
 |---|---|
-| `initiatedBy.role` | **Who *asked* — `vendor`, `admin` or `customer`. Not who approved it** |
+| `initiatedBy.role` | **Who *asked* — `vendor`, `admin`, `support` or `customer`. Not who approved it** |
+| `amount` | The **gross** refunded — what analytics deduct. Unchanged meaning |
+| `paymentTransactionId` · `gateway` | **`null` on a COD or externally-settled refund** (since 2026-10-05): no gateway payment was reversed. Branch on `channel`, not on these |
+| `channel` | `card_refund` (Stripe) · `payout` (sent by mobile-money transfer) · `external` (paid outside the platform). `null` on a row from before the refund flow |
+| `feeAmount` · `netAmount` | The refund transfer fee the platform kept, and what the customer received (`amount − feeAmount`). `null` on a legacy row (the customer received `amount`) |
+| `refundRequestId` | The refund request this row completed — open it at `/refunds/:refundId`. `null` on a legacy row |
 | `completedAt` | **When the money actually went back.** `null` on a `pending` or `failed` refund |
 
 ---
@@ -1202,6 +1271,18 @@ the unspent fee of a returned parcel — jovi-mall refunds it through the paymen
 When the gateway **cannot or will not** (a cash-on-delivery order, mobile money, an account with
 refunds disabled) the ledger row becomes **`manual_required`**: a HIGH support ticket is opened and
 the customer is told a person is sending it. **A person sends the money, then records it here.**
+
+> 🆕 **Folded into the refund queue (REFUND-FLOW-PLAN § 7, 2026-10-05).** Delivery money owed back is
+> now raised as a **refund request** and worked in [`/refunds`](refunds.md): approving it sends it,
+> `settle-external` records a hand payment **with its picture proof**, and a reject puts the row back
+> here. A row carries the request in **`refundRequestId`** — while it is set the row is **not
+> settleable here** (`settleable: false`; jovi-mall refuses a settle with `409`
+> `DELIVERY_FEE_REFUND_NOT_SETTLEABLE` + `details.refundRequestId`), so the button should link to
+> `GET /refunds/:refundId` instead. This screen stays for rows that never had a request (written
+> before the change, or where none could be opened) and rows whose request was **rejected**
+> (`rejectedRefundRequestId`). ⚠ **Also not settleable while a refund of the whole ORDER is open**
+> (`orderRefundRequest: { id, status }`): both come out of the same refundable ceiling. Finish or
+> reject that request first.
 
 | Route | Permission | Transport | Audited |
 |---|---|---|---|
@@ -1245,6 +1326,9 @@ payout permissions govern money owed to vendors, agencies and agents. Support ca
       "cause": "fee_decrease",
       "note": "The order was paid in cash at delivery — there is no charge to refund",
       "ticketId": "6701aabbccddeeff00112233",
+      "refundRequestId": null,
+      "rejectedRefundRequestId": null,
+      "orderRefundRequest": null,
       "settleable": true,
       "refundTransactionIds": [],
       "settledAt": null,
@@ -1260,7 +1344,10 @@ payout permissions govern money owed to vendors, agencies and agents. Support ca
 | Field | Notes |
 |---|---|
 | `status` | `manual_required` (owed) · `completed` · `processing` · `failed` (the last two only on automatic rows, via the detail or the order) |
-| **`settleable`** | **The one flag the settle button needs** (`status === 'manual_required'`) |
+| **`settleable`** | **The one flag the settle button needs** — `status === 'manual_required'`, **no `refundRequestId`**, and **no `orderRefundRequest`** |
+| `orderRefundRequest` | 🆕 `{ id, status }` of an OPEN refund request of the whole order, or `null` — read from `refund_requests` (jovi-mall's own DTO does not carry it). While set, nothing on this order is settled by hand |
+| `refundRequestId` | 🆕 The refund **request** returning this money, or `null`. When set, work it in the refund queue (`GET /refunds/:refundId`) — not here |
+| `rejectedRefundRequestId` | 🆕 A request that was **rejected** for this money (history). The row is back on this screen, settleable again |
 | `cause` | `fee_decrease` · `rto_leftover` (a returned parcel's unspent fee) · `sweep` |
 | `note` | Why it is manual. **Operator-facing — never show it to the customer** |
 | `ticketId` | The HIGH ticket the manual row opened; settling resolves it |
@@ -1291,7 +1378,7 @@ settled) and **no `settledBy`** (the caller is the administrator).
 
 | `details.platformCode` | When | What to do |
 |---|---|---|
-| `DELIVERY_FEE_REFUND_NOT_SETTLEABLE` | not `manual_required` — settled already, automatic, or another administrator won the race | reload the row |
+| `DELIVERY_FEE_REFUND_NOT_SETTLEABLE` | not `manual_required` — settled already, automatic, or another administrator won the race. **Or** the row is linked to a refund request that is still open, **or a refund of the whole order is open**: then `details.refundRequestId` and `details.refundRequestStatus` are set | reload the row; with `refundRequestId`, approve, settle or reject it in the refund queue instead |
 | `DELIVERY_FEE_REFUND_ALREADY_COVERED` | online order: a refund of the whole order already returned this money, so paying again would pay it twice (`details` may carry `amount`, `stillReturnable`) | settle it `covered_by_order_refund` instead |
 | `DELIVERY_FEE_REFUND_NOT_COVERED` | `covered_by_order_refund` on money the order still covers — or on a COD order, where nothing else can have returned it | send the money and use a paying method |
 

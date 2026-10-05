@@ -469,7 +469,9 @@ How much may be refunded, and whose policy that would break.
       "refundProcessingDays": 7,
       "returnShippingPayer": "customer"
     },
-    "overrides": ["RETURN_WINDOW_EXPIRED", "PARTIAL_REFUND_PERCENTAGE"]
+    "overrides": ["return_window_expired"],
+    "openRefundRequest": null,          // { id, status } when a refund request is already open on the order
+    "legacyRouteCeiling": 2000000       // POST /orders/:orderId/refund refuses at or above this
   }
 }
 ```
@@ -479,7 +481,11 @@ How much may be refunded, and whose policy that would break.
 | `maxRefundable` / `remaining` | **The platform's money invariant.** Never waivable |
 | `vendorPolicy` | **The vendor's commercial terms**, which are waivable with `overridePolicy` |
 | `overrides` | Exactly which vendor gates a full refund would cross. **Show these before asking an operator to confirm** — a specific override beats a general one |
-| `isCod` | A cash order refunds differently |
+| `gatewayRefundSupported` | Kept under its old name: **will the money go back on its own once approved?** True for a card, and for mobile money whose paying number is on record (a payout to it). False for COD and for a payment with no number — those wait in the refund queue for a typed number |
+| `isCod` | A cash order — its refund waits in the refund queue (`awaiting_approval`) for a typed number, its proof and a second administrator |
+| `overrides` values | `return_window_expired` · `policy_disabled` · `order_not_paid` · `above_policy_maximum` |
+| `openRefundRequest` | A refund request already open on the order (`{ id, status }`) — `POST /refund` is then `409 REFUND_ALREADY_OPEN`; open it at `GET /refunds/:refundId` |
+| `legacyRouteCeiling` | `2000000`. At or above it `POST /orders/:orderId/refund` is refused — use `POST /refunds` |
 
 Read the two blocks as two different ceilings: the outer one is what the platform will permit,
 the inner one is what the vendor agreed to.
@@ -621,8 +627,21 @@ error** — branch on the count.
 
 ## `POST /orders/:orderId/refund`
 
-Refund an order, in full or in part. **Calls a payment gateway, writes its ledger row before
-the call, and reverses escrow across every actor on the order.**
+> ⚠ **Superseded by the refund queue ([refunds.md](refunds.md), 2026-10-05).** The route, its permission and its audit action are unchanged; **what it does behind them changed.** jovi-mall now **opens a refund request** and approves it in the same call when there is somewhere to send the money (the administrator is the approver). New screens should use `POST /refunds` (with `approveNow`) instead.
+>
+> ⛔ **At or above 2 000 000 it is refused** — `422 REFUND_USE_REFUND_QUEUE`, before the audit row and before jovi-mall is asked. This route has no second administrator; the four-eyes approval lives on the queue. The line is **cumulative per order**: what the order already returned (its completed refunds, read from `refund_transactions`) **plus** this amount — so 1 999 999 twice cannot pass it in pieces. With no `amount`, this amount is jovi-mall's `maxRefundable` (one extra read).
+
+Refund an order, in full or in part — **below 2 000 000**. What happens to the money depends on how
+it was paid:
+
+| Paid by | Answer `status` | What happened |
+|---|---|---|
+| card | `completed` | Refunded through the card gateway in the call |
+| mobile money, payer's number on record | `sending` (then `completed` on the gateway's callback) — or `failed`, or `approved` with `transferFailureReason` | A transfer to the number that paid, **minus the refund fee** (`feeAmount`; the customer receives `netAmount`) |
+| cash on delivery, or no paying number | `awaiting_approval` | **Nothing was sent.** The request waits in the refund queue for a typed number, its proof picture and a second administrator |
+
+Every case opens a refund request (one per order at a time) and pauses the order's earnings until
+it completes, when they are clawed back.
 
 | | |
 |---|---|
@@ -634,9 +653,10 @@ the call, and reverses escrow across every actor on the order.**
 
 | Field | Type | Rules |
 |---|---|---|
-| `amount` | number | Optional, positive, ≤ 1 000 000 000. **Absent means the full remaining refundable balance — not the vendor's policy cap.** An administrator asking to "refund this order" means the order |
+| `amount` | integer | Optional, **whole** XAF, positive. Together with what the order already refunded it must stay **below 2 000 000** (`422 REFUND_USE_REFUND_QUEUE` otherwise). **Absent means the full remaining refundable balance — not the vendor's policy cap.** An administrator asking to "refund this order" means the order |
 | `reason` | string | **Required.** 3–500 characters |
 | `overridePolicy` | boolean flag | Acknowledges going beyond the **vendor's** commercial terms — the return window, the refund percentage. **It never waives a money invariant**: an amount above the remaining balance is refused whatever this says |
+| `itemDefective` | boolean flag | Optional (C-1). Under the vendor's "customer pays, reimbursed if defective" return-shipping setting, also returns the delivery money |
 
 ```json
 { "amount": 27500, "reason": "Parcel never arrived; agent confirmed loss", "overridePolicy": true }
@@ -658,29 +678,43 @@ it would cross — so an operator confirms a specific override rather than a gen
 {
   "success": true,
   "data": {
-    "refundId": "rf_66739911",
-    "status": "completed",
-    "amount": 27500,
+    "refundId": "6720a1b2c3d4e5f6a7b8c901",        // ⚠ DEPRECATED alias of refundRequestId (it used to be a refund_transactions id)
+    "refundRequestId": "6720a1b2c3d4e5f6a7b8c901", // open it at GET /refunds/:refundId
+    "status": "sending",                           // the REQUEST's status — no longer always "completed"
+    "amount": 27500,                               // GROSS — what the order loses (= grossAmount)
+    "grossAmount": 27500,
+    "feeAmount": 550,                              // the refund fee (0 on a card refund)
+    "netAmount": 26950,                            // what the customer receives
     "currency": "XAF",
-    "totalRefunded": 27500,
-    "fullyRefunded": true,
+    "paymentChannel": "mobile_money",              // card | mobile_money | cod | billing
+    "channel": "payout",                           // card_refund | payout | external | null
+    "transferFailureReason": null,
+    "totalRefunded": 0,                            // COMPLETED refunds on the order so far
+    "fullyRefunded": false,                        // true only once a refund COMPLETED and squared the order
     "withinVendorPolicy": false,
-    "overrides": ["RETURN_WINDOW_EXPIRED"]
+    "overrides": ["return_window_expired"]
   },
-  "message": "Refund completed — the vendor’s return policy was overridden"
+  "message": "Refund approved and being sent — the vendor’s return policy was overridden"
 }
 ```
 
-When nothing was overridden the message is simply `"Refund completed"`.
+The message follows `status`: `completed` → "Refund completed" · `awaiting_approval` → "Refund
+request opened — it waits in the refund queue for a destination number" · `failed` → "…the transfer
+failed — retry or settle it from the refund queue" · `waiting_for_cash` → "…sent once the cash on
+delivery reaches the platform" · otherwise "Refund approved and being sent". A suffix says when the
+vendor's policy was overridden. **Branch on `status`, never on the message.**
 
 ### Errors
 
 | Status | Code | When |
 |---|---|---|
-| 400 | `VALIDATION_ERROR` | Missing reason, non-positive amount, unknown field |
+| 400 | `VALIDATION_ERROR` | Missing reason, non-positive or fractional amount, unknown field |
 | 404 | `NOT_FOUND` | |
-| **422** | `PLATFORM_OPERATION_REJECTED` | **The refund would cross the vendor's policy and `overridePolicy` was not set.** `details` names the gates |
-| 409 / 422 | `PLATFORM_OPERATION_REJECTED` | Amount above the remaining balance, gateway refuses, order not refundable |
+| **422** | **`REFUND_USE_REFUND_QUEUE`** | Already refunded on the order + this refund is **2 000 000 or more** (`details: { requested, alreadyRefunded, ceiling, queue: "/api/v1/refunds" }`). Raised here before anything is written; raise it from the refund queue instead |
+| **422** | `PLATFORM_OPERATION_REJECTED` · `details.platformCode: REFUND_POLICY_OVERRIDE_REQUIRED` | **The refund would cross the vendor's policy and `overridePolicy` was not set.** `details.overrides` names the gates (also `requested`, `vendorMaxRefundable`, `maxRefundable`) |
+| 409 | `PLATFORM_OPERATION_REJECTED` · `details.platformCode: REFUND_ALREADY_OPEN` | A refund request is already open on the order — `details.refundRequestId`, `details.status`. Work it in the queue |
+| 423 | `PLATFORM_OPERATION_REJECTED` · `details.platformCode: ORDER_DISPUTE_HOLD` | A card dispute holds the order; resolve the dispute instead |
+| 409 / 404 / 400 | `PLATFORM_OPERATION_REJECTED` | `REFUND_ALREADY_FULLY_REFUNDED`, `REFUND_NOT_ELIGIBLE`, `REFUND_PAYMENT_NOT_FOUND`, `REFUND_AMOUNT_EXCEEDS_MAX` |
 | 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | |
 
 ### Audit

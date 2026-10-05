@@ -49,7 +49,8 @@ the dashboard's behalf and returns the result in its own envelope.
 | [shipments.md](shipments.md) | `/shipments` — shipment directory, offer trail, reassign, cancel |
 | [cod.md](cod.md) | `/cod` — cash-on-delivery overview, holders, remittances, deposits, discrepancies, trust |
 | [billing.md](billing.md) | `/billing` — pricing-plan catalog and subscriptions |
-| [money.md](money.md) | `/money` — earnings, allocations, payouts, payments, refunds |
+| [money.md](money.md) | `/money` — earnings, allocations, payouts, payments, refunds, refund debt (clawback list, write-off) |
+| [refunds.md](refunds.md) | `/refunds` — the refund queue: raise, approve (four-eyes ≥ 2 000 000), reject, retry, settle outside the platform, resolve a stuck transfer, proof pictures |
 | [accounts.md](accounts.md) | `/accounts` — one party's status, balances, activity, payouts, credits, cash ledger |
 | [system.md](system.md) | `/system` — health, dependencies, workers, queues, metrics, config, error journal |
 | [dev-tools.md](dev-tools.md) | `/dev-tools` — feature flags, worker triggers, outbox replay, maintenance mode |

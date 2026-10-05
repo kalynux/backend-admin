@@ -677,7 +677,7 @@ learns it now:
 
 | Status | `details.platformCode` | When |
 |---|---|---|
-| 422 | `ROLE_CLOSURE_BLOCKED` | Live work or money on the role. jovi-mall's `details.blockers` lists them (`[{ code, count, amount?, currency? }]`; codes in jovi-mall `api-doc/me/role-closure.md`) |
+| 422 | `ROLE_CLOSURE_BLOCKED` | Live work or money on the role. jovi-mall's `details.blockers` lists them (`[{ code, count, amount?, currency? }]`; codes in jovi-mall `api-doc/me/role-closure.md`). Passed through, never enumerated here. 🆕 2026-10-05: `earnings_clawback_outstanding` (`amount`, `currency`) — the role OWES the platform money back after a refund recovered more than its balances held (REFUND-FLOW-PLAN C-5); it clears through later earnings or a write-off at `POST /money/earnings/clawbacks/:ownerType/:ownerId/write-off` |
 | 409 | `ROLE_CLOSURE_ALREADY_PENDING` | One is already waiting |
 | 422 | `ROLE_CLOSURE_ROLE_NOT_HELD` | The user does not hold that role |
 | 409 | `ROLE_CLOSED` | That role is already closed |

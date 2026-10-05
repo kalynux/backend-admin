@@ -92,6 +92,15 @@ export const STORAGE_TREE_VISIBILITY: Readonly<Record<string, TreeVisibility>> =
      * report it.
      */
     'admin-identity': 'private',
+    /**
+     * A refund's PROOF pictures (REFUND-FLOW-PLAN § 7, R-7, R-7b) — the customer's message giving
+     * the number a typed refund is sent to, and the receipt of a refund paid outside the
+     * platform. Both carry a phone number and a personal conversation. Written only by
+     * jovi-mall `POST /api/internal/admin/refunds/proofs`; this service reaches the bytes only
+     * through `GET /api/v1/refunds/proofs/:fileId` (audited). Private, so `toFileDetail` here
+     * answers `url: null` for one.
+     */
+    'refund-proofs': 'private',
     'ticket-attachments': 'private',
 });
 

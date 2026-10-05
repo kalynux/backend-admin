@@ -41,7 +41,8 @@ import {
 import { maskPhone } from '../../src/modules/statements/domain/statement-masking';
 import { formatLocal, toStatementPeriod } from '../../src/modules/statements/domain/statement-period';
 import { StatementDocument } from '../../src/modules/statements/domain/statement.types';
-import { matchRemittance, paymentFor } from '../../src/modules/statements/domain/vendor-statement';
+import { matchRemittance, paymentFor, refundChannelLabel } from '../../src/modules/statements/domain/vendor-statement';
+import { reversalLabel, toReversalLines } from '../../src/modules/statements/domain/earnings-reversals';
 import { renderPdf, pdfSafe } from '../../src/modules/statements/render/pdf.renderer';
 import { renderXlsx } from '../../src/modules/statements/render/xlsx.renderer';
 import { CreateStatementBodySchema } from '../../src/modules/statements/validators/statement.validator';
@@ -219,6 +220,65 @@ async function main(): Promise<number> {
         const src = ['domain/money-breakdown.ts', 'domain/vendor-statement.ts', 'domain/delivery-statement.ts'].map(read).join('\n');
         return !/commission_percent_snapshot\s*\*|\*\s*commission_percent_snapshot|AI_MARGIN_PERCENT|\*\s*0\.3\b/.test(src);
     });
+
+    // ── Refund clawbacks (REFUND-FLOW-PLAN § 6.1) ─────────────────────────────
+    // Reversals now read `earnings_adjustments`: a PARTIAL claw is visible, a FULL claw (which
+    // also stamps `reversed_at`) is counted once, and a pre-ledger reversal is kept.
+    {
+        const at = (iso: string) => new Date(iso);
+        const allocation = (amount: number, reversedAt: string) =>
+            ({ _id: new ObjectId(), source_type: 'order', source_id: new ObjectId(), amount, currency: 'XAF', status: 'reversed', reversed_at: at(reversedAt) }) as never;
+        const claw = (allocationId: ObjectId | null, amount: number, debt = 0, kind = 'refund_clawback') =>
+            ({ _id: new ObjectId(), refund_key: 'r1', allocation_id: allocationId, source_type: 'order', source_id: new ObjectId(), beneficiary_type: 'vendor', beneficiary_id: new ObjectId(), amount, currency: 'XAF', taken_from: { pending: 0, reserve: 0, available: amount - debt, debt }, kind, created_at: at('2026-10-02T10:00:00Z') }) as never;
+
+        const fullyClawed = allocation(7_000, '2026-10-03T00:00:00Z');
+        const legacy = allocation(3_000, '2026-10-01T00:00:00Z');
+        const fullyClawedId = (fullyClawed as { _id: ObjectId })._id;
+        const { reversals, writeOffs } = toReversalLines(
+            [fullyClawed, legacy],
+            [claw(fullyClawedId, 4_000), claw(fullyClawedId, 3_000, 1_000), claw(new ObjectId(), 1_200), claw(null, 500, 0, 'write_off')],
+            new Set([fullyClawedId.toHexString()]),
+        );
+        const total = reversals.reduce((s, r) => s + r.amount, 0);
+
+        t.assert('clawback: a PARTIAL claw on a still-held row appears at its own amount', () =>
+            reversals.some((r) => r.kind === 'clawback' && r.amount === 1_200));
+        t.assert('clawback: a FULL claw is counted once — its adjustment rows, never also its reversed_at', () =>
+            reversals.filter((r) => r.kind === 'legacy').length === 1 && total === 4_000 + 3_000 + 1_200 + 3_000);
+        t.assert('clawback: a reversal from before the ledger (no clawback row) is kept as legacy', () =>
+            reversals.some((r) => r.kind === 'legacy' && r.amount === 3_000));
+        t.assert('clawback: the part that became debt is carried, and labelled', () =>
+            reversals.some((r) => r.toDebt === 1_000 && reversalLabel(r) === 'Refund clawback (part owed back)'));
+        t.assert('clawback: a write-off is returned apart — never a reversal, never in net', () =>
+            writeOffs.length === 1 && writeOffs[0].amount === 500 && !reversals.some((r) => r.amount === 500));
+        t.assert('clawback: debt recoveries are not read at all (they would count the claw twice)', () => {
+            const repo = read('repositories/statement.read.repository.ts');
+            const block = repo.slice(repo.indexOf('clawbacksFor('), repo.indexOf('clawedAllocationIds('));
+            return /kind: \{ \$in: \['refund_clawback', 'write_off'\] \}/.test(block) && !block.includes("'clawback_recovery'");
+        });
+        t.assert('neither statement reads `reversedFor` directly any more — both go through earnings_adjustments', () =>
+            !read('domain/vendor-statement.ts').includes('reversedFor(')
+            && !read('domain/delivery-statement.ts').includes('reversedFor(')
+            && read('domain/vendor-statement.ts').includes('reversalsFor(')
+            && read('domain/delivery-statement.ts').includes('reversalsFor('));
+        t.assert('write-offs stay outside "Net earnings in period"', () =>
+            /Refund debt written off by the platform/.test(read('domain/vendor-statement.ts'))
+            && !/Net earnings in period[^\n]*writeOff/.test(read('domain/vendor-statement.ts')));
+    }
+
+    // ── refund_transactions rows from the refund flow (§ 11.5) ──────────────────
+    t.assert('refund channel: card / mobile money / outside the platform, falling back to the legacy gateway', () =>
+        refundChannelLabel('card_refund', 'STRIPE') === 'Card'
+        && refundChannelLabel('payout', null) === 'Mobile money'
+        && refundChannelLabel('external', null) === 'Outside the platform'
+        && refundChannelLabel(null, 'NOTCHPAY') === 'NOTCHPAY'
+        && refundChannelLabel(null, null) === null);
+    t.assert('the refund reader tolerates a row with no gateway and reads channel / fee / net', () => {
+        const repo = read('repositories/statement.read.repository.ts');
+        return /gateway\?: string \| null;/.test(repo) && /channel: 1, feeAmount: 1, netAmount: 1/.test(repo);
+    });
+    t.assert('"Customer received" falls back to the whole amount on a pre-fee row (no NaN)', () =>
+        /net: r\.netAmount \?\? r\.refundAmount - \(r\.feeAmount \?\? 0\)/.test(read('domain/vendor-statement.ts')));
 
     // ─────────────────────────────────────────────────────────────────────────
     t.section('2. The period');

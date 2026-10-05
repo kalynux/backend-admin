@@ -3,10 +3,14 @@ import { anyPermission, defineRoute, permission, records } from '../../../api/ro
 import {
     MoneyController,
     getEarningsPause,
+    listClawbacks,
     listEarningsPauses,
     pauseEarnings,
     resumeEarnings,
+    writeOffClawback,
 } from '../controllers/money.controller';
+// Side effect, like the line below: registers the `money.earnings.clawback.write_off` handler.
+import '../domain/clawback-write-off';
 /**
  * Imported for SIDE EFFECT, and the import is load-bearing.
  *
@@ -47,6 +51,9 @@ import {
     PauseEarningsSchema,
     PauseTargetParamSchema,
     ResumeEarningsSchema,
+    ClawbackOwnerParamSchema,
+    ListClawbacksQuerySchema,
+    WriteOffClawbackSchema,
 } from '../validators/money.validator';
 
 /**
@@ -517,6 +524,42 @@ defineRoute(router, {
     validate: { params: PauseTargetParamSchema, body: ResumeEarningsSchema },
     audit: records('money.earnings.resume_order', 'money.earnings.resume_booking'),
     handler: resumeEarnings,
+});
+
+// ── Refund debt — clawback (REFUND-FLOW-PLAN § 6, 2026-10-05) ────────────────
+
+/**
+ * Owners who owe the platform after a refund recovered more than their held earnings. A DIRECT
+ * read of `earnings_accounts.clawback_balance`, under `money.earnings.read` like every `/earnings`
+ * read. `/earnings/clawbacks` is a literal sibling of `platform`, `accounts`, `allocations`, `pauses`.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/earnings/clawbacks',
+    access: permission('money.earnings.read'),
+    validate: { query: ListClawbacksQuerySchema },
+    handler: listClawbacks,
+});
+
+/**
+ * Forgive refund debt (C-6). `money.earnings.clawback.write_off` — financial, tiers 1 + 2,
+ * four-eyes at ≥ 2,000,000 (202 + an approval). DELEGATED to jovi-mall
+ * `POST /api/internal/admin/earnings/clawbacks/:ownerType/:ownerId/write-off`, audited fail-closed
+ * against the owner.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/earnings/clawbacks/:ownerType/:ownerId/write-off',
+    access: permission('money.earnings.clawback.write_off'),
+    validate: { params: ClawbackOwnerParamSchema, body: WriteOffClawbackSchema },
+    audit: records(
+        'money.earnings.clawback.write_off_vendor',
+        'money.earnings.clawback.write_off_agency',
+        'money.earnings.clawback.write_off_agent',
+    ),
+    handler: writeOffClawback,
 });
 
 export const moneyRoutes = router;

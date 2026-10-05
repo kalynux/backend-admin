@@ -857,6 +857,21 @@ t.assert('an aggregator this service has never heard of still parses (jovi-mall 
 t.assert('a lowercase aggregator name is refused before the hop', () =>
     !SetPaymentSettingsSchema.safeParse({ ...validSwitch, collectionAggregator: 'notchpay' }).success);
 
+// REFUND-FLOW-PLAN R-3 / § 11.6: the refund transfer fee rides the same switch, 0–20 percent.
+t.assert('refundFeePercent is accepted within 0–20 and forwarded as sent', () =>
+    SetPaymentSettingsSchema.safeParse({ ...validSwitch, refundFeePercent: 0 }).success
+    && SetPaymentSettingsSchema.safeParse({ ...validSwitch, refundFeePercent: 2.5 }).success
+    && SetPaymentSettingsSchema.safeParse({ ...validSwitch, refundFeePercent: 20 }).success);
+t.assert('refundFeePercent outside 0–20 (or not a number) is refused before the hop', () =>
+    !SetPaymentSettingsSchema.safeParse({ ...validSwitch, refundFeePercent: 21 }).success
+    && !SetPaymentSettingsSchema.safeParse({ ...validSwitch, refundFeePercent: -1 }).success
+    && !SetPaymentSettingsSchema.safeParse({ ...validSwitch, refundFeePercent: '2' }).success);
+t.assert("refundFeePercent mirrors jovi-mall's .strict() body bounds (min 0, max 20)", () => {
+    const jovi = readFileSync(
+        join(__dirname, '..', '..', '..', 'jovi-mall', 'src', 'modules', 'dev-tools', 'payment-settings.routes.ts'), 'utf8');
+    return jovi.includes('refundFeePercent: z.number().min(0).max(20).optional()');
+});
+
 t.assert('the stats window is 24h or 7d, nothing else', () =>
     PaymentStatsQuerySchema.safeParse({ window: '7d' }).success
     && PaymentStatsQuerySchema.safeParse({}).success

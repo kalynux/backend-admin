@@ -238,9 +238,15 @@ export function buildPaymentFilter(query: PaymentSearchQuery): Filter<PaymentTra
 // Refunds
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * ── Since the refund flow (REFUND-FLOW-PLAN § 11.5) ───────────────────────────
+ * `paymentTransactionId` and `gateway` are OPTIONAL: a COD refund and a refund paid outside the
+ * platform reverse no gateway payment. `refundAmount` stays the GROSS (what analytics deduct);
+ * `feeAmount` / `netAmount` say what the platform kept and what the customer received.
+ */
 export interface RefundTransactionReadModel extends Document {
     _id: ObjectId;
-    paymentTransactionId: ObjectId;
+    paymentTransactionId?: ObjectId | null;
     orderId?: ObjectId | null;
     bookingId?: ObjectId | null;
     vendorId: ObjectId;
@@ -249,10 +255,14 @@ export interface RefundTransactionReadModel extends Document {
     currency: string;
     reason?: string | null;
     status: string;
-    gateway: string;
+    gateway?: string | null;
     gatewayRefundRef?: string | null;
+    refundRequestId?: ObjectId | null;
+    channel?: string | null;
+    feeAmount?: number | null;
+    netAmount?: number | null;
     initiatedBy: ObjectId;
-    /** `vendor` · `admin` · `customer` — who asked for it, not who approved it. */
+    /** `vendor` · `admin` · `support` · `customer` — who asked for it, not who approved it. */
     initiatedByRole: string;
     createdAt: Date;
     /** Stamped when the money actually went back. Analytics group by THIS, not creation. */
@@ -272,6 +282,10 @@ const REFUND_TRANSACTION_PROJECTION = {
     status: 1,
     gateway: 1,
     gatewayRefundRef: 1,
+    refundRequestId: 1,
+    channel: 1,
+    feeAmount: 1,
+    netAmount: 1,
     initiatedBy: 1,
     initiatedByRole: 1,
     createdAt: 1,
@@ -285,6 +299,9 @@ export interface RefundSearchQuery extends ListQueryBase {
     orderId?: string;
     bookingId?: string;
     paymentTransactionId?: string;
+    /** `card_refund` · `payout` · `external` (REFUND-FLOW-PLAN § 11.5). */
+    channel?: string;
+    refundRequestId?: string;
     from?: Date;
     to?: Date;
 }
@@ -309,6 +326,20 @@ export class RefundTransactionReadRepository extends PlatformReadRepository<Refu
      * which gateway and at whose request. Bounded rather than paged: a payment accumulates
      * a handful of partial refunds, not a feed.
      */
+    /**
+     * What one order has already returned: Σ `refundAmount` (GROSS) of its COMPLETED refunds —
+     * jovi-mall's `sumCompletedRefundsForOrder`, byte for byte. The legacy refund route's
+     * four-eyes line is CUMULATIVE per order, so 1 999 999 twice cannot pass it in pieces.
+     */
+    async sumCompletedForOrder(orderId: string): Promise<number> {
+        if (!Types.ObjectId.isValid(orderId) || orderId.length !== 24) return 0;
+        const [tally] = await this.aggregateBy<{ total: number }>([
+            { $match: { orderId: new ObjectId(orderId), status: 'completed' } },
+            { $group: { _id: null, total: { $sum: '$refundAmount' } } },
+        ]);
+        return tally?.total ?? 0;
+    }
+
     async findForPayment(paymentTransactionId: string): Promise<RefundTransactionReadModel[]> {
         if (!Types.ObjectId.isValid(paymentTransactionId)) return [];
         return this.findBy(
@@ -332,6 +363,8 @@ export function buildRefundFilter(query: RefundSearchQuery): Filter<RefundTransa
     if (query.paymentTransactionId) {
         clauses.push({ paymentTransactionId: toObjectIdOrNothing(query.paymentTransactionId) });
     }
+    if (query.channel) clauses.push({ channel: query.channel });
+    if (query.refundRequestId) clauses.push({ refundRequestId: toObjectIdOrNothing(query.refundRequestId) });
 
     /**
      * Ranged on `createdAt`, not `completedAt` — deliberately, and against the collection's

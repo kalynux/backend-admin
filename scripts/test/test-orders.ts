@@ -357,9 +357,17 @@ t.assert(
     () => auditCatalog['orders.cancel'].permission === 'orders.intervene'
         && auditCatalog['orders.dispatch'].permission === 'orders.intervene',
 );
+/**
+ * The refund QUEUE's actions (REFUND-FLOW-PLAN § 7) are `orders.refund.*` because the catalog
+ * requires an action's family to match its permission's — so the derived filter picks them up
+ * too. They target the REFUND request (`target: 'refund'`, the order as related target) and are
+ * pinned in `test-refunds.ts`; here they only have to be accounted for.
+ */
+const REFUND_QUEUE_ACTIONS = Object.keys(auditCatalog).filter((action) => action.startsWith('orders.refund.'));
 t.assert(
     'the activity filter is DERIVED from the catalog, so it cannot drift',
-    () => ORDER_AUDIT_ACTIONS.length === ORDER_ACTIONS.length,
+    () => ORDER_AUDIT_ACTIONS.length === ORDER_ACTIONS.length + REFUND_QUEUE_ACTIONS.length
+        && REFUND_QUEUE_ACTIONS.length === 8,
 );
 t.assert(
     'the activity feed refuses an action from another family',
@@ -433,6 +441,14 @@ t.assert(
 t.assert(
     'a zero refund amount is refused',
     () => throws(() => RefundOrderSchema.parse({ amount: 0, reason: 'a reason' })),
+);
+t.assert(
+    'a fractional refund amount is refused — jovi-mall takes whole currency units only',
+    () => throws(() => RefundOrderSchema.parse({ amount: 1500.5, reason: 'a reason' })),
+);
+t.assert(
+    'itemDefective is accepted and passed through (C-1)',
+    () => RefundOrderSchema.parse({ reason: 'a reason', itemDefective: 'true' }).itemDefective === true,
 );
 t.assert(
     'an absent amount is allowed — it means the full remaining balance',
@@ -530,11 +546,51 @@ t.assert(
     'the admin refund reuses the vendor policy calculator rather than copying it',
     () => adminRefund.includes('computeVendorRefundEligibility'),
 );
+/*
+ * REFUND-FLOW-PLAN § 4 (2026-10-05): the legacy admin refund no longer calls the orchestrator's
+ * synchronous `refundPayment(` and no longer refuses COD (`REFUND_ORDER_IS_COD`). It OPENS A
+ * REFUND REQUEST through the shared `RefundRequestService.create` — whose money invariants it
+ * does not reimplement — approved in the same call only when there is somewhere to send it.
+ */
 t.assert(
-    'it enters the orchestrator, so the money invariants are not reimplemented',
-    () => adminRefund.includes('refundPayment(') && adminRefund.includes("initiatedByRole: 'admin'"),
+    'it opens a refund request through the shared service, so the money invariants are not reimplemented',
+    () => adminRefund.includes('this.refunds.create(') && adminRefund.includes("role: 'admin'"),
 );
-t.assert('COD is refused with its own code', () => adminRefund.includes('REFUND_ORDER_IS_COD'));
+t.assert(
+    'COD / no paying number is NOT approved in the call — it waits in the queue for a typed number',
+    () => adminRefund.includes('approveNow: verdict.gatewayRefundSupported'),
+);
+t.assert(
+    'jovi-mall refuses ≥ 2,000,000 on the legacy route (REFUND_USE_REFUND_QUEUE) — the backstop to ours',
+    () => adminRefund.includes('LEGACY_ADMIN_REFUND_CEILING = 2_000_000')
+        && adminRefund.includes('ERROR_CODES.REFUND_USE_REFUND_QUEUE'),
+);
+t.assert(
+    'its answer is the refund REQUEST (refundRequestId; refundId kept as an alias)',
+    () => adminRefund.includes('refundRequestId: request.id') && adminRefund.includes('refundId: request.id'),
+);
+t.assert(
+    'the legacy ceiling is CUMULATIVE per order on both sides (completed refunds + this amount)',
+    () => {
+        const code = readCode(join(MODULE, 'controllers')).map((f) => f.code).join(' ');
+        return adminRefund.includes('alreadyRefunded + amount >= LEGACY_ADMIN_REFUND_CEILING')
+            && code.includes('refundTransactions.sumCompletedForOrder(orderId)')
+            && code.includes('alreadyRefunded + requested >= ceiling')
+            && code.includes('alreadyRefunded,');
+    },
+);
+t.assert(
+    'wi-admin refuses ≥ 2,000,000 on the legacy route BEFORE the audit row and the call',
+    () => {
+        const code = readCode(join(MODULE, 'controllers')).map((f) => f.code).join(' ');
+        const handler = code.slice(code.indexOf('static refund = asyncHandler'));
+        const guard = handler.indexOf('assertBelowLegacyRefundCeiling(');
+        const call = handler.indexOf('gateway.refund(');
+        return guard > 0 && call > guard
+            && code.includes('ERROR_CODES.REFUND_USE_REFUND_QUEUE')
+            && code.includes('REFUND_FOUR_EYES_THRESHOLD');
+    },
+);
 t.assert(
     'the policy override is required rather than assumed',
     () => adminRefund.includes('REFUND_POLICY_OVERRIDE_REQUIRED'),

@@ -40,6 +40,14 @@ export interface DeliveryFeeRefundReadModel extends Document {
     /** `fee_decrease` · `rto_leftover` · `sweep`. */
     cause: string;
     refund_transaction_ids?: ObjectId[];
+    /**
+     * The `refund_requests` row returning this money (REFUND-FLOW-PLAN § 7, 2026-10-05), or
+     * null on a row written before refunds became requests. While it is set the money is
+     * worked in the refund queue (`/refunds`), never settled by hand here.
+     */
+    refund_request_id?: ObjectId | null;
+    /** A request that was REJECTED for this money — the link moves here and the row is manual again. */
+    rejected_refund_request_id?: ObjectId | null;
     /** Operator-facing — why it is manual or failed. Never shown to a customer. */
     note?: string | null;
     ticket_id?: ObjectId | null;
@@ -69,6 +77,8 @@ const DELIVERY_FEE_REFUND_PROJECTION = {
     status: 1,
     cause: 1,
     refund_transaction_ids: 1,
+    refund_request_id: 1,
+    rejected_refund_request_id: 1,
     note: 1,
     ticket_id: 1,
     settled_at: 1,

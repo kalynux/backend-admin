@@ -217,6 +217,13 @@ export const SetPaymentSettingsSchema = z.object({
     collectionAggregator: AggregatorNameSchema.optional(),
     payoutAggregator: AggregatorNameSchema.optional(),
     stripeEnabled: z.boolean().optional(),
+    /**
+     * The refund transfer fee (REFUND-FLOW-PLAN R-3), in PERCENT, 0–20 — jovi-mall's own bounds
+     * (`REFUND_FEE_PERCENT_MAX`), not an integer there either. Taken off every refund paid by
+     * transfer or outside the platform, never off a card refund. It changes NEW refund requests
+     * only: a request fixes its `fee_rate` when it is created.
+     */
+    refundFeePercent: z.number().min(0).max(20).optional(),
     providers: z.record(ProviderNameSchema, z.object({ enabled: z.boolean() }).strict()).optional(),
     /**
      * Required, and `0` when no document exists yet. The compare-and-set is what stops two

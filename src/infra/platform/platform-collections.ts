@@ -176,6 +176,10 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'Created `pending` BEFORE the gateway call and finalised atomically — never written from here',
     },
+    [COLLECTIONS.REFUND_REQUEST]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'The refund queue (REFUND-FLOW-PLAN § 7). Every transition pauses or resumes earnings, claims a payout transfer or claws earnings back in jovi-mall; a second writer would move the status and fire none of it',
+    },
     [COLLECTIONS.DELIVERY_FEE_PROPOSAL]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'Read-only on the order detail (ADR-A11). Every transition is a compare-and-set paired with a fee move and a customer notice; administrators write none (D-11)',
@@ -257,6 +261,10 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
     [COLLECTIONS.EARNINGS_ALLOCATION]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'The unique (source, beneficiary) row every split is computed from; release is shared with a worker',
+    },
+    [COLLECTIONS.EARNINGS_ADJUSTMENT]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'Append-only refund clawbacks, debt recoveries and write-offs, each written inside the transaction that moved the balance; unique per (refund, allocation, kind)',
     },
     [COLLECTIONS.EARNINGS_RESERVE_HOLD]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',

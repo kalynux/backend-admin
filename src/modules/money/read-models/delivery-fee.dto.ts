@@ -39,7 +39,28 @@ export interface DeliveryFeeRefundDto {
     note: string | null;
     /** The HIGH support ticket a manual row opened. */
     ticketId: string | null;
-    /** True while it may be settled (`status === 'manual_required'`) — the one flag the button needs. */
+    /**
+     * The refund REQUEST that returns this money (REFUND-FLOW-PLAN § 7), or null on a row that
+     * never had one. Open it at `GET /api/v1/refunds/:refundId` — that is where it is approved,
+     * settled externally (with its proof) or rejected.
+     */
+    refundRequestId: string | null;
+    /** A request that was REJECTED for this money (history); the row is back on this screen. */
+    rejectedRefundRequestId: string | null;
+    /**
+     * An OPEN refund request of the whole ORDER (`{ id, status }`), or null. While one is open
+     * this row cannot be settled by hand — both come out of the same refundable ceiling, and
+     * jovi-mall refuses it (`409 DELIVERY_FEE_REFUND_NOT_SETTLEABLE` + `details.refundRequestId`).
+     * Read here from `refund_requests`; jovi-mall's own DTO does not carry it.
+     */
+    orderRefundRequest: { id: string; status: string } | null;
+    /**
+     * True while it may be settled HERE — `manual_required`, not linked to a refund request, and
+     * no refund of the whole order open (`orderRefundRequest`).
+     * A row whose money sits in a request is settled in the refund queue: jovi-mall refuses it
+     * here with `409 DELIVERY_FEE_REFUND_NOT_SETTLEABLE` + `details.refundRequestId`. The same
+     * rule as jovi-mall's `AdminDeliveryFeeRefundDto.settleable`. The one flag the button needs.
+     */
     settleable: boolean;
     /** Automatic rows: the `refund_transactions` the gateway refund produced. */
     refundTransactionIds: string[];
@@ -58,7 +79,11 @@ export interface DeliveryFeeRefundDto {
     updatedAt: string | null;
 }
 
-export function toDeliveryFeeRefundDto(row: DeliveryFeeRefundReadModel, orderNumber: string | null): DeliveryFeeRefundDto {
+export function toDeliveryFeeRefundDto(
+    row: DeliveryFeeRefundReadModel,
+    orderNumber: string | null,
+    orderRefundRequest: { id: string; status: string } | null = null,
+): DeliveryFeeRefundDto {
     const s = row.settlement ?? null;
     return {
         id: row._id.toString(),
@@ -73,7 +98,10 @@ export function toDeliveryFeeRefundDto(row: DeliveryFeeRefundReadModel, orderNum
         cause: row.cause,
         note: row.note ?? null,
         ticketId: toId(row.ticket_id),
-        settleable: row.status === 'manual_required',
+        refundRequestId: toId(row.refund_request_id),
+        rejectedRefundRequestId: toId(row.rejected_refund_request_id),
+        orderRefundRequest,
+        settleable: row.status === 'manual_required' && !row.refund_request_id && orderRefundRequest === null,
         refundTransactionIds: (row.refund_transaction_ids ?? []).map((id) => id.toString()),
         settledAt: toIso(row.settled_at),
         settlement: s
@@ -260,11 +288,13 @@ export function toOrderDeliveryFeeDto(
     payments: PaymentTransactionReadModel[],
     proposals: DeliveryFeeProposalReadModel[],
     refunds: DeliveryFeeRefundReadModel[],
+    /** The order's OPEN refund request, if any — no row is settleable by hand while it is open. */
+    orderRefundRequest: { id: string; status: string } | null = null,
 ): OrderDeliveryFeeDto {
     return {
         payments: splitOrderPayments(payments),
         proposals: proposals.map(toDeliveryFeeProposalDto),
-        refunds: refunds.map((r) => toDeliveryFeeRefundDto(r, orderNumber)),
+        refunds: refunds.map((r) => toDeliveryFeeRefundDto(r, orderNumber, orderRefundRequest)),
         owedManually: refunds.filter((r) => r.status === 'manual_required').reduce((s, r) => s + r.amount, 0),
         // A `covered_by_order_refund` settlement moved nothing — the order refund that covered it
         // is already in `refund_transactions` — so counting it here would count that money twice.

@@ -242,7 +242,12 @@ t.assert('privilege nests: tier 3 ⊆ tier 2 ⊆ tier 1', () =>
  * leaves, and the owner can simply request again. If a candidate fails that test, the answer
  * is not to lengthen this list.
  */
-const TIER_3_FINANCIAL_ALLOWLIST = ['money.payouts.triage'];
+const TIER_3_FINANCIAL_ALLOWLIST = [
+    'money.payouts.triage',
+    // REFUND-FLOW-PLAN § 7: raising a refund request HOLDS the seller's earnings (C-4) and sends
+    // nothing — "Support may hold, never send". Approving is `orders.refund`, never tier 3.
+    'orders.refund.request',
+];
 
 t.assert('tier 3 holds no financial permission beyond the named allowlist', () =>
     TIER_GRANTS[3].every(
@@ -274,6 +279,14 @@ t.assert('Support holds triage and none of the money writes it precedes', () =>
     && !grantedTo(3).has('money.payouts.mark_paid' as never)
     && !grantedTo(3).has('money.payouts.reject' as never)
     && !grantedTo(3).has('money.payouts.destination.read' as never));
+
+/** The refund queue, same line: Support reads and raises; it never approves, settles or forgives. */
+t.assert('Support raises refund requests and none of the refund writes that move money', () =>
+    grantedTo(3).has('orders.refund.read' as never)
+    && grantedTo(3).has('orders.refund.request' as never)
+    && !grantedTo(3).has('orders.refund' as never)
+    && !grantedTo(3).has('orders.refund.settle_external' as never)
+    && !grantedTo(3).has('money.earnings.clawback.write_off' as never));
 
 /**
  * The destructive permissions tier 3 may hold, pinned BY NAME — a copy of
