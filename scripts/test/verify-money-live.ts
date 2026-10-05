@@ -461,18 +461,31 @@ async function main(): Promise<number> {
          * delivery-fee refund desk (8d3cf25) added list, detail and settle, taking it to
          * twenty — and CI's live job noticed first again. The platform summary and the
          * order money split (30a6256) took it to twenty-two — and, again, CI noticed first.
+         * Earnings pauses (6d10103: list, detail, pause, resume) and clawbacks (6d552f8: list,
+         * write-off) took it to twenty-eight — CI noticed first, for the fifth time.
          *
          * It stays a hand-maintained count ON PURPOSE: every other assertion in this section
          * reads a route out of the manifest and would pass just as happily on an EMPTY one, so
          * a count is the only thing here that catches a mount which quietly stopped happening.
          * Update it deliberately when routes change; never derive it from the manifest it guards.
          */
-        t.assert('twenty-two /money routes reached Express', () => money.length === 22);
+        t.assert('twenty-eight /money routes reached Express', () => money.length === 28);
 
         /** The platform summary and the order money split, by path. */
         t.assert('...including the platform summary and the order split, named rather than counted', () =>
             ['/api/v1/money/earnings/platform/summary', '/api/v1/money/orders/:orderId/split']
                 .every((p) => money.some((r) => r.fullPath === p)));
+
+        /** The earnings pauses and clawbacks, by path. */
+        t.assert('...including the earnings pauses and clawbacks, named rather than counted', () =>
+            [
+                '/api/v1/money/earnings/pauses',
+                '/api/v1/money/earnings/pauses/:kind/:id',
+                '/api/v1/money/earnings/pauses/:kind/:id/pause',
+                '/api/v1/money/earnings/pauses/:kind/:id/resume',
+                '/api/v1/money/earnings/clawbacks',
+                '/api/v1/money/earnings/clawbacks/:ownerType/:ownerId/write-off',
+            ].every((p) => money.some((r) => r.fullPath === p)));
 
         /** The three delivery-fee refund routes, by path. */
         t.assert('...including the three delivery-fee refund routes, named rather than counted', () =>
