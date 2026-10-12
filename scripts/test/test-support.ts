@@ -49,10 +49,17 @@ import {
 import { snapshotOf } from '../../src/modules/support/domain/admin-snapshot';
 import { scopeFilter, TicketReadModel } from '../../src/modules/support/repositories/ticket.read.repository';
 import {
+    TicketActor,
+    TicketFollowerRead,
+    ticketActorKey,
+} from '../../src/modules/support/repositories/ticket-actor.read.repository';
+import {
+    actorRefsOf,
     assignmentStateOf,
     toTicketDetailDto,
     toTicketDto,
 } from '../../src/modules/support/read-models/ticket.dto';
+import { TIER_GRANTS } from '../../src/modules/authorization/domain/tier-grants';
 import {
     AddFollowerSchema,
     AssignTicketSchema,
@@ -390,11 +397,11 @@ t.assert('the DTO never re-derives the rules — it calls them', () => {
         && !/callerTier === 1/.test(dto);
 });
 
-t.assert('the detail adds description and nothing else', () => {
+t.assert('the detail adds description and followers, and nothing else', () => {
     const list = toTicketDto(ticket(null), { adminId: SUP, tier: 3 });
     const detail = toTicketDetailDto(ticket(null), { adminId: SUP, tier: 3 });
-    const extra = Object.keys(detail).filter((key) => !(key in list));
-    return extra.length === 1 && extra[0] === 'description';
+    const extra = Object.keys(detail).filter((key) => !(key in list)).sort();
+    return extra.join() === 'description,followers';
 });
 t.assert('a missing description maps to an empty string, never undefined', () =>
     toTicketDetailDto({ ...ticket(null), description: undefined } as TicketReadModel, { adminId: SUP, tier: 3 })
@@ -708,5 +715,141 @@ t.assert('...the HOLDER id, without which the line only says "something failed"'
 t.assert('...and the error itself', () => /err[:,]/.test(refreshCatch));
 t.assert('and no Prometheus counter was smuggled in — wi-admin has no registry (D-14)', () =>
     !files.some((f) => /prom-client|new Counter\(/.test(f.code)));
+
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('9. Who is on a ticket — a name and a number, not just a role (2026-10-10)');
+
+/**
+ * The support screen was handed `{ role, userId }` for the person who opened a ticket and no
+ * follower list at all. These pin the shape the dashboard now builds on: the looked-up fields
+ * are present on EVERY row and `null` when nothing was found — never an omitted key, which a
+ * client cannot tell from an older service.
+ */
+const oid = (hex: string) => ({ toString: () => hex });
+const CUSTOMER_USER = 'c'.repeat(24);
+const VENDOR_USER = 'd'.repeat(24);
+const SYSTEM_ACTOR = '000000000000000000000001';
+
+const actorMap = new Map<string, TicketActor>([
+    [ticketActorKey(CUSTOMER_USER, 'customer'), {
+        userId: CUSTOMER_USER, role: 'customer', profileId: 'customer-profile', name: 'Awa Ndiaye',
+        businessName: null, phone: '+237600000001', email: null,
+    }],
+    [ticketActorKey(VENDOR_USER, 'vendor'), {
+        userId: VENDOR_USER, role: 'vendor', profileId: 'vendor-profile', name: 'Paul Biya',
+        businessName: 'Chez Paul', phone: '+237600000002', email: 'paul@example.com',
+    }],
+]);
+
+const byCustomer = { ...ticket(null), created_by_user_id: oid(CUSTOMER_USER) } as unknown as TicketReadModel;
+const IDENTITY_KEYS = ['profileId', 'name', 'businessName', 'phone', 'email'];
+
+t.assert('createdBy carries the name, phone and user id of whoever opened it', () => {
+    const { createdBy } = toTicketDto(byCustomer, { adminId: SUP, tier: 3 }, undefined, actorMap);
+    return createdBy.userId === CUSTOMER_USER && createdBy.role === 'customer'
+        && createdBy.name === 'Awa Ndiaye' && createdBy.phone === '+237600000001'
+        && createdBy.profileId === 'customer-profile';
+});
+t.assert('...on the QUEUE too — the list handler resolves the page in one batch', () => {
+    const body = handlerBody('search') ?? '';
+    return body.includes('ticketActors.resolve(actorRefsOf(page.items))')
+        && body.includes('toTicketDto(ticket, identity, undefined, actors)');
+});
+t.assert('an unresolved creator keeps every identity key, as null — never an omitted key', () => {
+    const { createdBy } = toTicketDto(byCustomer, { adminId: SUP, tier: 3 });
+    return IDENTITY_KEYS.every((key) => key in createdBy && (createdBy as Record<string, unknown>)[key] === null)
+        && createdBy.userId === CUSTOMER_USER;
+});
+t.assert('assignedTo carries the same identity fields, null when routed to nobody', () => {
+    const { assignedTo } = toTicketDto(byCustomer, { adminId: SUP, tier: 3 }, undefined, actorMap);
+    return assignedTo.userId === null && IDENTITY_KEYS.every((key) => key in assignedTo);
+});
+t.assert('a ticket the platform opened is named from its stored snapshot — no account to look up', () => {
+    const bySystem = {
+        ...ticket(null), created_by_role: 'admin', created_by_user_id: oid(SYSTEM_ACTOR),
+        created_by_admin: { ...snapshot(SYSTEM_ACTOR, 1), name: 'Wi-Mall (automatic)' },
+    } as unknown as TicketReadModel;
+    const { createdBy } = toTicketDto(bySystem, { adminId: SUP, tier: 3 });
+    return createdBy.name === 'Wi-Mall (automatic)' && createdBy.phone === null
+        && createdBy.administrator?.name === 'Wi-Mall (automatic)';
+});
+
+const followerRows = [
+    { _id: oid('f1'), ticket_id: oid('ticket-1'), user_id: oid(CUSTOMER_USER), role: 'customer', source: 'creator', added_at: new Date(ISO) },
+    { _id: oid('f2'), ticket_id: oid('ticket-1'), user_id: oid(VENDOR_USER), role: 'vendor', source: 'order_party', added_at: new Date(ISO) },
+    { _id: oid('f3'), ticket_id: oid('ticket-1'), user_id: oid('e'.repeat(24)), role: 'agent' },
+] as unknown as TicketFollowerRead[];
+const followersOf = () =>
+    toTicketDetailDto(byCustomer, { adminId: SUP, tier: 3 }, undefined, actorMap, followerRows).followers;
+
+t.assert('the detail lists every follower, in the order read', () =>
+    followersOf().map((f) => f.role).join() === 'customer,vendor,agent');
+t.assert('a follower carries name, phone, user id — and the BUSINESS name apart from the person’s', () => {
+    const vendor = followersOf()[1];
+    return vendor.userId === VENDOR_USER && vendor.name === 'Paul Biya' && vendor.businessName === 'Chez Paul'
+        && vendor.phone === '+237600000002' && vendor.email === 'paul@example.com';
+});
+t.assert('...and WHY they follow, with the creator flagged as a fact', () => {
+    const [creator, vendor] = followersOf();
+    return creator.source === 'creator' && creator.isCreator && !creator.isAssignee
+        && vendor.source === 'order_party' && !vendor.isCreator && vendor.addedAt === ISO;
+});
+t.assert('a follower nobody can resolve is still listed — id and role, the rest null', () => {
+    const ghost = followersOf()[2];
+    return ghost.userId === 'e'.repeat(24) && ghost.name === null && ghost.phone === null
+        && ghost.source === null && ghost.addedAt === null;
+});
+t.assert('the current assignee is flagged', () => {
+    const routed = { ...byCustomer, assigned_to_role: 'vendor', assigned_to_user_id: oid(VENDOR_USER) } as unknown as TicketReadModel;
+    const dto = toTicketDetailDto(routed, { adminId: SUP, tier: 3 }, undefined, actorMap, followerRows);
+    return dto.followers[1].isAssignee && dto.assignedTo.businessName === 'Chez Paul';
+});
+t.assert('actorRefsOf names the creator, the routed-to actor and every follower', () => {
+    const routed = { ...byCustomer, assigned_to_role: 'vendor', assigned_to_user_id: oid(VENDOR_USER) } as unknown as TicketReadModel;
+    return actorRefsOf([routed], followerRows).length === 5;
+});
+
+/**
+ * The follower read is unscoped by itself (keyed on a ticket id), so it must only ever run on
+ * a ticket `loadScoped` already returned — the `withFileIds` contract, for the same reason.
+ */
+const actorRepoCode = pick('ticket-actor.read.repository.ts').code;
+
+t.assert('the detail is built AFTER the scope — never from a raw ticket id', () => {
+    const body = handlerBody('get') ?? '';
+    return body.indexOf('loadScoped(') !== -1 && body.indexOf('loadScoped(') < body.indexOf('detailOf(');
+});
+t.assert('the contact projection is three fields — no password_hash, no roles, no status', () =>
+    /super\(COLLECTIONS\.USER, \{ _id: 1, login_phone: 1, login_email: 1 \}\)/.test(actorRepoCode));
+t.assert('the profile projection is four fields — no KYC, no payout details, no addresses', () =>
+    actorRepoCode.includes('super(collection, { _id: 1, user_id: 1, name: 1, display_name: 1 })'));
+t.assert('the business name comes from the store / the magazin, never from display_name', () =>
+    actorRepoCode.includes('this.stores.findNamesByVendorIds(profileIds)')
+    && actorRepoCode.includes('this.agencies.findBusinessNamesByIds(profileIds)'));
+
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('10. Followers are managed by every tier, on any ticket they can see (2026-10-10)');
+
+/**
+ * Owner decision. The permission is held by all three tiers, and the two follower routes pass
+ * the SCOPE alone — not the "may act on this administrator's work" rule every other write
+ * passes. The two coincide today, so this pins a separation rather than a behaviour: the day
+ * `mayActOnTicket` narrows, followers must not narrow with it.
+ */
+for (const tier of [1, 2, 3] as const) {
+    t.assert(`tier ${tier} holds support.tickets.followers.manage`, () =>
+        TIER_GRANTS[tier].includes('support.tickets.followers.manage'));
+}
+for (const name of ['addFollower', 'removeFollower']) {
+    const body = handlerBody(name) ?? '';
+    t.assert(`${name} goes through the scope — a ticket the caller cannot see is still a 404`, () =>
+        body.includes('loadScoped('));
+    t.assert(`${name} does NOT apply the tier rule`, () => body.length > 0 && !body.includes('assertMayAct('));
+    t.assert(`${name} answers the refreshed detail, followers included`, () =>
+        body.includes('sendSuccess(res, await detailOf(ticket, identity))'));
+}
+t.assert('every OTHER ticket write still applies the tier rule', () =>
+    ['update', 'setStatus', 'setPriority', 'close', 'reopen', 'createNote', 'attachFile', 'deleteAttachment']
+        .every((name) => (handlerBody(name) ?? '').includes('assertMayAct(')));
 
 process.exit(t.finish());

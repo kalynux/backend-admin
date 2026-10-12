@@ -1,5 +1,7 @@
 # `/users` — platform user management
 
+**Amended 2026-10-10.** Three routes for the **customer's cash-on-delivery restriction** (owner decision): an administrator holding the new `users.cod.restrict` switches COD off for one customer, and back on. The customer profile on `GET /users/:userId` gains `codRestriction`. See [the section at the end](#the-customers-cod-restriction). Pinned by `npm run test:users` § 7b and § 9.
+
 **Amended 2026-10-04.** Three routes for **role closure** (jovi-mall ADR-A10): an administrator holding the new `users.close` asks a user to close ONE role, and the user confirms or declines it themselves. See [the section at the end](#role-closure). Pinned by `npm run test:users`.
 
 **Amended 2026-09-22.** A ninth route, `POST /users/:userId/bot-memory/reset`, was added under the new permission `users.bot_memory.reset`. It is the one write on this surface that **all three levels** hold. See [the section at the end](#the-customer-bots-memory). Checked against the route manifest and `tier-grants.ts`, and pinned by `npm run test:users` § 7–8.
@@ -27,6 +29,9 @@ Design record: [`../../docs/ADR-007-USER-MANAGEMENT.md`](../../docs/ADR-007-USER
 | `GET` | `/users/:userId/closure-requests` | `users.read` | direct read | — |
 | `POST` | `/users/:userId/roles/:role/closure` | `users.close` | **delegated** | ✅ |
 | `DELETE` | `/users/:userId/roles/:role/closure` | `users.close` | **delegated** | ✅ |
+| `GET` | `/users/:userId/cod-restriction` | `users.read` | **delegated** | — |
+| `PUT` | `/users/:userId/cod-restriction` | `users.cod.restrict` | **delegated** | ✅ |
+| `POST` | `/users/:userId/cod-restriction/lift` | `users.cod.restrict` | **delegated** | ✅ |
 
 Reads go straight to the platform database; every write is executed by jovi-mall. A suspension
 is only meaningful because jovi-mall's auth path refuses a non-active account, and a login
@@ -148,7 +153,8 @@ Every list field, plus `profiles`:
         "status": "active",
         "verified": null,
         "kycStatus": null,
-        "createdAt": "2026-02-14T10:05:31.400Z"
+        "createdAt": "2026-02-14T10:05:31.400Z",
+        "codRestriction": null
       },
       {
         "role": "agent",
@@ -171,6 +177,7 @@ One entry per role, in `roles` order.
 | `name` | string \| null | The display name on that role, when the role carries one |
 | `verified` | boolean \| null | Business verification — **vendor and agency only**; `null` where the role has none |
 | `kycStatus` | string \| null | Identity verification — **agent only** |
+| **`codRestriction`** | object \| null | **(2026-10-10) On the `customer` entry only.** `null`, or `{ reason, restrictedAt, restrictedByUserId, restrictedBySource, restrictedByName }` when an administrator has switched cash on delivery off for this customer ([below](#the-customers-cod-restriction)). ⚠ **The key is absent — not `null` — on a vendor, agency or agent entry, and on a `missing` one.** `null` means "not restricted"; an agency's restriction is on [`GET /agencies/:agencyId`](agencies.md#get-agenciesagencyid), and this read does not look at it. `reason` is the administrator's and is never shown to the customer |
 | `missing` | `true` | **Present only on a broken entry.** The role is on the `users` row but its entity does not exist — **this stops the person signing in**, and would otherwise be invisible |
 
 Render `missing: true` prominently. It is a real, recoverable-only-by-hand fault.
@@ -723,3 +730,117 @@ stored `pending` past `expiresAt` is reported `expired`. `warnings` are what the
 
 The user's confirm or decline is **not** an administrator action, so it has no row here. It is
 on the request itself (`status`, `resolvedAt`, `outcome`).
+
+---
+
+# The customer's COD restriction
+
+**(2026-10-10, owner decision.)** An administrator can switch **cash on delivery off** for one
+customer, and back on. It is the lever the Returns policy promises: refusing parcels without a
+valid reason "may lead us to restrict cash on delivery on your account". Dashboard brief:
+[`../FRONTEND-CHANGELOG-cod-restrictions.md`](../FRONTEND-CHANGELOG-cod-restrictions.md).
+
+**What a restriction does.** The customer can no longer **place** a cash-on-delivery order.
+jovi-mall refuses it at checkout (`422 COD_CUSTOMER_RESTRICTED`) and the cart quote reports
+`customer_restricted`, so the website and the bot stop offering it.
+
+**What it does not touch.** Orders already placed, parcels already on their way, and the cash
+owed on them. Every other payment method. Nothing sets it automatically — it is an
+administrator's decision each time — and with nothing recorded, COD behaves as it always did.
+
+⚠ **Customers only.** The restriction lives on the *customer profile*. An account that does not
+hold the `customer` role has none, and all three routes answer
+`404 PLATFORM_OPERATION_REJECTED` with `details.platformCode: "AUTH_PROFILE_NOT_FOUND"`. Show
+the switch only when `roles` includes `customer`.
+
+| | |
+|---|---|
+| **Read** | `users.read` — every level, Support included |
+| **Write** | `users.cod.restrict` — **Developer and Admin. Support does not hold it.** Unflagged, like `users.suspend`, and granted the same way; no dual control |
+| **Transport** | Delegated to `/api/internal/admin/users/:userId/cod-restriction` |
+
+## `GET /users/:userId/cod-restriction`
+
+```json
+{
+  "success": true,
+  "data": {
+    "subject": "customer",
+    "subjectId": "665f1c2a9b3e4a91c7d2e5f1",
+    "userId": "665f1c2a9b3e4a91c7d2e5f0",
+    "restricted": true,
+    "restriction": {
+      "reason": "Refused three parcels without a reason",
+      "restrictedAt": "2026-10-10T09:30:00.000Z",
+      "restrictedByUserId": "66b0…",
+      "restrictedBySource": "admin",
+      "restrictedByName": "Ada Admin"
+    }
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `subject` | Always `"customer"` on this mount |
+| `subjectId` | The **customer profile's** id — `profiles[].id` of the customer entry, **not** the `:userId` in the path |
+| `userId` | The account — the `:userId` in the path |
+| `restricted` | `true` while cash on delivery is switched off |
+| `restriction` | `null` when not restricted. Otherwise the reason, when, and the acting administrator — `restrictedByUserId` is a **wi-admin administrator id** |
+
+Exactly these fields. Not audited. The same record is on the detail as the customer entry's
+[`codRestriction`](#the-profiles-array), read directly, so a badge needs no second call.
+
+## `PUT /users/:userId/cod-restriction`
+
+Switch cash on delivery **off** for the customer.
+
+```json
+{ "reason": "Refused three parcels without a reason" }
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `reason` | string | **Required.** Trimmed, 3–500 characters. Stored on the restriction (jovi-mall) **and** in the audit payload. Never shown to the customer |
+
+`.strict()` — `reason` is the only key. ⚠ There is **no `restricted` field**: the direction is
+the route. Answers the same body as the GET.
+
+## `POST /users/:userId/cod-restriction/lift`
+
+Switch cash on delivery back **on**.
+
+```json
+{ "reason": "Customer explained; the parcels were damaged" }
+```
+
+`reason` is **required here too** (trimmed, 3–500, `.strict()`) — unlike `/restore`, which takes
+no body. Lifting **clears** the stored restriction in jovi-mall, so the reason given for lifting
+survives only in the audit row. Answers the report with `restricted: false` and
+`restriction: null`.
+
+### Errors (both writes; the 404s apply to the read too)
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | A malformed user id, a missing or out-of-range `reason`, or any other key |
+| 403 | `AUTHZ_PERMISSION_DENIED` | The caller lacks `users.cod.restrict` — every Support administrator does |
+| 404 | `NOT_FOUND` | No such user. Checked here before jovi-mall is called |
+| 404 | `PLATFORM_OPERATION_REJECTED` | The account has **no customer profile**. `details.platformCode` is `AUTH_PROFILE_NOT_FOUND`. On a write it is answered by the read that precedes it, so **no audit row is written** — nothing was attempted |
+| 409 | `PLATFORM_OPERATION_REJECTED` | The customer is **already in that state** — already restricted on the PUT, not restricted on `/lift`. jovi-mall's write is a compare-and-set. `details.platformCode` is `COD_RESTRICTION_UNCHANGED`. Re-read and show what is there |
+| 500 | `INTERNAL_SERVER_ERROR` | The audit trail could not record the attempt. **Nothing changed** — jovi-mall is not called until the audit row exists |
+| 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | jovi-mall failed or is unreachable. A write is never retried automatically; re-read before pressing again |
+
+A **suspended or closed** account is not refused by either service: jovi-mall checks that the
+user and its customer profile exist, and nothing else.
+
+### Audit
+
+| Action | Sensitive | Records |
+|---|---|---|
+| `users.cod.restrict` | — | The actor, the target user, the `reason`, the outcome, and `before` / `after` as `{ codRestricted }` — `false → true` |
+| `users.cod.unrestrict` | — | The same, `true → false`. Its **own** action although it shares the permission: lifting clears the record in jovi-mall, so this row is the only surviving trace of the restriction and of why it was lifted |
+
+Both target the **user** (not the customer profile), so they appear in
+`GET /users/:userId/activity` beside every other act on the account. The row is written
+**before** jovi-mall is called; if it cannot be written, nothing changes.

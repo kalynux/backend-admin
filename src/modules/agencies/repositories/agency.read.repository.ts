@@ -4,6 +4,7 @@ import { containsInsensitive, toMongoSort } from '../../../core/data/mongo-list'
 import { ListQueryBase } from '../../../core/http/list-query';
 import { COLLECTIONS } from '../../../infra/platform/collections';
 import { Paginated, PlatformReadRepository } from '../../../infra/platform/platform.repository';
+import { StoredCodRestriction } from '../../cod/read-models/cod-restriction.dto';
 import { AGENCY_SORT } from '../validators/agency.validator';
 
 /**
@@ -55,6 +56,8 @@ export interface AgencyReadModel extends Document {
     policies?: Record<string, unknown> | null;
     assignment_settings?: { auto_assign_enabled?: boolean };
     policy_version?: number;
+    /** Detail only. `null` or absent = cash on delivery is not restricted. */
+    cod_restriction?: StoredCodRestriction | null;
     timezone?: string;
     preferred_language?: string;
     created_at: Date;
@@ -126,6 +129,15 @@ const AGENCY_DETAIL_EXTRAS = {
     policy_version: 1,
     timezone: 1,
     preferred_language: 1,
+    // The administrator's COD restriction (2026-10-10), so the detail can show a badge
+    // without a second call. Enumerated like `kyc_details` above. An agency that was never
+    // restricted has no such field, and a lifted one holds `null`; both project to nothing,
+    // which `toCodRestrictionDto` reads as not restricted.
+    'cod_restriction.reason': 1,
+    'cod_restriction.restricted_at': 1,
+    'cod_restriction.restricted_by_user_id': 1,
+    'cod_restriction.restricted_by_source': 1,
+    'cod_restriction.restricted_by_name': 1,
 } as const;
 
 /**

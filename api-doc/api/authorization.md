@@ -67,15 +67,15 @@ Every permission that exists, with its metadata.
         "phase": 5
       }
     ],
-    "total": 118
+    "total": 142
   }
 }
 ```
 
 | Field | Type | Notes |
 |---|---|---|
-| `families[]` | array | The 21 families in declaration order, each listing its permission names |
-| `permissions[]` | array | All 124 permissions |
+| `families[]` | array | The 23 families in declaration order, each listing its permission names |
+| `permissions[]` | array | All 142 permissions (re-measured 2026-10-10 — `npm run authz:matrix`; this row read 124 across 21 families until then, both stale) |
 | `permissions[].action` | `"read"` \| `"write"` \| `"approve"` | |
 | `permissions[].summary` | string | Written for an administrator, not an engineer — safe to render in a UI |
 | `permissions[].financial` etc. | boolean | The four sensitivity flags. **The dual-control *predicate* is never exposed** — only whether one exists |

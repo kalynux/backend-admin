@@ -4,20 +4,22 @@ import { createAppError } from '../../../core/errors/app-error';
 import { ERROR_CODES } from '../../../core/errors/error-codes';
 import { sendCreated, sendPaginated, sendSuccess } from '../../../core/http/responses';
 import { requestLogger } from '../../../core/logging/logger';
-import { requireAdminIdentity } from '../../admin-identity/domain/admin-identity.types';
+import { AdminTier, requireAdminIdentity } from '../../admin-identity/domain/admin-identity.types';
 import { AdminAccountRepository } from '../../admin-identity/repositories/admin-account.repository';
 import { actorContextOf } from '../../audit/domain/audit-context';
 import { resolveScope } from '../../authorization/domain/resource-scope';
 import { assignableTiers, mayActOnTicket, mayClaim } from '../domain/assignment-authority';
 import { snapshotOf } from '../domain/admin-snapshot';
 import * as gateway from '../gateways/ticket.gateway';
+import { TicketActorReadRepository, TicketFollowerReadRepository } from '../repositories/ticket-actor.read.repository';
 import { TicketEntityReadRepository } from '../repositories/ticket-entity.read.repository';
 import {
     TicketAttachmentFileReadRepository,
     TicketAttachmentReadRepository,
+    TicketReadModel,
     TicketReadRepository,
 } from '../repositories/ticket.read.repository';
-import { assignmentStateOf, toTicketDetailDto, toTicketDto } from '../read-models/ticket.dto';
+import { actorRefsOf, assignmentStateOf, toTicketDetailDto, toTicketDto } from '../read-models/ticket.dto';
 import {
     AddFollowerBody,
     AssignTicketBody,
@@ -64,6 +66,9 @@ const attachmentFiles = new TicketAttachmentFileReadRepository();
 const accounts = new AdminAccountRepository();
 /** Makes `about` navigable — one read on the DETAIL only. See the repository's header. */
 const ticketEntities = new TicketEntityReadRepository();
+/** Who opened it, who it was routed to, who follows it — name, phone, e-mail. Batched. */
+const ticketActors = new TicketActorReadRepository();
+const ticketFollowers = new TicketFollowerReadRepository();
 
 /** The caller's own snapshot, for the assigner stamp and the D-10 refresh. */
 async function callerSnapshot(adminId: string) {
@@ -111,6 +116,28 @@ function assertMayAct(req: Request, ticket: Parameters<typeof assignmentStateOf>
 }
 
 /**
+ * The ticket as the detail screen reads it: `about` made navigable, and everyone on it —
+ * creator, routed-to actor, followers — resolved to a name and a number.
+ *
+ * Shared by `GET /:ticketId` and the two follower writes, which answer the same shape so
+ * the screen can redraw the follower list from the write's own response. The follower rows
+ * are read HERE, after the write, never passed in: the ticket row a caller loaded before
+ * delegating does not change when a follower does, but the follower list just did.
+ *
+ * Every caller reaches this through `loadScoped`, which is what makes the unscoped follower
+ * read below safe — same contract as `withFileIds`.
+ */
+async function detailOf(ticket: TicketReadModel, identity: { adminId: string; tier: AdminTier }) {
+    const [entity, followers] = await Promise.all([
+        ticketEntities.resolve(ticket.entity_type, ticket.entity_id),
+        ticketFollowers.findByTicket(ticket._id.toString()),
+    ]);
+    const actors = await ticketActors.resolve(actorRefsOf([ticket], followers));
+
+    return toTicketDetailDto(ticket, identity, entity, actors, followers);
+}
+
+/**
  * Stamp each delegated attachment row with `fileId` — the id of the File it points at.
  *
  * ── Why the list is delegated but this field is not ───────────────────────────
@@ -150,9 +177,14 @@ export class SupportTicketController {
 
         const page = await tickets.search(query, resolveScope(identity, 'tickets'), identity.adminId);
 
+        // WHO opened each row, by name and number — the queue used to say "customer" and stop.
+        // One batch for the page (a query per role present), unlike `entity`, which stays
+        // unresolved here because it would be a read per row.
+        const actors = await ticketActors.resolve(actorRefsOf(page.items));
+
         sendPaginated(
             res,
-            page.items.map((ticket) => toTicketDto(ticket, identity)),
+            page.items.map((ticket) => toTicketDto(ticket, identity, undefined, actors)),
             { total: page.total, page: page.page, limit: page.limit, pages: page.pages },
         );
     });
@@ -169,9 +201,8 @@ export class SupportTicketController {
      */
     static get = asyncHandler(async (req: Request, res: Response) => {
         const { identity, ticket } = await loadScoped(req, req.params.ticketId);
-        const entity = await ticketEntities.resolve(ticket.entity_type, ticket.entity_id);
 
-        sendSuccess(res, toTicketDetailDto(ticket, identity, entity));
+        sendSuccess(res, await detailOf(ticket, identity));
     });
 
     static create = asyncHandler(async (req: Request, res: Response) => {
@@ -312,26 +343,46 @@ export class SupportTicketController {
         sendSuccess(res, updated);
     });
 
+    /**
+     * Followers are managed by EVERY tier, on every ticket the caller can see (owner
+     * decision, 2026-10-10).
+     *
+     * ── No `assertMayAct`, and that is the decision rather than an omission ───────
+     * Every other write here passes the scope and then the tier rule. These two pass the
+     * scope alone. Who follows a ticket is not "an administrator's work" in the sense that
+     * rule protects — it changes neither who holds the ticket nor its state — and letting
+     * the vendor or the customer into a conversation should not wait for whoever holds it.
+     *
+     * Today the two checks happen to coincide (`mayActOnTicket` mirrors the scope), so
+     * dropping the second changes no outcome. It is dropped anyway so the rules stay
+     * separate if they ever stop coinciding: a narrower "may act" must not quietly take
+     * followers with it. `test:support` § 10 pins the absence.
+     *
+     * The scope is NOT lifted. A ticket the caller cannot see is still a 404.
+     *
+     * Both answer the refreshed detail — the same shape as `GET /:ticketId`, `followers`
+     * included — so the screen redraws the list from the write's own response.
+     */
     static addFollower = asyncHandler(async (req: Request, res: Response) => {
-        const { ticket } = await loadScoped(req, req.params.ticketId);
-        assertMayAct(req, ticket);
+        const { identity, ticket } = await loadScoped(req, req.params.ticketId);
 
         const body = req.body as AddFollowerBody;
-        const updated = await gateway.addFollower(req.params.ticketId, body, ticket, actorContextOf(req));
-        sendSuccess(res, updated);
+        await gateway.addFollower(req.params.ticketId, body, ticket, actorContextOf(req));
+
+        sendSuccess(res, await detailOf(ticket, identity));
     });
 
     static removeFollower = asyncHandler(async (req: Request, res: Response) => {
-        const { ticket } = await loadScoped(req, req.params.ticketId);
-        assertMayAct(req, ticket);
+        const { identity, ticket } = await loadScoped(req, req.params.ticketId);
 
-        const updated = await gateway.removeFollower(
+        await gateway.removeFollower(
             req.params.ticketId,
             req.params.userId,
             ticket,
             actorContextOf(req),
         );
-        sendSuccess(res, updated);
+
+        sendSuccess(res, await detailOf(ticket, identity));
     });
 
     static listNotes = asyncHandler(async (req: Request, res: Response) => {

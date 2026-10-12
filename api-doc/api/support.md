@@ -140,6 +140,11 @@ Applied to a ticket the scope already returned, so a refusal here is a `403` and
 | **2 Admin** | their own, the unassigned pool, and anything a **Tier 3** holds |
 | **3 Support** | their own, and the unassigned pool |
 
+**One exception: followers.** Adding and removing a ticket's followers passes the scope and
+**skips this lock** — every tier may do it on any ticket they can see (2026-10-10). The two
+tables above are identical today, so no request changes its answer; the lock is skipped so that
+follower management stays open to all tiers if this table is ever narrowed.
+
 ### The assignment authority — who may hand it to whom
 
 | Caller | May assign to |
@@ -273,15 +278,29 @@ customer is normally filed against instead.
       "status": "open",
       "priority": "high",
       "priorityLocked": true,
+      "holdsEarnings": false,
       "importance": "normal",
       "entity": { "type": "ORDER", "id": "6670aabbccddeeff00112233", "vendorId": null, "label": null },
       "trackingNumber": "JM-2026-118842",
       "createdBy": {
         "role": "customer",
         "userId": "665f1c2a9b3e4a91c7d2e5f0",
+        "profileId": "665f1c2a9b3e4a91c7d2e5f1",
+        "name": "Awa Ndiaye",
+        "businessName": null,
+        "phone": "+237600000001",
+        "email": null,
         "administrator": null
       },
-      "assignedTo": { "role": "agency", "userId": "6650aa11bb22cc33dd44ee55" },
+      "assignedTo": {
+        "role": "agency",
+        "userId": "6650aa11bb22cc33dd44ee55",
+        "profileId": "6650aa11bb22cc33dd44ee56",
+        "name": "Jean Mbarga",
+        "businessName": "Rapide Livraison",
+        "phone": "+237600000003",
+        "email": "contact@rapide.example"
+      },
       "assignment": {
         "admin": {
           "id": "66b0000000000000000000a1",
@@ -314,8 +333,10 @@ customer is normally filed against instead.
 | Field | Notes |
 |---|---|
 | `priorityLocked` | jovi-mall's own flag: once an administrator sets a priority, the requester can no longer change it |
+| `holdsEarnings` | 🆕 2026-10-10. `true` while this ticket keeps its order’s or booking’s earnings **paused**: the customer reported a problem before the money was released (pause reason `customer_problem_reported`). **Resolving or closing it as an administrator lifts the pause, and a later ticket on the same purchase then no longer pauses it** — confirm before either. See [`FRONTEND-CHANGELOG-wi-mall-protection.md`](../FRONTEND-CHANGELOG-wi-mall-protection.md) |
+| **`createdBy`** | 🆕 2026-10-10. **Who opened the ticket, as a person** — `userId`, `name`, `phone`, `email`, `businessName`, `profileId`. It used to be `role` + `userId` alone. See [The people on a ticket](#the-people-on-a-ticket) |
 | `createdBy.administrator` | The **full** admin snapshot when an administrator opened the ticket on somebody's behalf, `null` otherwise. Same shape as `assignment.admin` |
-| `assignedTo` | ⚠ **The platform actor the ticket was routed to** — a vendor, agency or agent. **This is not the administrator handling it.** That is `assignment` |
+| `assignedTo` | ⚠ **The platform actor the ticket was routed to** — a vendor, agency or agent. **This is not the administrator handling it.** That is `assignment`. 🆕 Carries the same identity fields as `createdBy`; all `null` when it was routed to nobody |
 | `assignment` | `null` means the **unassigned pool** — a real state, not missing data |
 | `assignment.assignedBy` | `null` when the ticket was **claimed** rather than handed over. The tier rules read its `tier` |
 | `availableActions` | What **this caller** may do, derived from the same authority table the service enforces with |
@@ -324,6 +345,40 @@ customer is normally filed against instead.
 
 `description` is deliberately **absent from the list** — up to 700 characters of customer free
 text, a hundred of them per page. [`GET /:ticketId`](#get-supportticketsticketid) adds it.
+
+#### The people on a ticket
+
+🆕 2026-10-10. Every person a ticket names — **`createdBy`**, **`assignedTo`**, and each entry of
+**`followers`** on the detail — is one shape:
+
+| Field | Notes |
+|---|---|
+| `role` | `customer` · `vendor` · `agency` · `agent` · `admin`. From the ticket; always present |
+| `userId` | The **`users._id`** — what `/users/:userId` takes. For `role: "admin"` it is an administrator id instead (see below). From the ticket; always present on a follower |
+| `name` | ⚠ **The person.** A customer's or agent's own name; for a vendor or an agency, the **contact person** |
+| `businessName` | ⚠ **The shop or the agency** — `stores.name` / the agency's Magazin. `null` for a customer and an agent, and for a vendor with no shop yet |
+| `phone` | The account's sign-in number, E.164. `null` when the account has none |
+| `email` | The account's sign-in e-mail. `null` when it has none — common, a customer can register by phone alone |
+| `profileId` | The role's own id — `vendors._id`, `delivery_agencies._id`, `delivery_agents._id`, `customers._id`. It is what `/vendors/:id`, `/agencies/:id` and `/agents/:id` take, which `userId` is **not** |
+
+**Everything from `name` down is looked up, and is `null` when the lookup finds nothing** — a
+deleted profile, a closed and anonymised account. The keys are always present; render the id and
+the role in that case rather than hiding the row.
+
+**Do not print `name` under a heading that says "Vendor" or "Agency".** For those two roles show
+`businessName` as the title and `name` as the contact line; fall back to `name` only when
+`businessName` is `null`.
+
+**`role: "admin"`** is an administrator of this service, or the platform itself ("Wi-Mall
+(automatic)") on a ticket it opened on its own — a refund owed, a payment dispute. It has a
+`name` and **no** `phone`, `email`, `profileId` or `businessName`: an administrator is not a
+platform user. On `createdBy`, the fuller answer is the `administrator` block beside it.
+
+The phone and e-mail are the ones `/users` already returns under `users.read`, which all three
+tiers hold; nothing here is visible to a tier that could not already look it up.
+
+**Cost.** The queue resolves a whole page in one batch — one read per role present, never one per
+row — so, unlike `entity`, these fields **are** filled on the list.
 
 #### The administrator snapshot, in full
 
@@ -347,8 +402,8 @@ could disagree.
 
 ### Response (200)
 
-The list item **plus `description`**, and with **`entity` resolved** — the two differences from
-the queue row. Same mapper, same projection.
+The list item **plus `description`** and **`followers`**, and with **`entity` resolved** — the
+three differences from the queue row. Same mapper, same projection.
 
 ```jsonc
 {
@@ -358,15 +413,56 @@ the queue row. Same mapper, same projection.
     "subject": "Parcel marked delivered but never arrived",
     "description": "The agent marked it delivered at 14:02 but nobody was home…",
     "entity": {
-      "type": "PRODUCT",
-      "id": "66601122334455667788990a",
-      "vendorId": "6650aa11bb22cc33dd44ee55",
-      "label": "Plantain — 1 kg"
+      "type": "ORDER",
+      "id": "6670aabbccddeeff00112233",
+      "vendorId": null,
+      "label": "WM-2026-004512"
     },
+    "createdBy": {
+      "role": "customer", "userId": "665f1c2a9b3e4a91c7d2e5f0", "profileId": "665f1c2a9b3e4a91c7d2e5f1",
+      "name": "Awa Ndiaye", "businessName": null, "phone": "+237600000001", "email": null,
+      "administrator": null
+    },
+    "followers": [
+      {
+        "role": "customer", "userId": "665f1c2a9b3e4a91c7d2e5f0", "profileId": "665f1c2a9b3e4a91c7d2e5f1",
+        "name": "Awa Ndiaye", "businessName": null, "phone": "+237600000001", "email": null,
+        "source": "creator", "addedAt": "2026-08-17T08:12:00.000Z", "isCreator": true, "isAssignee": false
+      },
+      {
+        "role": "vendor", "userId": "6640aa11bb22cc33dd44ee01", "profileId": "6640aa11bb22cc33dd44ee02",
+        "name": "Paul Etoa", "businessName": "Chez Paul", "phone": "+237600000002", "email": "paul@chezpaul.example",
+        "source": "order_party", "addedAt": "2026-08-17T08:12:00.000Z", "isCreator": false, "isAssignee": false
+      },
+      {
+        "role": "agent", "userId": "6630aa11bb22cc33dd44ee03", "profileId": "6630aa11bb22cc33dd44ee04",
+        "name": "Moussa Diallo", "businessName": null, "phone": "+237600000004", "email": null,
+        "source": "order_party", "addedAt": "2026-08-17T15:40:00.000Z", "isCreator": false, "isAssignee": false
+      }
+    ],
     "…": "…"
   }
 }
 ```
+
+#### `followers`
+
+🆕 2026-10-10. Everyone following the ticket, **oldest first**, each in
+[the people shape](#the-people-on-a-ticket) plus:
+
+| Field | Notes |
+|---|---|
+| `source` | Why they follow. `creator` · `assignee` (the ticket was routed to them) · `order_party` (added automatically as the vendor, an agency or an agent of the order the ticket is about) · `admin` (an administrator added them). **`null` on a row written before 2026-10-09**, which recorded no reason |
+| `addedAt` | When. `null` only on a malformed legacy row |
+| `isCreator` | This follower opened the ticket |
+| `isAssignee` | This follower is the actor in `assignedTo` |
+
+**The remove button.** jovi-mall refuses to remove the **creator**, the **current assignee** and
+an **`admin`** follower (`403`, relayed as `PLATFORM_OPERATION_REJECTED` with
+`details.platformCode: TICKET_ACCESS_DENIED`). Hide the button when `isCreator`, `isAssignee` or
+`role === "admin"`; everyone else is removable.
+
+`followers` is on the **detail only**. The queue row does not carry it.
 
 #### Making `about` navigable
 
@@ -647,6 +743,50 @@ Followers are **platform actors**, not administrators. The four-value enum is pi
 because `admin` must not be expressible: an administrator's relationship to a ticket is the
 assignment, and a private note's visibility list is computed from the *follower* rows.
 
+A follower sees the ticket in their own app and reads its **public** notes and attachments.
+
+### Who may do it — every tier
+
+Developer, Admin and Support all hold `support.tickets.followers.manage`, and this route (with
+its `DELETE` twin) applies the **scope only**: any administrator may add or remove a follower on
+**any ticket they can see**, whoever holds it. It is the one pair of ticket writes that does
+**not** pass the [assignment lock](#the-assignment-lock--who-may-act) — who follows a ticket
+changes neither who holds it nor its state (owner decision, 2026-10-10).
+
+A ticket outside your scope is still `404 TICKET_NOT_FOUND`; the scope is not lifted.
+
+### Response (200)
+
+🆕 2026-10-10. **The refreshed ticket detail** — exactly the shape of
+[`GET /support/tickets/:ticketId`](#get-supportticketsticketid), `followers` included, read after
+the write. Redraw the follower list from it; no second call is needed. (Before 2026-10-09 this
+answered `data: undefined`.)
+
+### Rules (jovi-mall's, since 2026-10-09)
+
+- **Not capped.** A follower an administrator adds does not count toward jovi-mall's 5-non-admin
+  limit and is accepted even when it is full.
+- **Checked.** The user must exist and hold `role`. Before 2026-10-09 any id was written.
+- **Idempotent.** Adding someone already following answers 200 and changes nothing.
+- **Lifts a removal.** An earlier `DELETE` of this user is forgotten (see below).
+
+### Order parties are already on it
+
+A ticket **about an order** (entity type `ORDER`, or `SHIPMENT`) is followed automatically by the
+order's vendor and every agency and agent on its shipments — at creation, when an agent accepts,
+when the items move agency, and on reopen. Those rows do not count toward the limit either. So
+this route is for anyone *else*: the customer on a ticket a party opened, a party of a different
+order, and so on. Full rules: jovi-mall `api-doc/admin/tickets.md` § *Order parties follow
+automatically*.
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 404 | `TICKET_NOT_FOUND` | Out of your scope, or no such ticket |
+| 404 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: USER_NOT_FOUND` — no platform user has this id |
+| 422 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: TICKET_FOLLOWER_ROLE_MISMATCH` — the user does not hold `role` (`details.roles` lists what they do hold) |
+
 ### Audit
 
 `support.tickets.followers.add`
@@ -660,7 +800,27 @@ assignment, and a private note's visibility list is computed from the *follower*
 | **Permission** | `support.tickets.followers.manage` |
 | **Transport** | **delegated** |
 
-Both path parameters must be 24-hex.
+Both path parameters must be 24-hex. `userId` is the follower's `userId` from the detail.
+
+**Every tier**, on any ticket they can see — the same rule as the `POST` above, and likewise
+exempt from the assignment lock.
+
+### Response (200)
+
+The refreshed ticket detail, `followers` included — the same shape as
+[`GET /support/tickets/:ticketId`](#get-supportticketsticketid).
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 404 | `TICKET_NOT_FOUND` | Out of your scope, or no such ticket |
+| 404 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: TICKET_NOT_FOUND` — that user does not follow this ticket |
+| 403 | `PLATFORM_OPERATION_REJECTED` | `details.platformCode: TICKET_ACCESS_DENIED` — the follower is the ticket's **creator**, its **current assignee**, or an **`admin`** follower. None of the three can be removed; hide the button on `isCreator`, `isAssignee` and `role === "admin"` |
+
+**A removal is remembered.** jovi-mall records it on the ticket, and its automatic order-party
+sync never re-adds that user — so removing an order's agency is not undone the next time an agent
+accepts a shipment on that order. Adding the user back with `POST` clears it.
 
 ### Audit
 

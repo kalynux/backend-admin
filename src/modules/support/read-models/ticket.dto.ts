@@ -1,5 +1,6 @@
 import { AdminTier } from '../../admin-identity/domain/admin-identity.types';
 import { assignableTiers, mayClaim, TicketAssignmentState } from '../domain/assignment-authority';
+import { TicketActor, TicketFollowerRead, ticketActorKey } from '../repositories/ticket-actor.read.repository';
 import { TicketEntityRef } from '../repositories/ticket-entity.read.repository';
 import { AdminSnapshotRead, TicketReadModel } from '../repositories/ticket.read.repository';
 
@@ -50,6 +51,51 @@ export interface TicketAssignmentDto {
     assignedAt: string;
 }
 
+/**
+ * One person on a ticket — who opened it, who it was routed to, who follows it (2026-10-10).
+ *
+ * The screen used to be handed a role and an id and nothing else. `userId` and `role` come
+ * from the ticket and are always present; everything after them is LOOKED UP, and is `null`
+ * when the lookup finds nothing — a deleted profile, a closed and anonymised account, a
+ * vendor mid-onboarding with no shop yet. Render the id in that case; do not hide the row.
+ *
+ * ⚠ `name` is the PERSON and `businessName` is the shop or the agency. For a vendor or an
+ * agency both are usually set and they are different things; a customer and an agent have
+ * no `businessName`. Showing `name` under a heading that says "Vendor" prints a human where
+ * a business belongs.
+ *
+ * An `admin` actor is an administrator of this service or the platform's automatic
+ * identity: it has a `name` and no phone, e-mail, profile or business.
+ */
+export interface TicketActorDto {
+    role: string;
+    /** `users._id` for a platform actor; an `admin_accounts` id for `role: 'admin'`. */
+    userId: string;
+    /** The role entity's own id (`vendors._id`, `delivery_agents._id`, …) — what that role's detail route takes. */
+    profileId: string | null;
+    name: string | null;
+    businessName: string | null;
+    phone: string | null;
+    email: string | null;
+}
+
+export interface TicketFollowerDto extends TicketActorDto {
+    /**
+     * Why they follow: `creator` · `assignee` · `order_party` (added automatically as a party
+     * of the order the ticket is about) · `admin` (added by an administrator). `null` on a row
+     * written before 2026-10-09, which recorded no reason.
+     */
+    source: string | null;
+    addedAt: string | null;
+    /**
+     * FACTS, not permissions. jovi-mall refuses to remove the creator, the current assignee
+     * and an `admin` follower (`403 TICKET_ACCESS_DENIED`); these are the inputs to that rule,
+     * so the screen can hide the remove button without this service keeping a second copy of it.
+     */
+    isCreator: boolean;
+    isAssignee: boolean;
+}
+
 export interface TicketDto {
     id: string;
     subject: string;
@@ -57,6 +103,13 @@ export interface TicketDto {
     status: string;
     priority: string;
     priorityLocked: boolean;
+    /**
+     * This ticket keeps its order's or booking's earnings PAUSED (2026-10-10): the customer
+     * reported a problem while the money was still held. Resolving or closing the ticket as an
+     * administrator lifts the pause, and that is final for the purchase — so the dashboard
+     * confirms before either. See `FRONTEND-CHANGELOG-wi-mall-protection.md`.
+     */
+    holdsEarnings: boolean;
     importance: string;
     /**
      * What the ticket is about — `(type, id)`, polymorphic.
@@ -95,9 +148,18 @@ export interface TicketDto {
         label: string | null;
     };
     trackingNumber: string | null;
-    createdBy: { role: string; userId: string | null; administrator: AdminSnapshotDto | null };
-    /** The platform actor a ticket was routed to, which is NOT the administrator holding it. */
-    assignedTo: { role: string | null; userId: string | null };
+    /**
+     * Who opened it. `administrator` is set — and is the fuller answer — when an administrator
+     * or the platform itself did; the identity fields beside it then carry the same name and
+     * nothing else.
+     */
+    createdBy: Omit<TicketActorDto, 'userId'> & { userId: string | null; administrator: AdminSnapshotDto | null };
+    /**
+     * The platform actor a ticket was routed to, which is NOT the administrator holding it.
+     * Every field is `null` when it was routed to nobody, or to the admin pool (`role: 'admin'`,
+     * no `userId`).
+     */
+    assignedTo: Omit<TicketActorDto, 'role' | 'userId'> & { role: string | null; userId: string | null };
     /** Null means the unassigned pool — a real state, not missing data. */
     assignment: TicketAssignmentDto | null;
     /**
@@ -116,6 +178,53 @@ export interface TicketDto {
 
 export interface TicketDetailDto extends TicketDto {
     description: string;
+    /**
+     * Everyone following the ticket, oldest first — the detail only. A follower sees the
+     * ticket in their own app and reads its public notes.
+     */
+    followers: TicketFollowerDto[];
+}
+
+/** Nobody resolved — every looked-up field renders `null`. */
+const NO_ACTORS: ReadonlyMap<string, TicketActor> = new Map();
+
+type TicketActorIdentity = Pick<TicketActorDto, 'profileId' | 'name' | 'businessName' | 'phone' | 'email'>;
+
+/** The looked-up half of an actor, or all-`null` when nothing was found. */
+function identityOf(
+    userId: string | null,
+    role: string | null,
+    actors: ReadonlyMap<string, TicketActor>,
+): TicketActorIdentity {
+    const actor = userId && role ? actors.get(ticketActorKey(userId, role)) : undefined;
+
+    return {
+        profileId: actor?.profileId ?? null,
+        name: actor?.name ?? null,
+        businessName: actor?.businessName ?? null,
+        phone: actor?.phone ?? null,
+        email: actor?.email ?? null,
+    };
+}
+
+/** Every `(userId, role)` a set of tickets names — what the controller hands the resolver. */
+export function actorRefsOf(
+    tickets: readonly TicketReadModel[],
+    followers: readonly TicketFollowerRead[] = [],
+): { userId: string; role: string }[] {
+    const refs: { userId: string; role: string }[] = [];
+    for (const ticket of tickets) {
+        if (ticket.created_by_user_id) {
+            refs.push({ userId: ticket.created_by_user_id.toString(), role: ticket.created_by_role });
+        }
+        if (ticket.assigned_to_user_id && ticket.assigned_to_role) {
+            refs.push({ userId: ticket.assigned_to_user_id.toString(), role: ticket.assigned_to_role });
+        }
+    }
+    for (const follower of followers) {
+        refs.push({ userId: follower.user_id.toString(), role: follower.role });
+    }
+    return refs;
 }
 
 function toSnapshotDto(snapshot: AdminSnapshotRead | null | undefined): AdminSnapshotDto | null {
@@ -155,9 +264,15 @@ export function toTicketDto(
     ticket: TicketReadModel,
     caller: { adminId: string; tier: AdminTier },
     entity: TicketEntityRef = UNRESOLVED_ENTITY,
+    actors: ReadonlyMap<string, TicketActor> = NO_ACTORS,
 ): TicketDto {
     const state = assignmentStateOf(ticket);
     const assignment = ticket.admin_assignment ?? null;
+
+    const creatorId = ticket.created_by_user_id?.toString() ?? null;
+    const creator = identityOf(creatorId, ticket.created_by_role, actors);
+    const creatorSnapshot = toSnapshotDto(ticket.created_by_admin);
+    const assigneeId = ticket.assigned_to_user_id?.toString() ?? null;
 
     return {
         id: ticket._id.toString(),
@@ -166,6 +281,7 @@ export function toTicketDto(
         status: ticket.status,
         priority: ticket.priority,
         priorityLocked: ticket.priority_locked ?? false,
+        holdsEarnings: ticket.holds_earnings === true,
         importance: ticket.importance,
         entity: {
             type: ticket.entity_type,
@@ -176,12 +292,17 @@ export function toTicketDto(
         trackingNumber: ticket.tracking_number ?? null,
         createdBy: {
             role: ticket.created_by_role,
-            userId: ticket.created_by_user_id?.toString() ?? null,
-            administrator: toSnapshotDto(ticket.created_by_admin),
+            userId: creatorId,
+            ...creator,
+            // The snapshot on the row is the stored answer for an administrator or the
+            // platform's automatic identity — the latter matches no account to look up.
+            name: creator.name ?? creatorSnapshot?.name ?? null,
+            administrator: creatorSnapshot,
         },
         assignedTo: {
             role: ticket.assigned_to_role ?? null,
-            userId: ticket.assigned_to_user_id?.toString() ?? null,
+            userId: assigneeId,
+            ...identityOf(assigneeId, ticket.assigned_to_role ?? null, actors),
         },
         assignment: assignment
             ? {
@@ -204,9 +325,33 @@ export function toTicketDetailDto(
     ticket: TicketReadModel,
     caller: { adminId: string; tier: AdminTier },
     entity: TicketEntityRef = UNRESOLVED_ENTITY,
+    actors: ReadonlyMap<string, TicketActor> = NO_ACTORS,
+    followers: readonly TicketFollowerRead[] = [],
 ): TicketDetailDto {
+    const creatorId = ticket.created_by_user_id?.toString() ?? null;
+    const assigneeId = ticket.assigned_to_user_id?.toString() ?? null;
+
     return {
-        ...toTicketDto(ticket, caller, entity),
+        ...toTicketDto(ticket, caller, entity, actors),
         description: ticket.description ?? '',
+        followers: followers.map((follower) => {
+            const userId = follower.user_id.toString();
+            const identity = identityOf(userId, follower.role, actors);
+            const isCreator = userId === creatorId;
+
+            return {
+                role: follower.role,
+                userId,
+                ...identity,
+                // The platform's automatic identity follows the tickets it opens and matches
+                // no account; its name is the snapshot stored on the ticket.
+                name: identity.name
+                    ?? (isCreator && follower.role === 'admin' ? ticket.created_by_admin?.name ?? null : null),
+                source: follower.source ?? null,
+                addedAt: follower.added_at ? follower.added_at.toISOString() : null,
+                isCreator,
+                isAssignee: assigneeId !== null && userId === assigneeId,
+            };
+        }),
     };
 }

@@ -15,6 +15,7 @@ import { ContractEventReadRepository, distinctAgentIds } from '../repositories/c
 import { ContractReadRepository } from '../repositories/contract.read.repository';
 import { toContractEventDto, toRosterEntryDto } from '../read-models/contract.dto';
 import { AgencyPoliciesDto, toAgencyPoliciesDto } from '../read-models/agency-policies.dto';
+import { CodRestrictionDto, toCodRestrictionDto } from '../../cod/read-models/cod-restriction.dto';
 import { verificationRecord } from '../../verification/gateways/verification.gateway';
 /**
  * The contract-history feed names agents, and this is the name-only read of them.
@@ -29,12 +30,14 @@ import { AgentReadRepository } from '../../agents/repositories/agent.read.reposi
 import { VendorConnectionReadRepository } from '../../vendors/repositories/vendor-context.read.repository';
 import {
     DeactivateAgencyBody,
+    LiftAgencyCodRestrictionBody,
     ListAgencyActivityQuery,
     ListContractEventsQuery,
     ListRosterQuery,
     ReactivateAgencyBody,
     RejectAgencyBody,
     ReleaseAgencyCodLimitBody,
+    RestrictAgencyCodBody,
     SearchAgenciesQuery,
     SetAgencyCodLimitBody,
 } from '../validators/agency.validator';
@@ -133,6 +136,16 @@ interface AgencyDetailDto extends AgencyDto {
      * the two are counted off the same collection so they cannot disagree.
      */
     policyVersionPausedConnections: number;
+    /**
+     * The administrator's cash-on-delivery restriction (owner decision 2026-10-10), or
+     * `null` when there is none — the state of every agency written before it existed.
+     *
+     * While it is set the agency receives no new COD work. It is here so the detail can
+     * show a badge without a second call; `GET /:agencyId/cod-restriction` is the same
+     * record read through jovi-mall. The `reason` is the administrator's and is never shown
+     * to the agency.
+     */
+    codRestriction: CodRestrictionDto | null;
     timezone: string | null;
     preferredLanguage: string | null;
 }
@@ -211,6 +224,7 @@ function toAgencyDetailDto(agency: AgencyReadModel, pausedConnections: number): 
         policies: toAgencyPoliciesDto(agency.policies),
         policyVersion: agency.policy_version ?? 0,
         policyVersionPausedConnections: pausedConnections,
+        codRestriction: toCodRestrictionDto(agency.cod_restriction),
         timezone: agency.timezone ?? null,
         preferredLanguage: agency.preferred_language ?? null,
     };
@@ -489,6 +503,69 @@ export class AgencyController {
             context,
         );
         sendSuccess(res, updated, { message: 'Agency COD limit pin released' });
+    });
+
+    /**
+     * GET /api/v1/agencies/:agencyId/cod-restriction — whether an administrator switched
+     * cash on delivery off for this agency (2026-10-10), with the reason and who did it.
+     * `restriction: null` means not restricted. Delegated, so it is the same answer the two
+     * writes below are judged against; the detail's `codRestriction` is the direct read.
+     */
+    static codRestriction = asyncHandler(async (req: Request, res: Response) => {
+        await loadOr404(req.params.agencyId);
+        const report = await gateway.codRestriction(req.params.agencyId, actorContextOf(req));
+        sendSuccess(res, report);
+    });
+
+    /**
+     * PUT /api/v1/agencies/:agencyId/cod-restriction — body `{ reason }`.
+     *
+     * Switches cash on delivery OFF for the agency. From then on it receives no NEW COD
+     * work: checkout refuses COD for a basket it would carry, and no COD shipment is handed
+     * to it — a vendor's `force` does not waive that. What it already holds runs to the end,
+     * and its cash chain, its own COD policy and its cash limit are untouched.
+     *
+     * The audit `before` is the restriction as jovi-mall reports it (`current`), so the row
+     * reads `codRestricted: false → true`; the direct read gives the row its label. Already
+     * restricted is jovi-mall's `409 COD_RESTRICTION_UNCHANGED`, in `details.platformCode`.
+     */
+    static restrictCod = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as RestrictAgencyCodBody;
+        const agency = await loadOr404(req.params.agencyId);
+        const context = actorContextOf(req);
+        const current = await gateway.codRestriction(req.params.agencyId, context);
+
+        const updated = await gateway.restrictCod(
+            req.params.agencyId,
+            body.reason,
+            toAuditState(agency),
+            current,
+            context,
+        );
+        sendSuccess(res, updated, { message: 'Cash on delivery restricted for this agency' });
+    });
+
+    /**
+     * POST /api/v1/agencies/:agencyId/cod-restriction/lift — body `{ reason }`.
+     *
+     * Switches cash on delivery back on. The agency returns to exactly what it had
+     * configured — the restriction sat above its COD policy and its cash limit and rewrote
+     * neither. Not restricted is the same `409 COD_RESTRICTION_UNCHANGED`.
+     */
+    static liftCodRestriction = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as LiftAgencyCodRestrictionBody;
+        const agency = await loadOr404(req.params.agencyId);
+        const context = actorContextOf(req);
+        const current = await gateway.codRestriction(req.params.agencyId, context);
+
+        const updated = await gateway.liftCodRestriction(
+            req.params.agencyId,
+            body.reason,
+            toAuditState(agency),
+            current,
+            context,
+        );
+        sendSuccess(res, updated, { message: 'Cash on delivery restriction lifted for this agency' });
     });
 
     static verify = asyncHandler(async (req: Request, res: Response) => {

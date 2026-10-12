@@ -353,6 +353,11 @@ const ADMIN: readonly PermissionName[] = union(
     [
         'agents.cod_threshold.set',
         'agencies.cod_limit.set',
+        // The agency COD switch (owner, 2026-10-10). `financial`, so the family sweep above
+        // leaves it out and Support is refused it at boot. Its customer twin,
+        // `users.cod.restrict`, is unflagged and arrives through `allInFamily('users')`,
+        // the same way `users.suspend` does — Support does not name it.
+        'agencies.cod.restrict',
         'agents.ban',
         'agencies.deactivate',
         'billing.subscriptions.assign',

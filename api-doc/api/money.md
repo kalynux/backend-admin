@@ -611,6 +611,7 @@ in four situations, and an administrator may pause any order or booking by hand:
 | `card_dispute` | the customer disputed the card payment with their bank | lifts **itself** when the dispute is won (or lost — the earnings are then reversed) |
 | `admin` | an administrator paused it | — |
 | 🆕 `refund_in_progress` | a **refund request** is open on it (any status before `completed` — even a small partial refund; REFUND-FLOW-PLAN C-4) | lifts **itself**: closed when the refund completes (after the earnings were clawed back), resumed when the request is rejected. Find the request with `GET /refunds?sourceId=<id>&open=true`. Resuming it by hand while the refund still holds it is refused (`409 EARNINGS_PAUSE_HELD_BY_REFUND`) |
+| 🆕 `customer_problem_reported` | the **customer** opened a problem request about their own order, shipment or booking while its money was still held (2026-10-10) | lifts **itself** when the customer or an administrator resolves or closes that request — never when the seller does. A manual resume also releases every such request, and a later request on the same purchase then no longer pauses it. Label suggestion: "Customer reported a problem". See jovi-mall `api-doc/FRONTEND-CHANGELOG-wi-mall-protection.md` |
 
 A **completed** refund also closes a `seller_cancelled_paid_order` or `booking_cancelled_unrefunded`
 pause on the same order or booking — the refund was what it was waiting for. `card_dispute` and

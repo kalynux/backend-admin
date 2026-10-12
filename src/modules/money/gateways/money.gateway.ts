@@ -745,6 +745,9 @@ export interface PlatformEarningsPause {
         | 'card_dispute'
         | 'admin'
         | 'refund_in_progress'
+        // 2026-10-10: the customer reported a problem about their own purchase while its money
+        // was still held. Lifts itself when the customer or an administrator ends the request.
+        | 'customer_problem_reported'
         | null;
     note: string | null;
     paused_at: string | null;

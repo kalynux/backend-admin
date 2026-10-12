@@ -2,6 +2,11 @@ import { platformRequest } from '../../../infra/platform/platform.client';
 import { auditedAttempt } from '../../audit/domain/audit.writer';
 import { ActorContext } from '../../audit/domain/audit-context';
 import { AuditAction } from '../../audit/domain/audit.catalog';
+import {
+    CodRestrictionReport,
+    codRestrictionAuditState,
+    toCodRestrictionReport,
+} from '../../cod/read-models/cod-restriction.dto';
 
 /**
  * The user domain's WRITE half, reached over jovi-mall's internal admin API.
@@ -412,6 +417,110 @@ export async function resetBotMemory(
             return toBotMemoryReset(result.data);
         },
         asBotMemoryState,
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The customer's cash-on-delivery restriction (owner decision 2026-10-10)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Whether an administrator has switched cash on delivery off for this account's CUSTOMER
+ * profile, with the reason and who did it. `restriction: null` means not restricted.
+ *
+ * Delegated although the user detail already projects the field on the customer profile:
+ * it is the `before` of the two writes below, so the audit row and jovi-mall's
+ * compare-and-set are judged against the same answer.
+ *
+ * ⚠ **Customers only, and jovi-mall is what says so.** An account with no customer profile
+ * answers `404 AUTH_PROFILE_NOT_FOUND`, which arrives here as a 404
+ * `PLATFORM_OPERATION_REJECTED` carrying that code in `details.platformCode`. jovi-mall
+ * looks the profile up by `customers.user_id`, so an account that does not hold the
+ * `customer` role is such an account.
+ */
+export async function codRestriction(userId: string, context: ActorContext): Promise<CodRestrictionReport> {
+    const result = await platformRequest<CodRestrictionReport>({
+        method: 'GET',
+        path: `/users/${userId}/cod-restriction`,
+        actor: context.actor,
+        requestId: context.requestId,
+    });
+    return toCodRestrictionReport(result.data);
+}
+
+/**
+ * Switch cash on delivery OFF for the customer: they can no longer PLACE a COD order.
+ * Orders already placed, and every other payment method, are untouched.
+ *
+ * The reason is FORWARDED — jovi-mall stores it on the restriction — and is in the audit
+ * payload too. It is the administrator's; jovi-mall never shows it to the customer.
+ *
+ * jovi-mall's write is a compare-and-set and answers `409 COD_RESTRICTION_UNCHANGED` when
+ * the customer is already restricted. That code reaches the dashboard in
+ * `details.platformCode`, and the audit row is stamped `failed` with it.
+ *
+ * `user` is the caller's direct read and is used for the row's LABEL only, as it is for the
+ * bot-memory reset. The row's `before` is `current` — the report read through jovi-mall
+ * just ahead of the write — reduced by the same mapper as the `after`, so the diff is one
+ * key wide and lines up: `codRestricted: false → true`. The account row did not change.
+ */
+export async function restrictCod(
+    userId: string,
+    reason: string,
+    user: UserSnapshot,
+    current: CodRestrictionReport,
+    context: ActorContext,
+): Promise<CodRestrictionReport> {
+    return auditedDelegation(
+        'users.cod.restrict',
+        context,
+        { id: userId, label: labelOf(user) },
+        { reason },
+        codRestrictionAuditState(current),
+        async () => {
+            const result = await platformRequest<CodRestrictionReport>({
+                method: 'PUT',
+                path: `/users/${userId}/cod-restriction`,
+                body: { restricted: true, reason },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return toCodRestrictionReport(result.data);
+        },
+        codRestrictionAuditState,
+    );
+}
+
+/**
+ * LIFT the restriction. The same jovi-mall endpoint with `restricted: false`, under its OWN
+ * audit action for the reason `restore` has one: jovi-mall clears the field, so this row is
+ * the only surviving record the restriction existed, and its payload the only place the
+ * reason for lifting is kept.
+ */
+export async function liftCodRestriction(
+    userId: string,
+    reason: string,
+    user: UserSnapshot,
+    current: CodRestrictionReport,
+    context: ActorContext,
+): Promise<CodRestrictionReport> {
+    return auditedDelegation(
+        'users.cod.unrestrict',
+        context,
+        { id: userId, label: labelOf(user) },
+        { reason },
+        codRestrictionAuditState(current),
+        async () => {
+            const result = await platformRequest<CodRestrictionReport>({
+                method: 'PUT',
+                path: `/users/${userId}/cod-restriction`,
+                body: { restricted: false, reason },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return toCodRestrictionReport(result.data);
+        },
+        codRestrictionAuditState,
     );
 }
 

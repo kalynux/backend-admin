@@ -18,9 +18,11 @@ import {
 import { UserReadModel, UserReadRepository } from '../repositories/user.read.repository';
 import { RoleClosureReadRepository, toRoleClosureDto } from '../repositories/role-closure.read.repository';
 import {
+    LiftUserCodRestrictionBody,
     ListUserActivityQuery,
     RequestRoleClosureBody,
     ResetBotMemoryBody,
+    RestrictUserCodBody,
     SearchUsersQuery,
     SendCredentialBody,
     SuspendUserBody,
@@ -371,6 +373,72 @@ export class UserController {
         );
 
         sendSuccess(res, result, { message: 'Bot memory reset — the next conversation starts fresh' });
+    });
+
+    /**
+     * GET /api/v1/users/:userId/cod-restriction — whether an administrator switched cash on
+     * delivery off for this account's CUSTOMER profile (2026-10-10), with the reason and who
+     * did it. `restriction: null` means not restricted.
+     *
+     * Delegated. An account with no customer profile answers 404 with
+     * `details.platformCode: "AUTH_PROFILE_NOT_FOUND"` — the switch exists for customers
+     * only. The detail's customer profile carries the same record as `codRestriction`, read
+     * directly, so a badge needs no second call.
+     */
+    static codRestriction = asyncHandler(async (req: Request, res: Response) => {
+        await loadOr404(req.params.userId);
+        const report = await gateway.codRestriction(req.params.userId, actorContextOf(req));
+        sendSuccess(res, report);
+    });
+
+    /**
+     * PUT /api/v1/users/:userId/cod-restriction — body `{ reason }`.
+     *
+     * Switches cash on delivery OFF for the customer: they can no longer PLACE a COD order.
+     * Checkout refuses it and the cart quote stops offering it, on the website and in the
+     * bot alike. Orders already placed and every other payment method are untouched.
+     *
+     * The audit `before` is the restriction as jovi-mall reports it (`current`), so the row
+     * reads `codRestricted: false → true`. That read is also where an account with no customer
+     * profile is refused (`AUTH_PROFILE_NOT_FOUND`) — before any audit row is opened, since
+     * nothing was attempted. Already restricted is `409 COD_RESTRICTION_UNCHANGED`.
+     */
+    static restrictCod = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as RestrictUserCodBody;
+        const user = await loadOr404(req.params.userId);
+        const context = actorContextOf(req);
+        const current = await gateway.codRestriction(req.params.userId, context);
+
+        const updated = await gateway.restrictCod(
+            req.params.userId,
+            body.reason,
+            toAuditState(user),
+            current,
+            context,
+        );
+        sendSuccess(res, updated, { message: 'Cash on delivery restricted for this customer' });
+    });
+
+    /**
+     * POST /api/v1/users/:userId/cod-restriction/lift — body `{ reason }`.
+     *
+     * Switches cash on delivery back on for the customer. Not restricted is the same
+     * `409 COD_RESTRICTION_UNCHANGED`.
+     */
+    static liftCodRestriction = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as LiftUserCodRestrictionBody;
+        const user = await loadOr404(req.params.userId);
+        const context = actorContextOf(req);
+        const current = await gateway.codRestriction(req.params.userId, context);
+
+        const updated = await gateway.liftCodRestriction(
+            req.params.userId,
+            body.reason,
+            toAuditState(user),
+            current,
+            context,
+        );
+        sendSuccess(res, updated, { message: 'Cash on delivery restriction lifted for this customer' });
     });
 
     /**

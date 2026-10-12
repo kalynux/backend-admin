@@ -4,11 +4,13 @@ import { AgencyController } from '../controllers/agency.controller';
 import {
     AgencyIdParamSchema,
     DeactivateAgencySchema,
+    LiftAgencyCodRestrictionSchema,
     ListAgencyActivityQuerySchema,
     ListContractEventsQuerySchema,
     ListRosterQuerySchema,
     ReactivateAgencySchema,
     ReleaseAgencyCodLimitSchema,
+    RestrictAgencyCodSchema,
     SearchAgenciesQuerySchema,
     RejectAgencySchema,
     SetAgencyCodLimitSchema,
@@ -222,6 +224,45 @@ defineRoute(router, {
     validate: { params: AgencyIdParamSchema, body: ReleaseAgencyCodLimitSchema },
     audit: records('agencies.cod_limit.release'),
     handler: AgencyController.releaseCodLimit,
+});
+
+/**
+ * The agency's COD restriction (owner decision 2026-10-10) — an administrator switching
+ * cash on delivery off for one agency, and back on. The same three-route shape as the limit
+ * above: READ under `agencies.read` (Support answers "why is this agency getting no COD
+ * parcels"); RESTRICT (PUT) and LIFT (POST …/lift) under `agencies.cod.restrict`,
+ * `financial`, two audit actions because lifting clears the record in jovi-mall.
+ *
+ * Both writes take `{ reason }` and nothing else. jovi-mall's one endpoint takes a
+ * `restricted` flag; here the direction is the route, so it cannot disagree with the body.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/:agencyId/cod-restriction',
+    access: permission('agencies.read'),
+    validate: { params: AgencyIdParamSchema },
+    handler: AgencyController.codRestriction,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'put',
+    path: '/:agencyId/cod-restriction',
+    access: permission('agencies.cod.restrict'),
+    validate: { params: AgencyIdParamSchema, body: RestrictAgencyCodSchema },
+    audit: records('agencies.cod.restrict'),
+    handler: AgencyController.restrictCod,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/:agencyId/cod-restriction/lift',
+    access: permission('agencies.cod.restrict'),
+    validate: { params: AgencyIdParamSchema, body: LiftAgencyCodRestrictionSchema },
+    audit: records('agencies.cod.unrestrict'),
+    handler: AgencyController.liftCodRestriction,
 });
 
 export const agencyRoutes = router;

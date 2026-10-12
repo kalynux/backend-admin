@@ -2,6 +2,11 @@ import { Document, Filter, ObjectId } from 'mongodb';
 import { COLLECTIONS } from '../../../infra/platform/collections';
 import { PlatformCollection } from '../../../infra/platform/platform-collections';
 import { PlatformReadRepository } from '../../../infra/platform/platform.repository';
+import {
+    CodRestrictionDto,
+    StoredCodRestriction,
+    toCodRestrictionDto,
+} from '../../cod/read-models/cod-restriction.dto';
 
 /**
  * The role entities behind a `users` row.
@@ -38,6 +43,8 @@ interface RoleProfileDocument extends Document {
     /** Vendor only, and narrowed to the one flag — never the whole sub-document. */
     kyc_details?: { legit_verified?: boolean };
     kyc?: { status?: string };
+    /** Customer only. `null` or absent = cash on delivery is not restricted. */
+    cod_restriction?: StoredCodRestriction | null;
 }
 
 export type UserRoleName = 'customer' | 'vendor' | 'agency' | 'agent';
@@ -54,7 +61,24 @@ const ROLE_SOURCES: Readonly<
 > = Object.freeze({
     customer: {
         collection: COLLECTIONS.CUSTOMER,
-        projection: { _id: 1, user_id: 1, name: 1, status: 1, created_at: 1 },
+        /**
+         * `cod_restriction` — the administrator's cash-on-delivery switch (2026-10-10), so
+         * the user detail can show a badge without a second call.
+         *
+         * It is here, on the user screen, because a customer has no admin screen of its
+         * own: `users.read` IS the permission for this role. Dotted paths rather than the
+         * whole sub-document, so a field added to it upstream does not arrive uninvited.
+         * The agency carries the same field and it is NOT projected below — an agency's
+         * restriction is shown on the agency detail, behind `agencies.read`.
+         */
+        projection: {
+            _id: 1, user_id: 1, name: 1, status: 1, created_at: 1,
+            'cod_restriction.reason': 1,
+            'cod_restriction.restricted_at': 1,
+            'cod_restriction.restricted_by_user_id': 1,
+            'cod_restriction.restricted_by_source': 1,
+            'cod_restriction.restricted_by_name': 1,
+        },
     },
     vendor: {
         collection: COLLECTIONS.VENDOR,
@@ -97,6 +121,16 @@ export interface RoleProfile {
     /** Identity verification — agent only. */
     kycStatus: string | null;
     createdAt: string | null;
+    /**
+     * The administrator's cash-on-delivery restriction — **present on a `customer` profile
+     * only**: the restriction, or `null` when there is none.
+     *
+     * ⚠ The key is ABSENT on every other role rather than `null`, and that is the opposite
+     * of `verified` and `kycStatus` above on purpose. `null` here is a statement — "not
+     * restricted" — and an agency CAN be restricted; printing `null` on an agency profile
+     * this projection never looked at would be a claim about a field nobody read.
+     */
+    codRestriction?: CodRestrictionDto | null;
 }
 
 /**
@@ -262,5 +296,7 @@ function toRoleProfile(role: UserRoleName, document: RoleProfileDocument): RoleP
         verified: typeof verified === 'boolean' ? verified : null,
         kycStatus: document.kyc?.status ?? null,
         createdAt: document.created_at ? document.created_at.toISOString() : null,
+        // Customer only — see the field's note for why the other roles omit the key.
+        ...(role === 'customer' ? { codRestriction: toCodRestrictionDto(document.cod_restriction) } : {}),
     };
 }

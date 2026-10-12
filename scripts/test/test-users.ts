@@ -16,11 +16,11 @@
  *   §5  suspension is enforced in jovi-mall on all three auth paths. Without it this
  *       whole phase ships an endpoint that flips a column nobody reads.
  *
- * §8 is the one section that is DRIVEN rather than scanned. The bot-memory reset goes through
- * the real gateway, the real `platformRequest` and the real audit writer, against an
- * in-process stand-in for jovi-mall on 127.0.0.1 and a stand-in audit store. That is how it
- * proves the fail-closed order: no audit row, no call. It still needs no Mongo, no Redis and
- * no running jovi-mall.
+ * §8 and §9 are the sections that are DRIVEN rather than scanned. The bot-memory reset (§8)
+ * and the customer COD restriction (§9) go through the real gateway, the real
+ * `platformRequest` and the real audit writer, against an in-process stand-in for jovi-mall
+ * on 127.0.0.1 and a stand-in audit store. That is how they prove the fail-closed order: no
+ * audit row, no call. It still needs no Mongo, no Redis and no running jovi-mall.
  *
  *   npm run test:users
  */
@@ -41,15 +41,24 @@ process.env.ADMIN_JWT_REFRESH_SECRET = 'test-refresh-secret-value-32-chars-long'
 process.env.ADMIN_DASHBOARD_ORIGINS = 'http://localhost:5173';
 
 import {
+    LiftUserCodRestrictionSchema,
     ListUserActivityQuerySchema,
     ResetBotMemorySchema,
+    RestrictUserCodSchema,
     SearchUsersQuerySchema,
     SuspendUserSchema,
     UpdateUserSchema,
     USER_AUDIT_ACTIONS,
     USER_SORT,
 } from '../../src/modules/users/validators/user.validator';
-import { BotMemoryResetResult, resetBotMemory } from '../../src/modules/users/gateways/user.gateway';
+import {
+    BotMemoryResetResult,
+    codRestriction,
+    liftCodRestriction,
+    resetBotMemory,
+    restrictCod,
+} from '../../src/modules/users/gateways/user.gateway';
+import { CodRestrictionReport, toCodRestrictionDto } from '../../src/modules/cod/read-models/cod-restriction.dto';
 import { ActorContext } from '../../src/modules/audit/domain/audit-context';
 import { AdminIdentity } from '../../src/modules/admin-identity/domain/admin-identity.types';
 import { AppError } from '../../src/core/errors/app-error';
@@ -368,8 +377,10 @@ const USER_ROUTES = routeManifest().filter((route) => route.fullPath.startsWith(
 // Six at the user-management phase, eight once credential recovery landed, and nine since the
 // bot-memory reset (2026-09-22), twelve since role closure (jovi-mall ADR-A10, 2026-10-04 —
 // the closure-requests read, request and cancel, pinned by name below). §7 pins the ninth by
-// name, so this count cannot pass on a swap of one route for another.
-t.assert('twelve routes are declared', () => USER_ROUTES.length === 12);
+// name, so this count cannot pass on a swap of one route for another. Fifteen since the
+// customer COD restriction (2026-10-10 — its read, restrict and lift, pinned by method, path,
+// permission and audit action in §7b).
+t.assert('fifteen routes are declared', () => USER_ROUTES.length === 15);
 
 /**
  * Role closure — jovi-mall ADR-A10. The administrator ASKS; only the user confirms. So the
@@ -501,10 +512,10 @@ t.assert('...unlike role management, which is', () =>
     isSensitive(permissionSpec('users.roles.manage')));
 
 // Three at the user-management phase, five once the two credential sends were catalogued,
-// six since `users.bot_memory.reset` (2026-09-22), and eight since role closure's request
-// and cancel (2026-10-04).
-t.assert('eight user actions are catalogued, and no read among them', () =>
-    USER_AUDIT_ACTIONS.length === 8
+// six since `users.bot_memory.reset` (2026-09-22), eight since role closure's request
+// and cancel (2026-10-04), and ten since the COD restriction and its lift (2026-10-10).
+t.assert('ten user actions are catalogued, and no read among them', () =>
+    USER_AUDIT_ACTIONS.length === 10
     && USER_AUDIT_ACTIONS.every((action) => isAuditAction(action)));
 
 /**
@@ -643,6 +654,197 @@ t.assert('the handler answers 404 BEFORE it delegates (scanned within its own sp
     const call = span.indexOf('gateway.resetBotMemory(');
     return load !== -1 && call !== -1 && load < call;
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('7b. The customer COD restriction — routes, permission, bodies and the direct read');
+
+/**
+ * Owner decision 2026-10-10: an administrator may switch cash on delivery off for one
+ * customer, and back on. Three routes on one sub-resource. Each is found by METHOD and
+ * exact path — the read and the restrict share a path, so a lookup by path alone would
+ * pass with either one missing.
+ */
+const COD_RESTRICTION_PATH = '/api/v1/users/:userId/cod-restriction';
+const COD_READ = USER_ROUTES.find((route) => route.fullPath === COD_RESTRICTION_PATH && route.method === 'get');
+const COD_RESTRICT = USER_ROUTES.find((route) => route.fullPath === COD_RESTRICTION_PATH && route.method === 'put');
+const COD_LIFT = USER_ROUTES.find(
+    (route) => route.fullPath === `${COD_RESTRICTION_PATH}/lift` && route.method === 'post');
+
+t.assert('the read is a GET under `users.read` alone, and is not audited', () =>
+    COD_READ?.access.kind === 'permission'
+    && COD_READ.access.permissions.length === 1
+    && COD_READ.access.permissions[0] === 'users.read'
+    && !COD_READ.audit);
+
+t.assert('restricting is a PUT under `users.cod.restrict` alone, recording `users.cod.restrict`', () =>
+    COD_RESTRICT?.access.kind === 'permission'
+    && COD_RESTRICT.access.mode === 'all'
+    && COD_RESTRICT.access.permissions.length === 1
+    && COD_RESTRICT.access.permissions[0] === 'users.cod.restrict'
+    && COD_RESTRICT.audit?.kind === 'records'
+    && COD_RESTRICT.audit.actions.length === 1
+    && COD_RESTRICT.audit.actions[0] === 'users.cod.restrict');
+
+t.assert('lifting is a POST …/lift under the SAME permission, recording `users.cod.unrestrict`', () =>
+    COD_LIFT?.access.kind === 'permission'
+    && COD_LIFT.access.mode === 'all'
+    && COD_LIFT.access.permissions.length === 1
+    && COD_LIFT.access.permissions[0] === 'users.cod.restrict'
+    && COD_LIFT.audit?.kind === 'records'
+    && COD_LIFT.audit.actions.length === 1
+    && COD_LIFT.audit.actions[0] === 'users.cod.unrestrict');
+
+/**
+ * Lifting clears `customers.cod_restriction` in jovi-mall, reason and author with it. So the
+ * lift is its OWN action — the same reasoning as `users.reinstate` — or the trail would hold
+ * no record that the restriction ever existed.
+ */
+t.assert('both audit actions name the one permission, target a user and are delegated', () =>
+    (['users.cod.restrict', 'users.cod.unrestrict'] as const).every((action) => {
+        if (!isAuditAction(action)) return false;
+        const spec = auditSpec(action);
+        return spec.permission === 'users.cod.restrict'
+            && spec.target === 'user'
+            && spec.transport === 'delegated';
+    }));
+
+t.assert('...and read differently in the feed — two opposite acts, two summaries', () =>
+    auditSpec('users.cod.restrict').summary !== auditSpec('users.cod.unrestrict').summary);
+
+/** One assertion per tier, so a failing line names the tier whose grant moved. */
+t.assert('Developer (tier 1) holds `users.cod.restrict`', () =>
+    new Set(TIER_GRANTS[1]).has('users.cod.restrict'));
+
+t.assert('Admin (tier 2) holds it', () => new Set(TIER_GRANTS[2]).has('users.cod.restrict'));
+
+/**
+ * ⚠ The guard, because no flag is. `users.cod.restrict` is unflagged like `users.suspend`,
+ * so `assertGrantTableValid()` would not refuse it to Support — the same position as the
+ * two credential permissions in §6. What keeps it out is that SUPPORT names its grants by
+ * hand; this assertion, and "the ONLY users.* write Support holds" in §7, are what fail
+ * the day somebody adds the name.
+ */
+t.assert('Support (tier 3) does NOT hold it', () =>
+    !new Set(TIER_GRANTS[3]).has('users.cod.restrict'));
+
+t.assert('it is a write, unflagged like `users.suspend`, and not dual-controlled', () => {
+    const spec = permissionSpec('users.cod.restrict');
+    return spec.action === 'write'
+        && !isSensitive(spec)
+        && isSensitive(spec) === isSensitive(permissionSpec('users.suspend'));
+});
+
+const COD_BODIES = [
+    ['restrict', RestrictUserCodSchema],
+    ['lift', LiftUserCodRestrictionSchema],
+] as const;
+
+/**
+ * Required in BOTH directions, unlike suspend/restore where the restore takes no body.
+ * jovi-mall requires one both ways, and lifting clears the stored restriction, so the
+ * reason given for lifting survives only in this service's audit row.
+ */
+t.assert('a reason is required to restrict AND to lift', () =>
+    COD_BODIES.every(([, schema]) => !schema.safeParse({}).success
+        && schema.safeParse({ reason: 'Refused three parcels without a reason' }).success));
+
+t.assert('...trimmed, so padding cannot make a keystroke look like a reason', () =>
+    COD_BODIES.every(([, schema]) =>
+        schema.parse({ reason: '  refused three parcels  ' }).reason === 'refused three parcels'
+        && !schema.safeParse({ reason: '  x  ' }).success
+        && !schema.safeParse({ reason: '     ' }).success));
+
+t.assert('...bounded at 3–500 characters', () =>
+    COD_BODIES.every(([, schema]) =>
+        !schema.safeParse({ reason: 'xx' }).success
+        && schema.safeParse({ reason: 'xxx' }).success
+        && schema.safeParse({ reason: 'x'.repeat(500) }).success
+        && !schema.safeParse({ reason: 'x'.repeat(501) }).success));
+
+/**
+ * The bound is jovi-mall's. A reason this side accepted and that side refused would arrive
+ * as a bare 400 after the audit intent was already written.
+ */
+t.assert('...the same bound jovi-mall enforces (COD_RESTRICTION_REASON_MIN / _MAX)', () => {
+    const types = read(JOVI, 'core', 'types', 'cod-restriction.types.ts');
+    return /COD_RESTRICTION_REASON_MIN\s*=\s*3\b/.test(types)
+        && /COD_RESTRICTION_REASON_MAX\s*=\s*500\b/.test(types);
+});
+
+/**
+ * The direction is the ROUTE. jovi-mall's body carries a `restricted` flag; were it
+ * accepted here, a PUT saying `restricted: false` would be a restrict request asking to
+ * lift, and one of the two would silently win.
+ */
+t.assert('both bodies are strict — a `restricted` key is refused, never ignored', () =>
+    COD_BODIES.every(([, schema]) =>
+        !schema.safeParse({ reason: 'A real reason', restricted: false }).success
+        && !schema.safeParse({ reason: 'A real reason', channel: 'whatsapp' }).success));
+
+/** A controller handler, from `static name` to the next `static `. */
+function controllerHandler(name: string): string {
+    const controller = readCode(SRC, 'modules', 'users', 'controllers', 'user.controller.ts');
+    const start = controller.indexOf(`static ${name} `);
+    if (start === -1) return '';
+    const next = controller.indexOf('static ', start + 1);
+    return controller.slice(start, next === -1 ? undefined : next);
+}
+
+/**
+ * 404, then the delegated read that becomes the audit `before`, then the write — scanned
+ * inside each handler's own span, for the reason the bot-memory scan above gives.
+ */
+t.assert('both write handlers 404 first, read the current state through jovi-mall, then write', () =>
+    ([['restrictCod', 'gateway.restrictCod('], ['liftCodRestriction', 'gateway.liftCodRestriction(']] as const)
+        .every(([name, call]) => {
+            const span = controllerHandler(name);
+            const load = span.indexOf('loadOr404(');
+            const current = span.indexOf('gateway.codRestriction(');
+            const write = span.indexOf(call);
+            return load !== -1 && current !== -1 && write !== -1 && load < current && current < write;
+        }));
+
+t.assert('the read handler 404s before it delegates', () => {
+    const span = controllerHandler('codRestriction');
+    const load = span.indexOf('loadOr404(');
+    const call = span.indexOf('gateway.codRestriction(');
+    return load !== -1 && call !== -1 && load < call;
+});
+
+t.assert('every delegated COD path exists in jovi-mall’s admin user router', () => {
+    const router = read(JOVI, 'modules', 'users', 'admin-user.routes.ts');
+    return router.includes("router.get('/:userId/cod-restriction'")
+        && router.includes("router.put('/:userId/cod-restriction'");
+});
+
+/**
+ * The user detail carries the restriction on the CUSTOMER profile, so the dashboard can
+ * badge an account without a second call. Field by field, never the whole sub-document —
+ * and on the customer source only: an agency's restriction is shown on the agency detail.
+ */
+t.assert('the customer profile projects the restriction field by field, never whole', () => {
+    const table = ROLE_REPO.slice(ROLE_REPO.indexOf('const ROLE_SOURCES'));
+    const customer = table.slice(table.indexOf('customer: {'), table.indexOf('vendor: {'));
+    return ['reason', 'restricted_at', 'restricted_by_user_id', 'restricted_by_source', 'restricted_by_name']
+        .every((field) => customer.includes(`'cod_restriction.${field}': 1`))
+        && !/['"]?cod_restriction['"]?\s*:\s*1/.test(ROLE_REPO);
+});
+
+t.assert('...and no other role source projects it', () => {
+    const table = ROLE_REPO.slice(ROLE_REPO.indexOf('const ROLE_SOURCES'));
+    const others = table.slice(table.indexOf('vendor: {'), table.indexOf('});'));
+    return !others.includes('cod_restriction');
+});
+
+t.assert('the profile maps it through toCodRestrictionDto, for the customer role only', () =>
+    /role === 'customer'\s*\?\s*\{\s*codRestriction: toCodRestrictionDto\(document\.cod_restriction\)\s*\}/
+        .test(ROLE_REPO));
+
+t.assert('absent, null and unstamped all read as not restricted', () =>
+    toCodRestrictionDto(undefined) === null
+    && toCodRestrictionDto(null) === null
+    && toCodRestrictionDto({}) === null
+    && toCodRestrictionDto({ reason: 'stale', restricted_at: null }) === null);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §8 — the gateway DRIVEN, against a stand-in for jovi-mall and a stand-in audit store.
@@ -946,6 +1148,257 @@ async function runDrivenChecks(): Promise<void> {
         unconfigured.error?.statusCode === 503
         && unconfigured.error.code === ERROR_CODES.SERVICE_DEPENDENCY_UNAVAILABLE
         && unconfigured.error.message.includes('JOVI_MALL_BASE_URL'));
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // §9 — the customer COD restriction, through the same two stand-ins.
+    //
+    // §8 ended by unconfiguring jovi-mall, so the stand-in is pointed at again first.
+    // ─────────────────────────────────────────────────────────────────────────
+    process.env.JOVI_MALL_BASE_URL = `http://127.0.0.1:${port}`;
+    process.env.JOVI_MALL_SERVICE_TOKEN = STUB_SERVICE_TOKEN;
+    resetEnvCache();
+    resetPlatformClient();
+
+    t.section('9. The customer COD restriction, driven through the real gateway');
+
+    const COD_PATH = `/api/internal/admin/users/${USER_ID}/cod-restriction`;
+    const CUSTOMER_ID = '65f0000000000000000000d9';
+    const NOT_RESTRICTED: CodRestrictionReport = {
+        subject: 'customer', subjectId: CUSTOMER_ID, userId: USER_ID, restricted: false, restriction: null,
+    };
+    const RESTRICTED: CodRestrictionReport = {
+        subject: 'customer',
+        subjectId: CUSTOMER_ID,
+        userId: USER_ID,
+        restricted: true,
+        restriction: {
+            reason: 'Refused three parcels without a reason',
+            restrictedAt: '2026-10-10T09:30:00.000Z',
+            restrictedByUserId: ADMIN_ACTOR.adminId,
+            restrictedBySource: 'admin',
+            restrictedByName: ADMIN_ACTOR.displayName,
+        },
+    };
+
+    // ── Restrict ─────────────────────────────────────────────────────────────
+    joviReply = {
+        status: 200,
+        body: {
+            success: true,
+            data: {
+                ...RESTRICTED,
+                restriction: { ...RESTRICTED.restriction, internalNote: 'must not reach the dashboard' },
+                // Not in the contract either. Neither level may travel past the gateway.
+                internalNote: 'must not reach the dashboard',
+            },
+        },
+    };
+    const restricted = await attemptCod('req-cod-restrict', (context) =>
+        restrictCod(USER_ID, 'Refused three parcels without a reason', BEFORE, NOT_RESTRICTED, context));
+    const restrictCall = joviRequests[0];
+
+    t.assert('restricting succeeds against a jovi-mall that answers 200', () =>
+        restricted.result !== null && restricted.thrown === null);
+
+    t.assert('jovi-mall is called exactly once, with PUT /api/internal/admin/users/:userId/cod-restriction', () =>
+        joviRequests.length === 1 && restrictCall?.method === 'PUT' && restrictCall.url === COD_PATH);
+
+    t.assert('...carrying exactly { restricted: true, reason } — the direction comes from the route', () => {
+        if (!restrictCall) return false;
+        const body = JSON.parse(restrictCall.body) as Record<string, unknown>;
+        return Object.keys(body).sort().join(',') === 'reason,restricted'
+            && body.restricted === true
+            && body.reason === 'Refused three parcels without a reason';
+    });
+
+    t.assert('...the service token, the acting administrator and the correlation id', () =>
+        restrictCall?.headers['x-service-token'] === STUB_SERVICE_TOKEN
+        && restrictCall.headers['x-actor-id'] === ADMIN_ACTOR.adminId
+        && restrictCall.headers['x-actor-tier'] === '2'
+        && restrictCall.headers['x-request-id'] === 'req-cod-restrict');
+
+    t.assert('the answer is the five-field report and the five-field restriction — nothing else travels', () => {
+        const report = restricted.result;
+        return report !== null
+            && Object.keys(report).sort().join(',') === 'restricted,restriction,subject,subjectId,userId'
+            && report.subject === 'customer'
+            && report.subjectId === CUSTOMER_ID
+            && report.userId === USER_ID
+            && report.restricted === true
+            && report.restriction !== null
+            && Object.keys(report.restriction).sort().join(',')
+                === 'reason,restrictedAt,restrictedByName,restrictedBySource,restrictedByUserId'
+            && report.restriction.restrictedAt === '2026-10-10T09:30:00.000Z';
+    });
+
+    t.assert('the audit intent commits BEFORE jovi-mall is called, the outcome after', () =>
+        events.join(' → ') === 'audit:intent → jovi-mall:request → audit:outcome');
+
+    t.assert('the intent row names users.cod.restrict, the user, the actor and the reason', () => {
+        const row = intentOf();
+        return row !== undefined
+            && row.action === 'users.cod.restrict'
+            && row.status === 'attempted'
+            && row.target_type === 'user'
+            && row.target_id === USER_ID
+            && row.target_label === 'amina@example.test'
+            && String(row.actor_id) === ADMIN_ACTOR.adminId
+            && row.actor_tier === 2
+            && row.correlation_id === 'req-cod-restrict'
+            && row.delegated === true
+            && (row.payload as Record<string, unknown> | null)?.reason === 'Refused three parcels without a reason';
+    });
+
+    t.assert('the outcome is succeeded, and the diff is one key wide: codRestricted false → true', () => {
+        const row = outcomeOf();
+        const before = row?.before as Record<string, unknown> | null | undefined;
+        const after = row?.after as Record<string, unknown> | null | undefined;
+        return row !== undefined
+            && row.status === 'succeeded'
+            && before !== null && before !== undefined
+            && after !== null && after !== undefined
+            && Object.keys(before).join(',') === 'codRestricted'
+            && Object.keys(after).join(',') === 'codRestricted'
+            && before.codRestricted === false
+            && after.codRestricted === true;
+    });
+
+    // ── Lift ─────────────────────────────────────────────────────────────────
+    joviReply = { status: 200, body: { success: true, data: NOT_RESTRICTED } };
+    const lifted = await attemptCod('req-cod-lift', (context) =>
+        liftCodRestriction(USER_ID, 'Customer explained; parcels were damaged', BEFORE, RESTRICTED, context));
+    const liftCall = joviRequests[0];
+
+    t.assert('lifting calls the SAME endpoint, once, with exactly { restricted: false, reason }', () => {
+        if (joviRequests.length !== 1 || !liftCall) return false;
+        const body = JSON.parse(liftCall.body) as Record<string, unknown>;
+        return liftCall.method === 'PUT'
+            && liftCall.url === COD_PATH
+            && Object.keys(body).sort().join(',') === 'reason,restricted'
+            && body.restricted === false
+            && body.reason === 'Customer explained; parcels were damaged';
+    });
+
+    t.assert('...and answers a report with `restricted: false` and `restriction: null`', () =>
+        lifted.result !== null && lifted.result.restricted === false && lifted.result.restriction === null);
+
+    t.assert('it is recorded as users.cod.unrestrict — its OWN action, with the lift’s reason', () => {
+        const row = intentOf();
+        return row?.action === 'users.cod.unrestrict'
+            && (row.payload as Record<string, unknown> | null)?.reason === 'Customer explained; parcels were damaged';
+    });
+
+    t.assert('...and its diff reads the other way: codRestricted true → false', () => {
+        const row = outcomeOf();
+        return row?.status === 'succeeded'
+            && (row.before as Record<string, unknown> | null)?.codRestricted === true
+            && (row.after as Record<string, unknown> | null)?.codRestricted === false;
+    });
+
+    // ── jovi-mall refuses: already in that state ─────────────────────────────
+    joviReply = { status: 409, body: platformEnvelope('COD_RESTRICTION_UNCHANGED', 409, 'conflict') };
+    const unchanged = await attemptCod('req-cod-409', (context) =>
+        restrictCod(USER_ID, 'Refused three parcels without a reason', BEFORE, RESTRICTED, context));
+
+    t.assert('an already-restricted customer is a 409 PLATFORM_OPERATION_REJECTED', () =>
+        unchanged.error?.statusCode === 409
+        && unchanged.error.code === ERROR_CODES.PLATFORM_OPERATION_REJECTED);
+
+    t.assert('...carrying COD_RESTRICTION_UNCHANGED in details.platformCode', () =>
+        (unchanged.error?.details as Record<string, unknown> | undefined)?.platformCode
+            === 'COD_RESTRICTION_UNCHANGED');
+
+    t.assert('...the audit row is stamped failed with that code, and the PUT is not retried', () => {
+        const row = outcomeOf();
+        return joviRequests.length === 1
+            && row?.status === 'failed'
+            && row.platform_code === 'COD_RESTRICTION_UNCHANGED'
+            && row.outcome_status === 409;
+    });
+
+    // ── The read ─────────────────────────────────────────────────────────────
+    joviReply = { status: 200, body: { success: true, data: RESTRICTED } };
+    const readBack = await attemptCod('req-cod-read', (context) => codRestriction(USER_ID, context));
+
+    t.assert('the read is a GET on the same path, and answers the report', () =>
+        joviRequests.length === 1
+        && joviRequests[0].method === 'GET'
+        && joviRequests[0].url === COD_PATH
+        && readBack.result?.restricted === true
+        && readBack.result.restriction?.reason === 'Refused three parcels without a reason');
+
+    t.assert('...and writes NO audit row — a read is not an action', () => auditWrites.length === 0);
+
+    /**
+     * The account that is not a customer. jovi-mall answers this on the READ, which is the
+     * first thing both write handlers do — so the dashboard meets it before any audit row.
+     */
+    joviReply = { status: 404, body: platformEnvelope('AUTH_PROFILE_NOT_FOUND', 404, 'not_found') };
+    const noProfile = await attemptCod('req-cod-noprofile', (context) => codRestriction(USER_ID, context));
+
+    t.assert('an account with no customer profile is a 404 with AUTH_PROFILE_NOT_FOUND in details.platformCode', () =>
+        noProfile.error?.statusCode === 404
+        && noProfile.error.code === ERROR_CODES.PLATFORM_OPERATION_REJECTED
+        && (noProfile.error.details as Record<string, unknown> | undefined)?.platformCode
+            === 'AUTH_PROFILE_NOT_FOUND'
+        && auditWrites.length === 0);
+
+    // ── Fail-closed: the audit store is down ─────────────────────────────────
+    joviReply = { status: 200, body: { success: true, data: RESTRICTED } };
+    auditStoreDown = true;
+    const unrecorded = await attemptCod('req-cod-noaudit', (context) =>
+        restrictCod(USER_ID, 'Refused three parcels without a reason', BEFORE, NOT_RESTRICTED, context));
+    // Counted here: the next attempt clears the capture before it runs.
+    const callsWhileRestricting = joviRequests.length;
+    const unrecordedLift = await attemptCod('req-cod-noaudit-lift', (context) =>
+        liftCodRestriction(USER_ID, 'Customer explained; parcels were damaged', BEFORE, RESTRICTED, context));
+    const callsWhileLifting = joviRequests.length;
+    auditStoreDown = false;
+
+    t.assert('FAIL-CLOSED: with the audit store down, a restriction fails and jovi-mall is never called', () =>
+        unrecorded.result === null && unrecorded.thrown !== null && callsWhileRestricting === 0);
+
+    t.assert('...and so does a lift — an unrecordable change does not happen in either direction', () =>
+        unrecordedLift.result === null && unrecordedLift.thrown !== null && callsWhileLifting === 0);
+}
+
+/** §9's actor: an Admin. Support does not hold `users.cod.restrict`. */
+const ADMIN_ACTOR: AdminIdentity = {
+    ...SUPPORT_ACTOR,
+    adminId: '65f0000000000000000000a2',
+    sessionId: 'session-admin-1',
+    email: 'admin.tester@example.test',
+    displayName: 'Admin Tester',
+    tier: 2,
+};
+
+interface CodAttempt<T> {
+    result: T | null;
+    error: AppError | null;
+    thrown: unknown;
+}
+
+/** §8's `attemptReset`, generalised over the call: reset the captures, run, catch. */
+async function attemptCod<T>(
+    requestId: string,
+    run: (context: ActorContext) => Promise<T>,
+): Promise<CodAttempt<T>> {
+    joviRequests.length = 0;
+    auditWrites.length = 0;
+    events.length = 0;
+    try {
+        const result = await run({
+            method: 'PUT',
+            path: `/api/v1/users/${USER_ID}/cod-restriction`,
+            requestId,
+            ip: '127.0.0.1',
+            userAgent: 'test-users',
+            actor: ADMIN_ACTOR,
+        });
+        return { result, error: null, thrown: null };
+    } catch (thrown) {
+        return { result: null, error: thrown instanceof AppError ? thrown : null, thrown };
+    }
 }
 
 runDrivenChecks()

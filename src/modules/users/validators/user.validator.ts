@@ -176,6 +176,40 @@ export const ResetBotMemorySchema = z
     .strict();
 
 /**
+ * Switch cash on delivery OFF for this account's customer profile (owner decision
+ * 2026-10-10).
+ *
+ * ── The body is the reason and nothing else ──────────────────────────────────
+ * jovi-mall's endpoint takes `{ restricted, reason }` on one path. Here restricting and
+ * lifting are two routes with two audit actions (ADR-005 D-4), so the DIRECTION is the URL
+ * and a `restricted` key in this body is a 400 (`.strict()`) — it can never contradict the
+ * route it was sent to.
+ *
+ * ── `reason` is required ─────────────────────────────────────────────────────
+ * The same rule as `SuspendUserSchema`: this takes something from a person with no
+ * automatic rule behind it. The bound is jovi-mall's own (`COD_RESTRICTION_REASON_MIN` /
+ * `_MAX`, 3–500), which is also `reasonText`'s default; `test-users.ts` reads jovi-mall's
+ * constants and asserts the two still agree. The reason is FORWARDED — jovi-mall stores it
+ * on the restriction — and is in the audit payload as well. The customer is never shown it.
+ */
+export const RestrictUserCodSchema = z
+    .object({
+        reason: reasonText('A reason is required to restrict cash on delivery for a customer'),
+    })
+    .strict();
+
+/**
+ * Lift the restriction. The reason is REQUIRED here too — unlike `restore`, which takes no
+ * body at all. jovi-mall requires one in both directions, and lifting clears the stored
+ * restriction, so the reason given for lifting survives only in this service's audit row.
+ */
+export const LiftUserCodRestrictionSchema = z
+    .object({
+        reason: reasonText('A reason is required to lift a customer’s cash-on-delivery restriction'),
+    })
+    .strict();
+
+/**
  * The activity feed's query — the audit list, narrowed to one user.
  *
  * A deliberate subset of `ListAuditQuerySchema`: no `targetType`/`targetId` (the path
@@ -210,4 +244,6 @@ export type UpdateUserBody = z.infer<typeof UpdateUserSchema>;
 export type SuspendUserBody = z.infer<typeof SuspendUserSchema>;
 export type SendCredentialBody = z.infer<typeof SendCredentialSchema>;
 export type ResetBotMemoryBody = z.infer<typeof ResetBotMemorySchema>;
+export type RestrictUserCodBody = z.infer<typeof RestrictUserCodSchema>;
+export type LiftUserCodRestrictionBody = z.infer<typeof LiftUserCodRestrictionSchema>;
 export type ListUserActivityQuery = z.infer<typeof ListUserActivityQuerySchema>;

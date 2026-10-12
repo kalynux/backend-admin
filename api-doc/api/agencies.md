@@ -24,6 +24,9 @@ Design record: [`../../docs/ADR-009-DELIVERY-NETWORK.md`](../../docs/ADR-009-DEL
 | `GET` | `/agencies/:agencyId/cod-limit` | `agencies.read` | **delegated** | — |
 | `PUT` | `/agencies/:agencyId/cod-limit` | `agencies.cod_limit.set` (financial) | **delegated** | ✅ |
 | `POST` | `/agencies/:agencyId/cod-limit/release` | `agencies.cod_limit.set` (financial) | **delegated** | ✅ |
+| `GET` | `/agencies/:agencyId/cod-restriction` | `agencies.read` | **delegated** | — |
+| `PUT` | `/agencies/:agencyId/cod-restriction` | `agencies.cod.restrict` (financial) | **delegated** | ✅ |
+| `POST` | `/agencies/:agencyId/cod-restriction/lift` | `agencies.cod.restrict` (financial) | **delegated** | ✅ |
 
 `agencies.read` is a Support-level lookup — answering a ticket about a stalled delivery needs
 it. The three writes are Admin and above; `agencies.deactivate` is `destructive` and had to be
@@ -192,6 +195,7 @@ Every list field, plus:
     },
     "policyVersion": 4,
     "policyVersionPausedConnections": 12,
+    "codRestriction": null,
     "timezone": "Africa/Douala",
     "preferredLanguage": "fr"
   }
@@ -215,6 +219,7 @@ Every list field, plus:
 | `policies.documents[]` | Up to two links to off-platform term sheets. URLs to somewhere else entirely: render them as links, and note this service never fetches or previews them |
 | `policyVersion` | Bumping it pauses every vendor connection for re-approval — which is why nothing here edits policies |
 | **`policyVersionPausedConnections`** | How many vendor connections are sitting in `paused_reapproval` **right now**. New in the dashboard-request round: `policyVersion` is the field with the largest blast radius on this screen and there was no way to see the consequence. The vendor side has had `counts.agencyConnections.pausedReapproval` all along; the two count the same collection, from opposite ends |
+| **`codRestriction`** | **(2026-10-10)** `null`, or `{ reason, restrictedAt, restrictedByUserId, restrictedBySource, restrictedByName }` when an administrator has switched cash on delivery off for this agency ([below](#get-agenciesagencyidcod-restriction)). `null` is also what every agency written before the field existed reads as. It is on the detail so a badge needs no second call; it is **not** on a list row. ⚠ `reason` is the administrator's — the agency is never shown it. Independent of `policies.cod.enabled`: that is the agency's own switch, and a restriction leaves it as the agency set it |
 
 > **Why `policies` is projected whole when nothing else here is.** These are commercial terms
 > already visible to every vendor connected to the agency, so there is no field that could be
@@ -697,6 +702,8 @@ collected-unremitted cash, a verdict jovi-mall computes and this service never r
     "exposure": { "inFlight": 420000, "inFlightCount": 6, "collectedUnremitted": 310000, "collectedCount": 4, "total": 730000 },
     "headroom": 770000,
     "overLimit": false,
+    "codRestricted": false,
+    "codRestrictedAt": null,
     "override": { "amount": 1500000, "reason": "Long-standing partner, remits daily", "setAt": "2026-10-02T09:00:00.000Z", "setByUserId": "…", "setBySource": "admin", "setByName": "Ada Admin" }
   }
 }
@@ -708,6 +715,7 @@ collected-unremitted cash, a verdict jovi-mall computes and this service never r
 | `exposure.inFlight` | COD shipments the agency holds (`assigned` → `agent_delivered`) whose cash is not collected |
 | `exposure.collectedUnremitted` | Collected cash not yet settled by a confirmed remittance or a direct-to-platform deposit |
 | `overLimit` | `exposure.total > limit` — after a vendor's forced dispatch, or a pin lowered below holdings |
+| `codRestricted` · `codRestrictedAt` | **(2026-10-10)** Whether an administrator has switched cash on delivery off for the agency, and since when ([below](#the-agencys-cod-restriction)). ⚠ **`headroom` does not account for it**: a restricted agency receives no new COD shipment whatever its headroom says, so a screen showing headroom must show this beside it. Passed through from jovi-mall's report; the reason and the author are on `GET …/cod-restriction` and on the detail's `codRestriction` |
 | `override` | The pin with its reason and author, or `null` |
 
 `agencies.read` (Support holds it). Not audited. `404 NOT_FOUND` for an unknown agency.
@@ -742,3 +750,115 @@ accepted: the next dispatch is refused and the read shows `overLimit: true`.
 Back to the 1 000 000 default. Same jovi-mall endpoint (`maxAmount: null`), **its own audit
 action** `agencies.cod_limit.release` — jovi-mall clears the pin entirely, so this row is the
 only surviving record it existed. Permission `agencies.cod_limit.set`.
+
+---
+
+## The agency's COD restriction
+
+**(2026-10-10, owner decision.)** An administrator can switch **cash on delivery off** for one
+agency, and back on. Three routes on one sub-resource — the same shape as the limit above — and
+one new permission, `agencies.cod.restrict`. Dashboard brief:
+[`../FRONTEND-CHANGELOG-cod-restrictions.md`](../FRONTEND-CHANGELOG-cod-restrictions.md).
+
+**What a restriction does.** The agency receives **no new cash-on-delivery work**:
+
+- at checkout, jovi-mall refuses COD for a basket this agency would carry — to the customer it
+  reads exactly like an agency that never offered COD, and the pay screen stops offering it;
+- no COD shipment is handed to it. Auto-dispatch holds the shipment back, and a vendor's manual
+  dispatch or change of agency is refused with `422 COD_AGENCY_RESTRICTED`. ⚠ **`force` does not
+  waive it** — `force` waives *amount* limits, and this is not an amount.
+
+**What it does not touch.** Parcels the agency already holds run to the end. Its cash chain
+(collections, deposits, remittances) is unchanged — a restricted agency still owes, and can
+still hand over, the cash it holds. Prepaid orders are unaffected. Its own
+`policies.cod.enabled` switch and its cash limit are not rewritten, so lifting the restriction
+returns it to exactly what it had configured.
+
+Nothing sets it automatically, and with nothing recorded — the state of every agency written
+before 2026-10-10 — COD behaves as it always did.
+
+## `GET /agencies/:agencyId/cod-restriction`
+
+Whether the agency is restricted, with the reason and who did it. **Delegated** to
+`GET /api/internal/admin/agencies/:id/cod-restriction`. The same record is on the detail as
+[`codRestriction`](#get-agenciesagencyid), read directly; this route is the one the two writes
+below are judged against.
+
+```json
+{
+  "success": true,
+  "data": {
+    "subject": "agency",
+    "subjectId": "66a1…",
+    "userId": "665f…",
+    "restricted": true,
+    "restriction": {
+      "reason": "Three remittances short in two weeks",
+      "restrictedAt": "2026-10-10T09:30:00.000Z",
+      "restrictedByUserId": "66b0…",
+      "restrictedBySource": "admin",
+      "restrictedByName": "Ada Admin"
+    }
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `subject` | Always `"agency"` on this mount |
+| `subjectId` | The agency's id — the `:agencyId` in the path |
+| `userId` | The `users._id` that owns the agency, or `null` |
+| `restricted` | `true` while cash on delivery is switched off |
+| `restriction` | `null` when not restricted. Otherwise the reason, when, and the acting administrator — `restrictedByUserId` is a **wi-admin administrator id**, not a platform user id |
+
+Exactly these fields: wi-admin names them one by one. `agencies.read` (Support holds it). Not
+audited. `404 NOT_FOUND` for an unknown agency.
+
+## `PUT /agencies/:agencyId/cod-restriction`
+
+Switch cash on delivery **off** for the agency.
+
+```json
+{ "reason": "Three remittances short in two weeks" }
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `reason` | string | **Required.** Trimmed, 3–500 characters. Stored on the restriction (jovi-mall) **and** in the audit payload. Never shown to the agency |
+
+`.strict()` — `reason` is the only key. ⚠ There is **no `restricted` field**: the direction is
+the route. (jovi-mall's own endpoint takes `{ restricted, reason }`; wi-admin sends
+`restricted: true` for this route and `false` for `/lift`.) Answers the same body as the GET.
+
+| | |
+|---|---|
+| **Permission** | `agencies.cod.restrict` — flagged `financial`, so never granted to Support and named into the Admin grant by hand, beside `agencies.cod_limit.set`. Tiers 1 and 2. No dual control |
+| **Audit** | `agencies.cod.restrict`, payload `{ reason }`; `before` / `after` are `{ codRestricted }` — `false → true` |
+
+### Errors
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | A malformed id, a missing or out-of-range `reason`, or any other key |
+| 404 | `NOT_FOUND` | No such agency — checked here before jovi-mall is called |
+| 409 | `PLATFORM_OPERATION_REJECTED` | The agency is **already restricted**. jovi-mall's write is a compare-and-set, so two administrators on one screen cannot each believe their reason is the one on record. `details.platformCode` is `COD_RESTRICTION_UNCHANGED`. Re-read and show the restriction that is there |
+| 500 | `INTERNAL_SERVER_ERROR` | The audit trail could not record the attempt. **Nothing changed** — jovi-mall is not called until the audit row exists |
+| 502 / 503 | `SERVICE_DEPENDENCY_UNAVAILABLE` | jovi-mall failed or is unreachable. A write is never retried automatically; re-read before pressing again |
+
+## `POST /agencies/:agencyId/cod-restriction/lift`
+
+Switch cash on delivery back **on**.
+
+```json
+{ "reason": "Shortfalls settled; reviewed with the agency" }
+```
+
+`reason` is **required here too** (trimmed, 3–500, `.strict()`) — unlike `/reactivate`, where
+undoing needs none. jovi-mall requires one in both directions, and lifting **clears** the stored
+restriction, so the reason given for lifting survives only in the audit row.
+
+Answers the report with `restricted: false` and `restriction: null`. Same permission,
+`agencies.cod.restrict`; **its own audit action** `agencies.cod.unrestrict` (payload
+`{ reason }`, `codRestricted: true → false`) — the row is the only surviving record that the
+restriction existed. An agency that is **not** restricted answers the same
+`409 PLATFORM_OPERATION_REJECTED` / `COD_RESTRICTION_UNCHANGED`; the other errors are as above.

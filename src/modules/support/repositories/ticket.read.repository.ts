@@ -48,6 +48,8 @@ export interface TicketReadModel extends Document {
     priority: string;
     importance: string;
     priority_locked?: boolean;
+    /** jovi-mall's flag: this ticket keeps its order's or booking's earnings paused. */
+    holds_earnings?: boolean;
     entity_type: string;
     entity_id: string;
     tracking_number?: string | null;
@@ -85,6 +87,7 @@ const TICKET_LIST_PROJECTION = {
     priority: 1,
     importance: 1,
     priority_locked: 1,
+    holds_earnings: 1,
     entity_type: 1,
     entity_id: 1,
     tracking_number: 1,

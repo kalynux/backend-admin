@@ -1002,6 +1002,25 @@ export const AUDIT_CATALOG = Object.freeze({
         transport: 'delegated',
         summary: 'Released an agency’s COD limit pin — back to the 1 000 000 default',
     },
+    /**
+     * The agency COD switch (owner decision 2026-10-10) — one permission, two audit actions,
+     * for the reason the pin above has two. Lifting CLEARS `cod_restriction` off the agency
+     * in jovi-mall, reason and author with it, so the `unrestrict` row is the only surviving
+     * record that the restriction existed and the only place the reason for lifting it is
+     * kept. The reason is in each row's payload; `before` / `after` carry `codRestricted`.
+     */
+    'agencies.cod.restrict': {
+        permission: 'agencies.cod.restrict',
+        target: 'agency',
+        transport: 'delegated',
+        summary: 'Switched cash on delivery off for a delivery agency',
+    },
+    'agencies.cod.unrestrict': {
+        permission: 'agencies.cod.restrict',
+        target: 'agency',
+        transport: 'delegated',
+        summary: 'Switched cash on delivery back on for a delivery agency',
+    },
 
     // ═══ USERS — delegated to jovi-mall ═══════════════════════════════════════
     // The reads are not here: a list and a detail are not actions. Three mutations,
@@ -1102,6 +1121,28 @@ export const AUDIT_CATALOG = Object.freeze({
         target: 'user',
         transport: 'delegated',
         summary: 'Withdrew a request asking a user to close one of their roles',
+    },
+    /**
+     * The customer COD switch (owner decision 2026-10-10). Two acts, one permission, as
+     * suspend/reinstate — and for the same reason `users.reinstate` has its own name:
+     * lifting CLEARS `customers.cod_restriction` in jovi-mall, so the `unrestrict` row is
+     * the only surviving record of the restriction and of why it was lifted.
+     *
+     * The target is the `user` (the path id), not the customer profile: that is the id
+     * every other row in this family carries, so one account's history reads in one feed.
+     * The reason is in the payload; `before` / `after` carry `codRestricted`.
+     */
+    'users.cod.restrict': {
+        permission: 'users.cod.restrict',
+        target: 'user',
+        transport: 'delegated',
+        summary: 'Switched cash on delivery off for a customer',
+    },
+    'users.cod.unrestrict': {
+        permission: 'users.cod.restrict',
+        target: 'user',
+        transport: 'delegated',
+        summary: 'Switched cash on delivery back on for a customer',
     },
 
     // ═══ VENDORS — delegated to jovi-mall ═════════════════════════════════════

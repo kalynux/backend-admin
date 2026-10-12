@@ -205,6 +205,37 @@ export const ReleaseAgencyCodLimitSchema = z
     })
     .strict();
 
+/**
+ * Switch cash on delivery OFF for the agency (owner decision 2026-10-10).
+ *
+ * The body carries the reason and nothing else — the DIRECTION is the route, never a field.
+ * jovi-mall's endpoint takes `{ restricted, reason }` on one path; here restricting and
+ * lifting are two routes with two audit actions (ADR-005 D-4), so a `restricted` key in
+ * this body is a 400 (`.strict()`) and can never contradict the URL it was sent to.
+ *
+ * The bound is jovi-mall's own (`COD_RESTRICTION_REASON_MIN` / `_MAX`, 3–500), which is also
+ * `reasonText`'s default; `test-agencies.ts` reads jovi-mall's constants and asserts the two
+ * still agree. The reason is FORWARDED — jovi-mall stores it on the restriction — and is in
+ * the audit payload as well. It is never shown to the agency.
+ */
+export const RestrictAgencyCodSchema = z
+    .object({
+        reason: reasonText('A reason is required to restrict cash on delivery for an agency'),
+    })
+    .strict();
+
+/**
+ * Lift the restriction. The reason is REQUIRED here too, which is the opposite call from
+ * `ReactivateAgencySchema` above and deliberate: jovi-mall requires one in both directions,
+ * and lifting clears the stored restriction, so the reason given for lifting survives only
+ * in this service's audit row — which is where a reviewer will look for it.
+ */
+export const LiftAgencyCodRestrictionSchema = z
+    .object({
+        reason: reasonText('A reason is required to lift an agency’s cash-on-delivery restriction'),
+    })
+    .strict();
+
 /*
  * `DelegatedPageQuerySchema` — a `.strict()` page schema for the delegated lists — was
  * declared here and **bound to no route**, verified by scan and removed 2026-09-12 (BR-022).
@@ -223,3 +254,5 @@ export type DeactivateAgencyBody = z.infer<typeof DeactivateAgencySchema>;
 export type ReactivateAgencyBody = z.infer<typeof ReactivateAgencySchema>;
 export type SetAgencyCodLimitBody = z.infer<typeof SetAgencyCodLimitSchema>;
 export type ReleaseAgencyCodLimitBody = z.infer<typeof ReleaseAgencyCodLimitSchema>;
+export type RestrictAgencyCodBody = z.infer<typeof RestrictAgencyCodSchema>;
+export type LiftAgencyCodRestrictionBody = z.infer<typeof LiftAgencyCodRestrictionSchema>;

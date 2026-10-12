@@ -2,9 +2,11 @@ import { Router } from 'express';
 import { defineRoute, permission, records } from '../../../api/route-manifest';
 import { UserController } from '../controllers/user.controller';
 import {
+    LiftUserCodRestrictionSchema,
     ListUserActivityQuerySchema,
     RequestRoleClosureSchema,
     ResetBotMemorySchema,
+    RestrictUserCodSchema,
     RoleClosureParamsSchema,
     SearchUsersQuerySchema,
     SendCredentialSchema,
@@ -218,6 +220,51 @@ defineRoute(router, {
     validate: { params: UserIdParamSchema, body: ResetBotMemorySchema },
     audit: records('users.bot_memory.reset'),
     handler: UserController.resetBotMemory,
+});
+
+/**
+ * The customer's cash-on-delivery restriction (owner decision 2026-10-10) — an
+ * administrator switching COD off for one customer, and back on.
+ *
+ * READ under `users.read`: Support answers "why can't I pay on delivery any more" and has
+ * to be able to see that a restriction exists. RESTRICT (PUT) and LIFT (POST …/lift) under
+ * `users.cod.restrict`, which tiers 1 and 2 hold and Support does not — the same posture as
+ * `users.suspend`, for the same kind of act. Two audit actions under the one permission,
+ * because lifting clears the record in jovi-mall (the suspend / reinstate reasoning above).
+ *
+ * Both writes take `{ reason }` and nothing else. jovi-mall's one endpoint takes a
+ * `restricted` flag; here the direction is the route, so it cannot disagree with the body.
+ *
+ * Customers only: an account with no customer profile is refused by jovi-mall
+ * (`AUTH_PROFILE_NOT_FOUND`), on the read and on both writes.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/:userId/cod-restriction',
+    access: permission('users.read'),
+    validate: { params: UserIdParamSchema },
+    handler: UserController.codRestriction,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'put',
+    path: '/:userId/cod-restriction',
+    access: permission('users.cod.restrict'),
+    validate: { params: UserIdParamSchema, body: RestrictUserCodSchema },
+    audit: records('users.cod.restrict'),
+    handler: UserController.restrictCod,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/:userId/cod-restriction/lift',
+    access: permission('users.cod.restrict'),
+    validate: { params: UserIdParamSchema, body: LiftUserCodRestrictionSchema },
+    audit: records('users.cod.unrestrict'),
+    handler: UserController.liftCodRestriction,
 });
 
 export const userRoutes = router;

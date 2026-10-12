@@ -309,6 +309,28 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'agencies', action: 'write', phase: 9, financial: true,
         summary: 'Pin (or release) how much cash on delivery an agency may hold, overriding the 1 000 000 default',
     },
+    /**
+     * Switch cash on delivery OFF for one agency, and back on — owner decision 2026-10-10.
+     *
+     * A restricted agency receives no NEW cash-on-delivery work: jovi-mall refuses COD at
+     * checkout for a basket it would carry and never hands it a COD shipment, `force`
+     * included. What it already holds runs to the end, and its cash chain, its own
+     * `policies.cod` switch and its cash limit are left exactly as they were.
+     *
+     * ── `financial`, for the reason its sibling above is ───────────────────────
+     * It decides whether the platform's cash passes through a third party at all, which is
+     * the cash limit's question asked at zero — jovi-mall models it as a limit kind
+     * (`agency_restricted`) beside the two amount limits. The flag keeps the name out of
+     * `allInFamily('agencies')`, so it is granted by name in the tier-2 money block and the
+     * boot assertion refuses it to Support.
+     *
+     * One permission for both directions, two audit actions (`agencies.cod.restrict` /
+     * `agencies.cod.unrestrict`), like the pin and its release. No dual control.
+     */
+    'agencies.cod.restrict': {
+        family: 'agencies', action: 'write', phase: 9, financial: true,
+        summary: 'Switch cash on delivery off for a delivery agency, or back on — it receives no new COD work while restricted',
+    },
 
     // ═══ BILLING ═══ 7 legacy endpoints ═══════════════════════════════════════
     'billing.plans.read': {
@@ -1079,6 +1101,33 @@ export const PERMISSION_CATALOG = Object.freeze({
     'users.close': {
         family: 'users', action: 'write', phase: 6, destructive: true,
         summary: 'Ask a user to close one of their roles (they must confirm; irreversible once they do)',
+    },
+    /**
+     * Switch cash on delivery OFF for one CUSTOMER, and back on — owner decision 2026-10-10.
+     *
+     * The lever the Returns policy promises: refusing parcels without a valid reason "may
+     * lead us to restrict cash on delivery on your account". A restricted customer cannot
+     * PLACE a cash-on-delivery order; every other payment method, and every order already
+     * placed, is untouched. It is a person's decision each time — nothing sets it
+     * automatically — and jovi-mall refuses it for an account with no customer profile.
+     *
+     * ── Unflagged, like `users.suspend`, which it sits beside in kind ──────────
+     * Both take something from one account and both are undone with one call. It moves no
+     * money and no cash custody, which is the difference from `agencies.cod.restrict`
+     * (`financial`): an agency holds the platform's cash, a customer only hands it over.
+     * So `allInFamily('users')` grants it to tier 2, exactly as it grants `users.suspend`.
+     *
+     * ⚠️ **Tier 3 must not hold it**, and no flag enforces that — the same position as
+     * `users.password.reset`. The protection is that SUPPORT names its grants by hand and
+     * this is not among them, pinned in `test-users.ts` twice over: by name, and by the
+     * assertion that `users.bot_memory.reset` is the only `users.*` write Support holds.
+     *
+     * One permission for both directions, two audit actions (`users.cod.restrict` /
+     * `users.cod.unrestrict`), like suspend and reinstate. No dual control.
+     */
+    'users.cod.restrict': {
+        family: 'users', action: 'write', phase: 6,
+        summary: 'Switch cash on delivery off for a customer, or back on — they cannot place a COD order while restricted',
     },
 
     // ═══ VENDORS ═══ all five built ═══════════════════════════════════════════

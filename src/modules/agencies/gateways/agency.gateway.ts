@@ -2,6 +2,11 @@ import { platformRequest } from '../../../infra/platform/platform.client';
 import { auditedAttempt } from '../../audit/domain/audit.writer';
 import { ActorContext } from '../../audit/domain/audit-context';
 import { AuditAction } from '../../audit/domain/audit.catalog';
+import {
+    CodRestrictionReport,
+    codRestrictionAuditState,
+    toCodRestrictionReport,
+} from '../../cod/read-models/cod-restriction.dto';
 
 /**
  * The agency domain's WRITE half, reached over jovi-mall's internal admin API.
@@ -362,6 +367,102 @@ export async function releaseCodLimit(
             return result.data;
         },
         codLimitAuditState,
+    );
+}
+
+// ─── The agency's COD restriction (owner decision 2026-10-10) ─────────────────
+
+/**
+ * Whether an administrator has switched cash on delivery off for this agency, with the
+ * reason and who did it. `restriction: null` means not restricted.
+ *
+ * A DELEGATED read although the agency detail already projects the field: it is the
+ * `before` of the two writes below, and reading it through jovi-mall means the audit row
+ * and the compare-and-set are judged against the same answer. A screen that only needs the
+ * badge reads `codRestriction` off the detail instead and makes no second call.
+ */
+export async function codRestriction(agencyId: string, context: ActorContext): Promise<CodRestrictionReport> {
+    const result = await platformRequest<CodRestrictionReport>({
+        method: 'GET',
+        path: `/agencies/${agencyId}/cod-restriction`,
+        actor: context.actor,
+        requestId: context.requestId,
+    });
+    return toCodRestrictionReport(result.data);
+}
+
+/**
+ * Switch cash on delivery OFF for the agency: no new COD work reaches it. The reason is
+ * FORWARDED (jovi-mall stores it on the restriction) and is in the audit payload too.
+ *
+ * jovi-mall's write is a compare-and-set and answers `409 COD_RESTRICTION_UNCHANGED` when
+ * the agency is already restricted, so two administrators on one screen cannot each believe
+ * their reason is the one on record. That code reaches the dashboard in
+ * `details.platformCode`, and the audit row is stamped `failed` with it.
+ *
+ * `agency` is the caller's direct read and is used for the row's LABEL only. The row's
+ * `before` is `current` — the report read through jovi-mall just ahead of the write —
+ * reduced by the same mapper as the `after`, so the two halves of the diff are one key
+ * wide and line up: `codRestricted: false → true`. That is narrower than the limit pin's
+ * `before` above, which also carries the agency's status; nothing here can change those.
+ */
+export async function restrictCod(
+    agencyId: string,
+    reason: string,
+    agency: AgencySnapshot,
+    current: CodRestrictionReport,
+    context: ActorContext,
+): Promise<CodRestrictionReport> {
+    return auditedDelegation(
+        'agencies.cod.restrict',
+        context,
+        { id: agencyId, label: labelOf(agency) },
+        { reason },
+        codRestrictionAuditState(current),
+        async () => {
+            const result = await platformRequest<CodRestrictionReport>({
+                method: 'PUT',
+                path: `/agencies/${agencyId}/cod-restriction`,
+                body: { restricted: true, reason },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return toCodRestrictionReport(result.data);
+        },
+        codRestrictionAuditState,
+    );
+}
+
+/**
+ * LIFT the restriction. The same jovi-mall endpoint with `restricted: false`, under its OWN
+ * audit action: jovi-mall clears the field entirely, so this row is the only surviving
+ * record the restriction existed, and its payload the only place the reason for lifting is
+ * kept (the `agencies.cod_limit.release` reason).
+ */
+export async function liftCodRestriction(
+    agencyId: string,
+    reason: string,
+    agency: AgencySnapshot,
+    current: CodRestrictionReport,
+    context: ActorContext,
+): Promise<CodRestrictionReport> {
+    return auditedDelegation(
+        'agencies.cod.unrestrict',
+        context,
+        { id: agencyId, label: labelOf(agency) },
+        { reason },
+        codRestrictionAuditState(current),
+        async () => {
+            const result = await platformRequest<CodRestrictionReport>({
+                method: 'PUT',
+                path: `/agencies/${agencyId}/cod-restriction`,
+                body: { restricted: false, reason },
+                actor: context.actor,
+                requestId: context.requestId,
+            });
+            return toCodRestrictionReport(result.data);
+        },
+        codRestrictionAuditState,
     );
 }
 
