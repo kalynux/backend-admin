@@ -1,5 +1,11 @@
 # Backend requests
 
+**Amended 2026-10-15** — **round nine** added: BR-030 answered in [`RESPONSE-2026-10-15-BR-030.md`](RESPONSE-2026-10-15-BR-030.md), and BR-031 (two pages BR-030 left half-updated) in [`RESPONSE-2026-10-15-BR-031.md`](RESPONSE-2026-10-15-BR-031.md).
+
+**Amended 2026-10-13** — **round eight** added: BR-029 answered in [`RESPONSE-2026-10-13-BR-029.md`](RESPONSE-2026-10-13-BR-029.md).
+
+**Amended 2026-10-12** — **round seven** added: BR-028 answered in [`RESPONSE-2026-10-12-BR-028.md`](RESPONSE-2026-10-12-BR-028.md), BR-027 in [`RESPONSE-2026-10-12-BR-027.md`](RESPONSE-2026-10-12-BR-027.md).
+
 **Amended 2026-09-15** — **round six** added (BR-024 · BR-025 answered, BR-026 open), and the `details.platformCode` bullet below reversed for **429**: it now arrives on a forwarded rate-limit refusal. 403 is unchanged and that asymmetry is now deliberate — see [`RESPONSE-2026-09-15.md`](RESPONSE-2026-09-15.md).
 
 **Verified against source on 2026-09-09** — the four-round index and its close-out links; the platform-rules list, whose `details.platformCode` bullet was corrected for the 403/429 allowlist against `admin/src/core/errors/detail-policy.ts:132-176`; the multipart narrowing and the four `†` permissions, both re-derived from source; and every route the folder names, checked against the live route manifest.
@@ -144,6 +150,73 @@ and it is the cost of a fast channel rather than an argument against one.
   administrator phone verification does **not** "self-heal when the template is approved" — Meta
   will not let that template be created at all. The fix is an account matter, not a code one, and
   there is a manual in-window workaround that works today.
+
+---
+
+### Round seven — opened 2026-10-12, one from an owner request and one from an operator report
+
+| # | Request | Answered in |
+|---|---|---|
+| [BR-027](BR-027-platform-transactions.md) | One platform-wide transactions list, filterable column by column, with a detail read | [`RESPONSE-2026-10-12-BR-027.md`](RESPONSE-2026-10-12-BR-027.md) |
+| [BR-028](BR-028-search-by-id-finds-nothing.md) | Searching by id finds nothing unless the id is exactly the right kind, whole | [`RESPONSE-2026-10-12-BR-028.md`](RESPONSE-2026-10-12-BR-028.md) |
+
+**BR-027 → built: three routes, nine kinds, no new permission.** Contract:
+[`transactions.md`](../../api/transactions.md). Not deployed yet.
+
+- **`GET /money/transactions`** merges nine kinds of record into one row shape, with every filter
+  applied in the database and the amount comparable five ways. Cursor-paged, strict query.
+- **Nine kinds, not eight.** Delivery money returned to a customer by hand writes no refund row,
+  so it is a kind of its own (`delivery_fee_refund`).
+- **Graded by the reads the caller already holds.** Support gets six kinds, tiers 1–2 all nine,
+  and the platform's own ledger rows go to tier 1 only. `meta.withheld` names what was left out.
+- ⚠ **Two owner decisions are open** and are stated in the response: whether a customer's
+  cash-on-delivery payment is a row, and whether refund-debt write-offs are.
+
+**BR-028 → four of five asks built, one declined.** It was measured against a throwaway database
+before it was filed, and every measurement held.
+
+- **`GET /users?search=` now finds the account behind a profile id** — a customer, vendor, agency
+  or agent id. For a customer this is the first route from an order to the person, and it is why
+  a `CUSTOMER` ticket entity is now reachable by search.
+- **`GET /agencies` and `GET /agents` match the user id**, as `GET /vendors` always has.
+- **`GET /audit?search=` matches a pasted id** (target, related target, actor), and
+  [`audit.md`](../../api/audit.md) now states the three text fields it reads. The action name is
+  not one of them.
+- ⛔ **A part of an id does not match, by decision.** Every page whose `search` takes an id now
+  says an id matches only whole, and says which ids that page matches.
+
+### Round eight — opened 2026-10-13, a follow-up to BR-028
+
+| # | Request | Answered in |
+|---|---|---|
+| [BR-029](BR-029-users-search-say-which-id-matched.md) | `GET /users?search=<id>`: say which kind of id matched | [`RESPONSE-2026-10-13-BR-029.md`](RESPONSE-2026-10-13-BR-029.md) |
+
+**BR-029 → built as proposed.** `GET /users` carries `meta.idMatch.kinds` when `search` was read
+as an id: `user`, `customer`, `vendor`, `agency`, `agent`, as a list. Absent for every other
+search, `[]` for an id that is nobody's. It describes the **id**, not the page, so an empty page
+under a filter can be told apart from an id that belongs to no one. Contract:
+[`users.md` § `meta.idMatch`](../../api/users.md#metaidmatch--what-the-pasted-id-was).
+
+### Round nine — opened 2026-10-13, the owner's answers to BR-027
+
+| # | Request | Answered in |
+|---|---|---|
+| [BR-030](BR-030-transactions-owner-decisions.md) | Two more kinds of transaction, and the platform's own amounts held back on the server | [`RESPONSE-2026-10-15-BR-030.md`](RESPONSE-2026-10-15-BR-030.md) |
+| [BR-031](BR-031-br030-doc-corrections.md) | Two pages still state the old figures after BR-030 | [`RESPONSE-2026-10-15-BR-031.md`](RESPONSE-2026-10-15-BR-031.md) |
+
+**BR-030 → all three parts built; § 3c answered with a list.** Not deployed yet.
+
+- **`cod_collection` and `earnings_adjustment`** are kinds ten and eleven on `/money/transactions`;
+  every row gains `links.agentId` and `links.payoutId`.
+- ⚠ **The BR-027 reply's rule for debt adjustments was too wide** and would have listed a vendor
+  overflow charge twice. The kind is exactly write-offs and payout-driven recoveries, and a test
+  reads jovi-mall's writers to keep it so.
+- ⚠ **`money.earnings.platform.read` (tier 1 only) now guards the three `/money/earnings/platform*`
+  routes** — tier 2 gets `403` — and decides who is sent the platform's amounts on the order split
+  (`platformAmountsWithheld`) and on the transactions list.
+
+**BR-031 → corrected, plus one line it did not name** (`permissions.md` "4 of 142"). Both misses were
+older lines on pages whose new text was right; `test:authz` and `test:transactions` now pin them.
 
 ---
 

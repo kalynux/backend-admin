@@ -92,7 +92,7 @@ could express none of them.
 
 | Parameter | Type | Notes |
 |---|---|---|
-| `search` | string, 1–120 | Matches name, email, phone, or — when 24-hex — the agent id |
+| `search` | string, 1–120 | Matches name, email, phone, or — when 24-hex — the **agent id or their user id** (the user id since 2026-10-12, BR-028; the same pair [`GET /vendors`](vendors.md) matches). **An id matches only whole:** exactly 24 hexadecimal characters, in either letter case. A shorter or longer term, or one with anything round it, is not read as an id; it is treated as text |
 | `status` | `pending_verification` \| `active` \| `inactive` \| `suspended` | The account status |
 | `kycStatus` | `unverified` \| `pending` \| `verified` \| `rejected` | Identity documents |
 | `availability` | `online` \| `offline` \| `on_break` | What the agent set |

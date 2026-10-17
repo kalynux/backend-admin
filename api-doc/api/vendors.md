@@ -91,7 +91,7 @@ the tiebreaker that keeps paging stable.
 
 | Parameter | Type | Notes |
 |---|---|---|
-| `search` | string, 1–120 | Matches **business name** (resolved against `stores` first), display name, email, phone, and — when the term is a 24-hex id — the **vendor id or its user id** |
+| `search` | string, 1–120 | Matches **business name** (resolved against `stores` first), display name, email, phone, and — when the term is a 24-hex id — the **vendor id or its user id**. **An id matches only whole:** exactly 24 hexadecimal characters, in either letter case. A shorter or longer term, or one with anything round it, is not read as an id; it is treated as text |
 | `status` | `active` \| `pending_verification` \| `inactive` | |
 | `kycStatus` | `pending` \| `verified` \| `rejected` | |
 | `onboarding` | `complete` \| `incomplete` | |

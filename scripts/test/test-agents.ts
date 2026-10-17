@@ -184,10 +184,24 @@ t.assert('a 24-hex term ALSO matches the id — pasting one must not look broken
     return or.some((branch) => '_id' in branch);
 });
 
-t.assert('a non-id term adds no _id branch', () => {
+// BR-028. The agent's detail page prints their user id, and the user directory names them
+// by nothing else. The vendor directory has matched both since it was written.
+t.assert('⭐ a 24-hex term ALSO matches the USER id, as the vendor directory does', () => {
+    const filter = buildAgentFilter({ ...base, search: OID }) as Record<string, unknown>;
+    const or = filter.$or as Record<string, unknown>[];
+    return or.some((branch) => String(branch.user_id) === OID);
+});
+
+t.assert('a non-id term adds no id branch of either kind', () => {
     const filter = buildAgentFilter({ ...base, search: 'ama' }) as Record<string, unknown>;
     const or = filter.$or as Record<string, unknown>[];
-    return !or.some((branch) => '_id' in branch);
+    return !or.some((branch) => '_id' in branch || 'user_id' in branch);
+});
+
+t.assert('a PART of an id is not read as an id', () => {
+    const filter = buildAgentFilter({ ...base, search: OID.slice(0, 8) }) as Record<string, unknown>;
+    const or = filter.$or as Record<string, unknown>[];
+    return !or.some((branch) => '_id' in branch || 'user_id' in branch);
 });
 
 t.assert('a blank search term adds no clause at all', () =>

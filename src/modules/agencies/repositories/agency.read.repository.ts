@@ -430,7 +430,7 @@ export function buildAgencyFilter(query: AgencySearchQuery): Filter<AgencyReadMo
 }
 
 /**
- * Match a business name, a contact name, an email, a phone — or an agency id.
+ * Match a business name, a contact name, an email, a phone — or an id.
  *
  * `magazin.name` first because it is what an administrator actually types: the agency is
  * known to the platform by its business name, and `display_name` here is a contact
@@ -439,6 +439,11 @@ export function buildAgencyFilter(query: AgencySearchQuery): Filter<AgencyReadMo
  * The id branch matters for the same reason it does on the user directory: every other
  * screen identifies an agency by its id, so pasting one into the only search box is the
  * obvious move, and a directory that answers "no results" to a valid id looks broken.
+ *
+ * Two id branches, as on the vendor directory (BR-028): the AGENCY id and the USER id. The
+ * agency's own detail page prints its user id, and the user directory names this business
+ * by nothing else, so that is as likely to be what was copied. An id matches whole, never
+ * in part.
  *
  * `containsInsensitive` escapes the term before it reaches a `$regex` — an unescaped one
  * is both a correctness bug (`a.b` matching `axb`) and a catastrophic-backtracking pattern
@@ -455,6 +460,7 @@ function agencySearchClause(term: string): Record<string, unknown> {
 
     if (Types.ObjectId.isValid(term) && term.length === 24) {
         branches.push({ _id: new ObjectId(term) });
+        branches.push({ user_id: new ObjectId(term) });
     }
 
     return { $or: branches };

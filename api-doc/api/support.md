@@ -184,7 +184,7 @@ order nobody can predict.
 
 | Parameter | Type | Notes |
 |---|---|---|
-| `search` | string, 1–120 | Matches the **subject** (case-insensitive, contains). A **24-hex** term is read as a ticket id instead |
+| `search` | string, 1–120 | Matches the **subject** (case-insensitive, contains). A **24-hex** term is read as a ticket id instead — the **ticket's own id only**, not the id of the order, shipment or person the ticket is about (filter on `entityId` for those). **An id matches only whole:** exactly 24 hexadecimal characters, in either letter case. A part of an id is treated as subject text |
 | `status` | token, 1–60 | **Format-validated, not pinned** — see below |
 | `type` | token, 1–60 | |
 | `priority` | token, 1–60 | |
@@ -229,7 +229,7 @@ is no write path by which a twelfth value can be stored.
 | `SHIPMENT` | ✅ `shipmentId` |
 | `PRODUCT` | ✅ **since BR-016 § 7** — needs `entity.vendorId`, which is now on the detail |
 | `VENDOR` · `AGENT` · `AGENCY` · `USER` | ✅ each maps to a directory, the id is the parameter |
-| `CUSTOMER` | ❌ **there is no customer directory** — see below. This row said ✅ until 2026-08-26 |
+| `CUSTOMER` | ⚠ **By search, not by link** — there is no customer directory, but since 2026-10-12 `GET /users?search=<id>` finds the person. See below. This row said ✅ until 2026-08-26 and ❌ until 2026-10-12 |
 | `BOOKING` · `DELIVERY` | ❌ no administrative surface to link to |
 | `OTHER` | ❌ names no entity by definition — jovi-mall lets `entityId` be omitted for it alone |
 
@@ -245,13 +245,18 @@ unrecognised token as plain text.
 `GET /users?role=customer` answers the same question. That holds for *finding* a customer and
 fails for *following a ticket's link*, because the two are keyed on different documents:
 
-- the user directory is keyed on **`users._id`** — `GET /users/:userId`, and the search box's
-  id branch matches `users._id` **only** (`user.read.repository.ts` § `searchClause`);
+- the user directory is keyed on **`users._id`** — `GET /users/:userId` takes nothing else;
 - a "customer id" in the platform's vocabulary is a **`customers._id`**, a separate document
   joined to a user by `customers.user_id`.
 
-So a customer id pasted into the user directory returns an empty page rather than an error. The
-row above put `CUSTOMER` beside four types that really do have a directory, and it was wrong.
+So `/users/<customerId>` is a `404`, and the row above put `CUSTOMER` beside four types that
+really do have a directory. It was wrong.
+
+✅ **The search box closes the gap (2026-10-12, BR-028).** Until that date a customer id pasted
+into the user directory returned an empty page. `GET /users?search=<24-hex>` now tries the term
+as a user id **and** as a customer, vendor, agency or agent id, and returns the account that
+owns it — see [`users.md` § Searching by id](users.md#searching-by-id). It is a **search**, so
+the destination is a list of one row (or none), not a detail page.
 
 **And nothing guarantees which of the two a ticket carries.** jovi-mall resolves `entityId`
 for `ORDER`, `BOOKING` and `PRODUCT` only; every other type falls through
@@ -259,8 +264,13 @@ for `ORDER`, `BOOKING` and `PRODUCT` only; every other type falls through
 unread (`ticket.service.ts`). A `CUSTOMER` ticket's `entityId` is whatever its creator sent,
 so even a customer screen could not be routed to from it safely.
 
-Render `CUSTOMER` as plain text, alongside `BOOKING` and `DELIVERY`. Two things on the same
-ticket **are** routable and are usually the operator's actual destination:
+That last point is why the search suits this case: it does not need to know which of the two
+ids the ticket carries, because it tries both. An `entityId` that is neither returns an empty
+page, which is the honest answer.
+
+Link `CUSTOMER` to `/users?search=<entityId>`, never to `/users/<entityId>`. `BOOKING` and
+`DELIVERY` stay plain text. Two things on the same
+ticket **are** routable directly and are usually the operator's actual destination:
 `createdBy.userId` — a `users._id` whenever `createdBy.role` is not `admin`, so
 `/users/:userId` behind `users.read` — and the `ORDER` or `SHIPMENT` a complaint about a
 customer is normally filed against instead.

@@ -1,5 +1,9 @@
 # `/users` — platform user management
 
+**Amended 2026-10-13 (BR-029).** `GET /users` gains **`meta.idMatch`**: when `search` was read as an id, it says which kind of id it was (`user`, `customer`, `vendor`, `agency`, `agent`). Additive; absent for every other search. See [`meta.idMatch`](#metaidmatch--what-the-pasted-id-was). Pinned by `npm run test:users` § 4 and § 2b.
+
+**Amended 2026-10-12 (BR-028).** `GET /users?search=` now also finds the account behind a **profile id**: a customer, vendor, agency or agent id resolves to the person who owns it. An id still matches only whole. See [Searching by id](#searching-by-id). Pinned by `npm run test:users` § 2 and § 2b.
+
 **Amended 2026-10-10.** Three routes for the **customer's cash-on-delivery restriction** (owner decision): an administrator holding the new `users.cod.restrict` switches COD off for one customer, and back on. The customer profile on `GET /users/:userId` gains `codRestriction`. See [the section at the end](#the-customers-cod-restriction). Pinned by `npm run test:users` § 7b and § 9.
 
 **Amended 2026-10-04.** Three routes for **role closure** (jovi-mall ADR-A10): an administrator holding the new `users.close` asks a user to close ONE role, and the user confirms or declines it themselves. See [the section at the end](#role-closure). Pinned by `npm run test:users`.
@@ -72,16 +76,94 @@ could request by query string.
 
 | Parameter | Type | Notes |
 |---|---|---|
-| `search` | string, 1–120 | Matches **email**, **phone**, or — when the term is itself a 24-hex id — the **user id**. That last branch is what makes a support conversation work: an id copied out of an order, a ticket or an audit row finds the person |
+| `search` | string, 1–120 | Matches **email**, **phone**, or — when the term is itself a 24-hex id — the **user id, or the id of one of that person's profiles** (customer, vendor, agency, agent). That last branch is what makes a support conversation work: an id copied out of an order, a ticket or an audit row finds the person. **An id matches only whole** — see [Searching by id](#searching-by-id) |
 | `role` | `vendor` \| `agency` \| `agent` \| `customer` | **`admin` is deliberately absent** — no `users` row can hold that role, so offering it would advertise a search that can only return nothing |
 | `status` | `active` \| `suspended` \| `closed` | `closed` is an account its **owner** closed (jovi-mall ADR-A02). Filterable because a closed account still owns orders and tickets, so "why does this order resolve to a customer with no name" is a real support question |
 | `from` / `to` | ISO-8601 instant | Creation range, half-open `[from, to)`. **Maximum span 366 days** |
 | `page`, `limit`, `sort` | | |
 
+### Searching by id
+
+A 24-hex term is tried as **five** ids, and any one of them finds the account:
+
+| The term is | Finds |
+|---|---|
+| a user id (`users._id`) | that account |
+| a **customer** id — the `customerId` on an order | the account that owns that customer profile |
+| a **vendor** id | the account that owns that vendor |
+| an **agency** id | the account that owns that agency |
+| an **agent** id | the account that owns that agent |
+
+The row that comes back is the **account**, so its `id` is the user id, not the id that was
+typed. The id that was typed is on the detail, as `profiles[].id`, and
+[`meta.idMatch`](#metaidmatch--what-the-pasted-id-was) says which kind of id it was.
+
+For a customer this is the only route there is: there is no customer directory, and the id on
+an order is a customer id. `GET /users?search=<customerId>` is the link from an order to the
+person.
+
+> **An id matches only whole — exactly 24 hexadecimal characters.** A shorter or longer term,
+> or one with anything round it (quotes, `ObjectId("…")`, a URL), is not read as an id. It is
+> treated as text and matched against the email and the phone, where it will normally match
+> nothing. Letter case does not matter.
+
+Matching a **part** of an id was considered and declined (BR-028 § 3). A run of digits is far
+more often part of a phone number than the start of an id, so reading `67011234` as both would
+return people whose phone does not contain it. Only the start of an id could be matched
+cheaply, and the dashboard draws an id as its start **and** its end.
+
+`role` and the other filters still apply to an id match: `?search=<customerId>&role=vendor`
+finds the person only if they are also a vendor.
+
+### `meta.idMatch` — what the pasted id was
+
+The row an id search returns is the account, so its `id` is often not the id that was typed.
+`meta.idMatch` says what the typed id **was**.
+
+```jsonc
+"meta": {
+  "total": 1, "page": 1, "limit": 20, "pages": 1,
+  "idMatch": { "kinds": ["customer"] }
+}
+```
+
+| `meta.idMatch` | Means |
+|---|---|
+| **absent** (no key) | `search` was not read as an id: no `search`, a name, an email, a phone, a part of an id. A service older than 2026-10-13 also sends no key |
+| `{ "kinds": [] }` | `search` was a whole id, and it is **nobody's**: no account has it and no profile has it. An order id pasted here is the usual case |
+| `{ "kinds": ["user"] }` | It is an account's own id |
+| `{ "kinds": ["customer"] }` | It is a customer profile's id. Likewise `vendor`, `agency`, `agent` |
+| `{ "kinds": ["user", "customer"] }` | It is both. See below |
+
+- **`kinds` is a list**, in a fixed order: `user`, `customer`, `vendor`, `agency`, `agent`. The
+  five kinds of id live in five separate collections, so nothing but probability stops one value
+  being a user id and somebody else's profile id. In that case the page has **two** rows, and the
+  row whose `id` equals the term is the `user` one.
+- **The vocabulary is open.** Treat a kind you do not recognise as unknown rather than as an
+  error; a sixth profile kind would be an additive change.
+- **It is never `null`.** Present with a list, or not there.
+
+**It describes the id, not the page.** `role`, `status` and the date range do not affect it. So
+an empty page has three different explanations, and `idMatch` tells them apart:
+
+| Request | `total` | `kinds` | What happened |
+|---|---|---|---|
+| `?search=<customerId>&role=vendor` | 0 | `["customer"]` | The id is a customer's. **A filter is hiding the account** |
+| `?search=<userId>&role=vendor` | 0 | `["user"]` | The same, for an account's own id |
+| `?search=<an order id>&role=vendor` | 0 | `[]` | The id is nobody's. Removing the filter will not help |
+| `?search=<customerId>`, **no other filter** | 0 | `["customer"]` | ⚠ The profile exists and **its account does not**. A data fault, not a search result: `users` rows are never deleted by the platform, so this needs a hand-edited database to happen |
+
+This tells a caller that an id is a customer's without returning the row. It is nothing they
+could not learn by sending the same search without the filter, and every holder of `users.read`
+may send that.
+
+It costs one extra count on `users._id`, and only for a term that is a whole id.
+
 ### Example
 
 ```
 GET /api/v1/users?role=agent&status=active&search=+237670112233&sort=-createdAt&limit=25
+GET /api/v1/users?search=66b0000000000000000000c3        ← a customer id copied from an order
 ```
 
 ### Response (200)

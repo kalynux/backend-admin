@@ -87,7 +87,7 @@ disappears rather than erroring when the administrator does not hold its permiss
 | Unread inbox badge | `GET /notifications/unread-count` | `notifications.read` | All three tiers. Polled — there is no realtime |
 | Waiting for approval | `GET /approvals?status=pending` | `approvals.read` | Tiers 1–2. `status` already defaults to `pending` |
 | Platform cash position | `GET /cod/overview` | `cod.overview.read` | Tiers 1–2. **Delegated** — can 502/503 |
-| Platform earnings | `GET /money/earnings/platform` | `money.earnings.read` | Tiers 1–2. **Delegated**. Oversight only — the marketplace never pays itself out, so no payout pipeline on this account |
+| Platform earnings | `GET /money/earnings/platform` | **`money.earnings.platform.read`** (since 2026-10-15) | **Tier 1 only.** **Delegated**. Oversight only — the marketplace never pays itself out, so no payout pipeline on this account |
 | Service health | `GET /system/health` | `system.health.read` | Tiers 1–2. Includes `audit.danglingIntents` |
 | Maintenance banner | `GET /system/maintenance` | `system.maintenance.read` | **Render `effectiveMode`, not `storedMode`** — they differ once a window has passed its expiry |
 
@@ -1207,8 +1207,8 @@ Assignment is refused by the platform for `BILLING_PLAN_INACTIVE` and `BILLING_P
 
 | Method | Path | Permission | Transport | Audited |
 |---|---|---|---|---|
-| GET | `/money/earnings/platform` | `money.earnings.read` | delegated | — |
-| GET | `/money/earnings/platform/ledger` | `money.earnings.read` | direct | — |
+| GET | `/money/earnings/platform` | **`money.earnings.platform.read`** (tier 1) | delegated | — |
+| GET | `/money/earnings/platform/ledger` | **`money.earnings.platform.read`** (tier 1) | direct | — |
 | GET | `/money/earnings/accounts` | `money.earnings.read` | delegated | — |
 | GET | `/money/earnings/allocations` | `money.earnings.read` | direct | — |
 | GET | `/money/earnings/allocations/:id` | `money.earnings.read` | direct | — |
@@ -1221,6 +1221,9 @@ Assignment is refused by the platform for `BILLING_PLAN_INACTIVE` and `BILLING_P
 | GET | `/money/payments` | `money.payments.read` | direct | — |
 | GET | `/money/payments/:transactionId` | `money.payments.read` | direct | — |
 | GET | `/money/refunds` | `money.payments.read` | direct | — |
+| GET | `/money/transactions` | any of `money.payments.read` · `money.payouts.read` · `cod.deposits.read` · `cod.remittances.read` · `money.earnings.read`; each kind graded by its own reads | direct | — |
+| GET | `/money/transactions/summary` | the same | direct | — |
+| GET | `/money/transactions/:kind/:id` | the same, then the kind's own reads (`403`) | direct | — |
 | GET | `/money/delivery-fee-refunds` | `money.payments.read` | direct | — |
 | GET | `/money/delivery-fee-refunds/:refundId` | `money.payments.read` | direct | — |
 | POST | `/money/delivery-fee-refunds/:refundId/settle` | **`orders.refund`** | **delegated** | ✅ `orders.delivery_fee_refund.settle` |

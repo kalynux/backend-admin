@@ -492,12 +492,16 @@ export function buildAgentFilter(query: AgentSearchQuery): Filter<AgentReadModel
 }
 
 /**
- * Match a name, an email, a phone number, or an agent id.
+ * Match a name, an email, a phone number, or an id.
  *
  * The id branch matters more than it looks: every other admin screen — a shipment, a COD
  * discrepancy, an audit row — identifies an agent by their id, so pasting one into the
  * only box on the directory is the obvious move, and a directory that answers "no results"
  * to a valid id looks broken rather than strict.
+ *
+ * Two id branches, as on the vendor directory (BR-028): the AGENT id and the USER id. The
+ * agent's own detail page prints their user id, and the user directory names this person
+ * by nothing else. `user_id` carries a unique index. An id matches whole, never in part.
  *
  * `containsInsensitive` escapes the term before it reaches a `$regex`: an unescaped one is
  * both a correctness bug and a catastrophic-backtracking pattern the caller supplies.
@@ -512,6 +516,7 @@ function agentSearchClause(term: string): Record<string, unknown> {
 
     if (Types.ObjectId.isValid(term) && term.length === 24) {
         branches.push({ _id: new ObjectId(term) });
+        branches.push({ user_id: new ObjectId(term) });
     }
 
     return { $or: branches };

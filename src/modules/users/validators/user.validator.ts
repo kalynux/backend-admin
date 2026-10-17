@@ -68,9 +68,11 @@ export const USER_MAX_RANGE_DAYS = 366;
 export const SearchUsersQuerySchema = listQuery(USER_SORT, '-createdAt', {
     /**
      * Matches an email, a phone number, or — when the term is itself a 24-hex id — the
-     * user id. The last case is what makes a support conversation work: an id copied out
-     * of an order, a ticket or an audit row is pasted into the one box on the screen and
-     * finds the person, instead of returning nothing and looking broken.
+     * user id, or the id of that person's customer, vendor, agency or agent profile. The
+     * last case is what makes a support conversation work: an id copied out of an order, a
+     * ticket or an audit row is pasted into the one box on the screen and finds the person,
+     * instead of returning nothing and looking broken. The id on an order is a customer id,
+     * not a user id, which is why the profile ids are resolved too (BR-028).
      */
     search: searchTerm.optional(),
     role: z.enum(USER_ROLES).optional(),

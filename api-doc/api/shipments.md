@@ -73,7 +73,7 @@ collection.
 
 | Parameter | Type | Notes |
 |---|---|---|
-| `search` | string, 1–120 | Tracking-number **prefix**, or a 24-hex id of a shipment, order, agent or agency |
+| `search` | string, 1–120 | Tracking-number **prefix**, or a 24-hex id of a shipment, order, agent or agency. The agent and agency ids are the **profile** ids, **not user ids** — a user id matches nothing here. **An id matches only whole:** exactly 24 hexadecimal characters, in either letter case. A part of an id is not read as an id |
 | `status` | status token | Format-validated |
 | `assignmentState` | status token | `unassigned` \| `offered` \| `accepted` |
 | `agencyId` | 24-hex | |

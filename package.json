@@ -34,6 +34,7 @@
     "test:billing": "ts-node scripts/test/test-billing.ts",
     "test:cod": "ts-node scripts/test/test-cod.ts",
     "test:money": "ts-node scripts/test/test-money.ts",
+    "test:transactions": "ts-node scripts/test/test-transactions.ts",
     "test:accounts": "ts-node scripts/test/test-accounts.ts",
     "test:statements": "ts-node scripts/test/test-statements.ts",
     "test:devtools": "ts-node scripts/test/test-devtools.ts",
@@ -79,6 +80,7 @@
     "verify:billing": "node --max-old-space-size=4096 -r ts-node/register scripts/test/verify-billing-live.ts",
     "verify:cod": "node --max-old-space-size=4096 -r ts-node/register scripts/test/verify-cod-live.ts",
     "verify:money": "node --max-old-space-size=4096 -r ts-node/register scripts/test/verify-money-live.ts",
+    "verify:transactions": "node --max-old-space-size=4096 -r ts-node/register scripts/test/verify-transactions-live.ts",
     "verify:accounts": "node --max-old-space-size=4096 -r ts-node/register scripts/test/verify-accounts-live.ts"
   },
   "keywords": [],

@@ -55,6 +55,13 @@ import {
     ListClawbacksQuerySchema,
     WriteOffClawbackSchema,
 } from '../validators/money.validator';
+import { TransactionController } from '../controllers/transaction.controller';
+import { TRANSACTION_DOOR_PERMISSIONS } from '../domain/transaction-sources';
+import {
+    ListTransactionsQuerySchema,
+    TransactionParamSchema,
+    TransactionSummaryQuerySchema,
+} from '../validators/transaction.validator';
 
 /**
  * `/api/v1/money` — earnings, payouts and gateway settlements.
@@ -86,16 +93,18 @@ const mountedAt = '/money';
 /**
  * The platform's own commission account. DELEGATED: a balance is a verdict.
  *
- * `money.earnings.read` is unflagged, so `allInFamily('money')` sweeps it into the tiers
- * that hold the family. That is right — reading what the marketplace has earned is not the
- * kind of money permission the `financial` flag exists to fence off, and the flag's own
- * docstring says so in as many words.
+ * ⚠ **`money.earnings.platform.read`, tier 1 only (BR-030 § 3a, 2026-10-13).** This and the
+ * two routes below stood behind `money.earnings.read` until then, and this comment argued
+ * that what the marketplace earned was not the kind of read the `financial` flag fences off.
+ * The owner's rule says otherwise: Admin and Support see the platform's take as rates, never
+ * as amounts. Tier 2 keeps `money.earnings.read` — Accounts and Allocations need it — so the
+ * three routes that state the platform's amounts got a permission of their own.
  */
 defineRoute(router, {
     mountedAt,
     method: 'get',
     path: '/earnings/platform',
-    access: permission('money.earnings.read'),
+    access: permission('money.earnings.platform.read'),
     handler: MoneyController.platformEarnings,
 });
 
@@ -107,7 +116,7 @@ defineRoute(router, {
     mountedAt,
     method: 'get',
     path: '/earnings/platform/ledger',
-    access: permission('money.earnings.read'),
+    access: permission('money.earnings.platform.read'),
     validate: { query: ListPlatformLedgerQuerySchema },
     handler: MoneyController.platformLedger,
 });
@@ -120,7 +129,7 @@ defineRoute(router, {
     mountedAt,
     method: 'get',
     path: '/earnings/platform/summary',
-    access: permission('money.earnings.read'),
+    access: permission('money.earnings.platform.read'),
     validate: { query: PlatformEarningsSummaryQuerySchema },
     handler: MoneyController.platformSummary,
 });
@@ -203,8 +212,8 @@ defineRoute(router, {
 /**
  * The digits — the one route on this service that emits a beneficiary's account number.
  *
- * Its own permission, and `money.payouts.destination.read` is the only `financial` READ in
- * the catalog. The flag is doing real work rather than describing a money movement: it keeps
+ * Its own permission, and `money.payouts.destination.read` was the only `financial` READ in
+ * the catalog until `money.earnings.platform.read` (2026-10-13) became the second. The flag is doing real work rather than describing a money movement: it keeps
  * the name out of `allInFamily('money')` and refuses it to Support at boot, which is why
  * tier-grants names it by hand.
  *
@@ -560,6 +569,59 @@ defineRoute(router, {
         'money.earnings.clawback.write_off_agent',
     ),
     handler: writeOffClawback,
+});
+
+// ── Platform transactions — every money movement in one list (BR-027, 2026-10-12) ──
+
+/**
+ * Eleven kinds of record merged into one filterable list: customer payments, plan purchases,
+ * credit top-ups, refunds, hand-settled delivery refunds, payouts, COD collections, deposits
+ * and remittances, earnings-ledger entries and the refund-debt adjustments that write no
+ * ledger entry. DIRECT reads, all three routes.
+ *
+ * ⚠ **`anyPermission`, and no permission of its own — deliberately.** The door opens to
+ * anybody holding one of the existing reads, and each KIND is then sent only to a caller who
+ * holds the reads that kind's own screens already require (`viewerFor` in
+ * `domain/transaction-sources.ts`). A `money.transactions.read` granted to every tier would
+ * have been a second way to reach rows the first way withholds — plan purchases and seller
+ * ledger entries from Support — which is exactly the widening the request asked us to avoid.
+ * So this list can never show a caller a row their other screens would refuse.
+ *
+ * The platform's own ledger rows are the one tier rule: tier 1 only.
+ *
+ * `/transactions/summary` is a literal and `/transactions/:kind/:id` is two levels deep, so
+ * neither shadows the other; a one-segment `/transactions/:id` must never be added beside them.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/transactions',
+    access: anyPermission(...TRANSACTION_DOOR_PERMISSIONS),
+    validate: { query: ListTransactionsQuerySchema },
+    handler: TransactionController.list,
+});
+
+/** Counts and sums of the same filtered set — asked once, not on every page turn. */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/transactions/summary',
+    access: anyPermission(...TRANSACTION_DOOR_PERMISSIONS),
+    validate: { query: TransactionSummaryQuerySchema },
+    handler: TransactionController.summary,
+});
+
+/**
+ * One row and everything on the same order or booking. The kind's own reads are checked in
+ * the handler (403 naming them), because the door cannot know the kind until the path is read.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/transactions/:kind/:id',
+    access: anyPermission(...TRANSACTION_DOOR_PERMISSIONS),
+    validate: { params: TransactionParamSchema },
+    handler: TransactionController.detail,
 });
 
 export const moneyRoutes = router;

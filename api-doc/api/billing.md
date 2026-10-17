@@ -61,7 +61,7 @@ order somebody happened to create them.
 | `role` | `vendor` \| `agency` \| `agent` | |
 | `isActive` | boolean flag | `false` is a **defined-but-not-purchasable** tier — a real state |
 | `includeArchived` | boolean flag, default **`false`** | Soft-deleted plans. **They are excluded, not gone** — existing subscribers keep running on an archived tier, so "which plan is this vendor on" can name a row this list would not otherwise show |
-| `search` | string, 1–120 | Matches the plan code or display name — or, for a 24-hex term, the plan id |
+| `search` | string, 1–120 | Matches the plan code or display name — or, for a 24-hex term, the plan id. **An id matches only whole:** exactly 24 hexadecimal characters, in either letter case. A shorter or longer term, or one with anything round it, is not read as an id; it is treated as text |
 
 ### Response (200)
 

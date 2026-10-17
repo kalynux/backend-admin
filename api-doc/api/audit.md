@@ -78,7 +78,7 @@ ordering nobody reads a trail in. Filter by those instead.
 | `targetId` | string | 1–128 characters. **Not** validated as an ObjectId — a target may be a session UUID or a composite key |
 | `correlationId` | string | 1–128 characters. The `requestId` of the originating request |
 | `sensitiveOnly` | boolean flag | `true` → only money, escalation, destructive and four-eyes rows |
-| `search` | string | 1–120 characters |
+| `search` | string | 1–120 characters. Matches three text fields — see [What `search` matches](#what-search-matches) — and, for a whole 24-hex id, the row's target, related target or actor |
 | `from` / `to` | ISO-8601 instant | Half-open `[from, to)`. **Maximum span 92 days** |
 | `page` | integer | Default 1 |
 | `limit` | integer | Default 20, max 100 |
@@ -86,6 +86,35 @@ ordering nobody reads a trail in. Filter by those instead.
 
 `action`, `actionFamily`, `status` and `targetType` are **pinned enums**: a typo is a `400`
 naming the valid values, rather than a filter that silently matches nothing.
+
+#### What `search` matches
+
+Case-insensitive, contains, over **three** fields:
+
+| Field on the row | What it is |
+|---|---|
+| `actor.email` | the administrator's email at the time |
+| `actor.displayName` | the administrator's name at the time |
+| `target.label` | the human-readable name of what was acted on, when the action recorded one |
+
+**It does not match the action name, the action family or the target type.** Typing
+`users.suspend` or `order` into `search` returns an empty page. Those have their own filters
+(`action`, `actionFamily`, `targetType`), which are pinned enums.
+
+**A pasted id (since 2026-10-12, BR-028).** A term that is exactly 24 hexadecimal characters is
+*also* matched as an id, against the row's `target.id`, `relatedTarget.id` and `actor.id`. So pasting a user id, an order id or an administrator id finds the rows about it
+and, for an administrator, the rows they produced. Letter case does not matter. **An id matches
+only whole**: a part of one is treated as text, and matches only if a label or an email happens
+to contain it.
+
+`targetId` and `actorId` remain the precise filters: `search` answers "anything to do with this
+id", and they answer one question each. A target that is not a 24-hex id (a session UUID, a
+composite key) is reachable through `targetId` only.
+
+The read scope applies to a search exactly as it does to the feed. A Support administrator who
+pastes an administrator's id gets only the rows they could already read.
+
+Pinned by `npm run test:audit` § 8b.
 
 #### `targetType` values
 

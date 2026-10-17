@@ -522,10 +522,25 @@ t.assert('the DTOs name their fields — no spread of a read model', () =>
  * does not protect it from the raw driver. The strongest form of the guarantee is that this
  * module cannot leak a field of a collection it cannot point a repository at.
  */
-t.assert('the money module declares NO projection of cash_collections or user_payment_methods', () =>
-    !MONEY_MODULE_SOURCE.includes('CASH_COLLECTION')
-    && !MONEY_MODULE_SOURCE.includes('USER_PAYMENT_METHOD')
-    && !MONEY_MODULE_SOURCE.includes('code_plain'));
+t.assert('the money module declares NO projection of user_payment_methods', () =>
+    !MONEY_MODULE_SOURCE.includes('USER_PAYMENT_METHOD'));
+
+/**
+ * ⚠ **Relaxed on 2026-10-13, deliberately, and only this far.** This asserted that the module
+ * named `CASH_COLLECTION` nowhere. The owner then decided a customer's cash-on-delivery
+ * payment is a row on the platform transactions list (BR-030 § 1), so exactly ONE reader of
+ * that collection now exists here: the `cod_collection` source in `transaction-sources.ts`.
+ *
+ * What the old assertion was really protecting still holds and is asserted directly: the
+ * delivery code (plaintext and hash) and the verification block (the agent's GPS fix, IP and
+ * device) are named nowhere in the module. `test:transactions` § 6 pins the projection itself.
+ */
+t.assert('cash_collections has exactly ONE reader in the money module — the transactions source', () =>
+    occurrences(MONEY_MODULE_SOURCE, 'COLLECTIONS.CASH_COLLECTION') === 1
+    && occurrences(readCode(SRC, 'modules', 'money', 'domain', 'transaction-sources.ts'), 'COLLECTIONS.CASH_COLLECTION') === 1);
+
+t.assert('...and the delivery code and the verification block are named nowhere in the module', () =>
+    !/code_plain|code_hash|code_attempts|code_locked|verification\.|verification:\s*1|device_info/.test(MONEY_MODULE_SOURCE));
 
 // ─────────────────────────────────────────────────────────────────────────────
 t.section('4. The destination DTO — the second lock');
@@ -1243,7 +1258,7 @@ t.section('10. The route manifest');
 
 const moneyRoutes = routeManifest().filter((route) => route.fullPath.startsWith('/api/v1/money'));
 
-t.assert('twenty-eight routes are declared on /money (17 + three delivery-fee refund routes, ADR-A11 W-G2, + platform summary and order split, 2026-10-04, + four earnings-pause routes, 2026-10-05, + the clawback list and write-off, REFUND-FLOW-PLAN § 6)', () => moneyRoutes.length === 28);
+t.assert('thirty-one routes are declared on /money (17 + three delivery-fee refund routes, ADR-A11 W-G2, + platform summary and order split, 2026-10-04, + four earnings-pause routes, 2026-10-05, + the clawback list and write-off, REFUND-FLOW-PLAN § 6, + the three platform-transactions reads, BR-027)', () => moneyRoutes.length === 31);
 
 /**
  * The triage route is the ONE write on this surface a Support administrator can reach, and

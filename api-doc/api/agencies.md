@@ -67,7 +67,7 @@ name client-side instead.
 
 | Parameter | Type | Notes |
 |---|---|---|
-| `search` | string, 1–120 | Matches the **business name** (on the Magazin), the contact name, the email, the phone, or — when the term is a 24-hex id — the agency id |
+| `search` | string, 1–120 | Matches the **business name** (on the Magazin), the contact name, the email, the phone, or — when the term is a 24-hex id — the **agency id or its user id** (the user id since 2026-10-12, BR-028; the same pair [`GET /vendors`](vendors.md) matches). **An id matches only whole:** exactly 24 hexadecimal characters, in either letter case. A shorter or longer term, or one with anything round it, is not read as an id; it is treated as text |
 | `status` | `active` \| `pending_verification` \| `inactive` | |
 | `verified` | boolean flag | Whether the business-verification flag is set. **Distinct from `status`, and the two can legitimately disagree** — nothing enforces verification today, so an `active` unverified agency is a real state, and finding those is exactly why this filter exists |
 | `autoAssign` | boolean flag | Whether the agency opted into auto-assignment |

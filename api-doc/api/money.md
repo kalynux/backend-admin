@@ -7,16 +7,18 @@ verification date — see the section under `GET /money/payouts` (BR-026 § 1).
 
 Base path: `/api/v1/money`
 
-Twenty-two routes on the mount (`test:money` § 10 pins the count — re-measured 2026-10-04, when the platform summary and the order split were added).
+Thirty-one routes on the mount (`test:money` § 10 pins the count — re-measured 2026-10-12, when the three platform-transactions reads were added). ⚠ This line read "twenty-two" until then, six routes behind the suite that pins it.
+
+**The three `/money/transactions` routes have their own page: [`transactions.md`](transactions.md)** — every money movement on the platform in one filterable list (BR-027).
 
 Design record: [`../../docs/ADR-011-ACCOUNTS-AND-FINANCE.md`](../../docs/ADR-011-ACCOUNTS-AND-FINANCE.md).
 
 | Method | Path | Permission | Transport | Audited |
 |---|---|---|---|---|
-| `GET` | `/money/earnings/platform` | `money.earnings.read` | **delegated** | — |
-| `GET` | `/money/earnings/platform/ledger` | `money.earnings.read` | direct read | — |
-| `GET` | `/money/earnings/platform/summary` | `money.earnings.read` | direct read | — |
-| `GET` | `/money/orders/:orderId/split` | **`money.splits.read`** (every tier) | **delegated** | — |
+| `GET` | `/money/earnings/platform` | **`money.earnings.platform.read`** (tier 1 only, since 2026-10-15) | **delegated** | — |
+| `GET` | `/money/earnings/platform/ledger` | **`money.earnings.platform.read`** (tier 1 only) | direct read | — |
+| `GET` | `/money/earnings/platform/summary` | **`money.earnings.platform.read`** (tier 1 only) | direct read | — |
+| `GET` | `/money/orders/:orderId/split` | **`money.splits.read`** (every tier) — the platform's amounts withheld below tier 1 | **delegated** | — |
 | `GET` | `/money/earnings/accounts` | `money.earnings.read` | **delegated** | — |
 | `GET` | `/money/earnings/allocations` | `money.earnings.read` | direct read | — |
 | `GET` | `/money/earnings/allocations/:allocationId` | `money.earnings.read` | direct read | — |
@@ -105,6 +107,28 @@ than a `400`. That is honest: it is a filter matching nothing.
 
 # Earnings
 
+## The platform's own amounts are tier 1 only (2026-10-15, BR-030 § 3)
+
+**The owner's rule:** Admin and Support see the platform's commission and bargain fee as
+**rates**, never as amounts. Only a Developer sees the amounts. Until 2026-10-15 the server sent
+the amounts to tier 2 and the dashboard hid them; now the server holds them back.
+
+- **The three `/money/earnings/platform*` routes** need **`money.earnings.platform.read`**, a
+  permission of its own held by tier 1 alone. A tier-2 caller gets **`403 AUTHZ_PERMISSION_DENIED`**
+  with `details.required: ["money.earnings.platform.read"]`. Tier 2 keeps `money.earnings.read`,
+  which Accounts and Allocations need. Gate the screen on the new permission with `can()` — the
+  dashboard's `developerOnly` flag is no longer needed.
+- **The order split** stays open to every tier and **withholds the platform's amounts** below that
+  permission — see [`GET /money/orders/:orderId/split`](#get-moneyordersorderidsplit) § *Below tier 1*.
+- **The transactions list** sends the platform's own rows only to a holder of the same permission
+  ([transactions.md](transactions.md#access)).
+
+One permission, three places: granting it lower is one line in `tier-grants.ts` and moves all
+three together.
+
+⚠ **Other routes still state the platform's take to tier 2.** The owner has not ruled on them
+yet; the list is in [`RESPONSE-2026-10-15-BR-030.md`](../dashboard/backend-requests/RESPONSE-2026-10-15-BR-030.md) § 3c.
+
 ## `GET /money/earnings/platform`
 
 What the marketplace holds: its **two** earnings accounts and their total.
@@ -117,7 +141,7 @@ made; read `accounts` to see the two parts.
 
 | | |
 |---|---|
-| **Permission** | `money.earnings.read` |
+| **Permission** | `money.earnings.platform.read` — **tier 1 only** (since 2026-10-15; see [above](#the-platforms-own-amounts-are-tier-1-only-2026-10-15-br-030--3)) |
 | **Transport** | **Delegated** — a balance is a verdict |
 | **Parameters** | None |
 
@@ -161,7 +185,7 @@ vendor analytics use).
 
 | | |
 |---|---|
-| **Permission** | `money.earnings.read` |
+| **Permission** | `money.earnings.platform.read` — **tier 1 only** (since 2026-10-15; see [above](#the-platforms-own-amounts-are-tier-1-only-2026-10-15-br-030--3)) |
 | **Parameters** | `from`, `to` — ISO-8601, both optional, half-open `[from, to)`. Neither ⇒ since the beginning. **No span cap.** ⚠ **Strict**: any other key is a `400` |
 
 ### Response (200)
@@ -202,7 +226,7 @@ delegates — **both of them by default** since 2026-10-04.
 
 | | |
 |---|---|
-| **Permission** | `money.earnings.read` |
+| **Permission** | `money.earnings.platform.read` — **tier 1 only** (since 2026-10-15; see [above](#the-platforms-own-amounts-are-tier-1-only-2026-10-15-br-030--3)) |
 | **Pagination** | `page`, `limit` |
 | **Sorting** | `createdAt`, `amount`. Default **`-createdAt`** |
 
@@ -254,7 +278,7 @@ support can explain to a vendor why they received the amount they see.
 
 | | |
 |---|---|
-| **Permission** | `money.splits.read` — **every tier, Support included** |
+| **Permission** | `money.splits.read` — **every tier, Support included**. Below `money.earnings.platform.read` (tiers 2 and 3) the platform's amounts are withheld — see *Below tier 1* |
 | **Transport** | **Delegated** to jovi-mall (`GET /api/internal/admin/earnings/orders/:orderId/split`). Before a split runs, its figures exist only as jovi-mall's own split arithmetic, so a copy here would be a second formula. Names are added here |
 | **Errors** | `404 NOT_FOUND` — no such order |
 
@@ -409,6 +433,29 @@ name. `null` for the two platform accounts and, deliberately, for the customer.
 | `vendor_net_negative` | The costs exceed the items: **the split will refuse this order** (`EARNINGS_INVALID_SPLIT`). Escalate |
 | `fee_not_charged_to_vendor` | A parcel created after payment: its fee was never deducted from the vendor |
 | `legacy_agency_on_order` | An order paid before delivery fees were deferred: the agency was paid at payment |
+
+### Below tier 1 — the platform's amounts withheld (2026-10-15, BR-030 § 3b)
+
+Every response carries **`platformAmountsWithheld`** (`true` · `false`). When it is `true`:
+
+| Withheld (set to `null`) | Kept |
+|---|---|
+| `amount` and `clawedAmount` on every line whose beneficiary is `platform` or `platform_ai` (`commission`, `bargain_fee`) | Every rate: `goods.commission.percent`, `goods.bargainFee.percent`, `bargainFeePercent` |
+| `goods.commission.amount` | `goods.commission.base` (what the rate is applied to) |
+| `goods.bargainFee.amount`, and `fee` on every item of `goods.bargainFee.lines` | Each bargained item's price, floor, quantity and `uplift` |
+| `totals.platform` (the whole object) | The vendor's, agencies' and agents' lines and totals, `charged`, `reconciliation` |
+| `amount`, `goodsAmount`, `deliveryAmount`, `takenFrom` on an `adjustments` row whose beneficiary is a platform account | Every other adjustment |
+
+Every line, basis block and adjustment it touched also carries **`withheld: true`**.
+
+⚠ **`null` already means "not known yet" on this route** — an agent's share before anybody
+accepts the run. Read `withheld`, not the `null`: a withheld figure is known and not shown, and
+the screen must say *"not shown at your level"*, never *"not known yet"*.
+
+⚠ **This is not a confidentiality boundary.** What the customer paid, less the vendor's net, less
+the delivery lines, is the platform's share, and those are exactly the figures Support reads to
+answer *"why did the vendor receive this amount"*. The service stops **stating** the platform's
+amounts; it cannot stop them being worked out. The owner was told so (BR-030 § 3b).
 
 ### `reconciliation` — the check
 

@@ -430,6 +430,30 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'money', action: 'read', phase: 5,
         summary: 'View platform earnings and the earnings ledger',
     },
+    /**
+     * What the marketplace itself earned, IN AMOUNTS — its commission and bargain-fee
+     * accounts, their ledger and their period summary (BR-030 § 3a, 2026-10-13).
+     *
+     * ── Tier 1 only, by the owner's rule ──────────────────────────────────────
+     * Admin and Support see the platform's commission and bargain fee as RATES, never as
+     * amounts (owner, 2026-10-04, restated 2026-10-13). Until this name existed the three
+     * `/money/earnings/platform*` routes stood behind `money.earnings.read`, which tier 2
+     * holds because it needs it for Accounts and Allocations — so the amounts were sent to
+     * every Admin and only hidden by a dashboard flag.
+     *
+     * ── Why `financial` on a read ─────────────────────────────────────────────
+     * The second read in the catalog to carry it, for the reason the first does
+     * (`money.payouts.destination.read`): disclosing the value is itself the risk, and the
+     * flag is the mechanism — it keeps the name out of `allInFamily('money')`, so tier 2
+     * does not inherit it, and the boot assertion refuses it to tier 3. It is in no tier's
+     * hand-written list, so only tier 1, which is derived from the whole catalog, holds it.
+     * Granting it lower is a deliberate one-line edit in `tier-grants.ts` — and a decision
+     * that is the owner's.
+     */
+    'money.earnings.platform.read': {
+        family: 'money', action: 'read', phase: 11, financial: true,
+        summary: 'View what the platform itself earned, in amounts — its commission and bargain-fee accounts, ledger and summary',
+    },
     'money.payouts.read': {
         family: 'money', action: 'read', phase: 5,
         summary: 'View the payout request queue',

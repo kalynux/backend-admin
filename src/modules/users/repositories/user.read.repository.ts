@@ -5,6 +5,7 @@ import { ListQueryBase } from '../../../core/http/list-query';
 import { COLLECTIONS } from '../../../infra/platform/collections';
 import { Paginated, PlatformReadRepository } from '../../../infra/platform/platform.repository';
 import { USER_SORT } from '../validators/user.validator';
+import { isWholeId } from './role-profile.read.repository';
 
 /**
  * Reading platform users straight out of `jovi_mall`.
@@ -73,7 +74,7 @@ const USER_PROJECTION = {
 } as const;
 
 export interface UserSearchQuery extends ListQueryBase {
-    /** Substring of email or phone — or, when it is a 24-hex string, the user id. */
+    /** Substring of email or phone — or, when it is a 24-hex string, a user or profile id. */
     search?: string;
     role?: string;
     status?: 'active' | 'suspended' | 'closed';
@@ -87,8 +88,18 @@ export class UserReadRepository extends PlatformReadRepository<UserReadModel> {
         super(COLLECTIONS.USER, USER_PROJECTION);
     }
 
-    async search(query: UserSearchQuery): Promise<Paginated<UserReadModel>> {
-        return this.findPage(buildFilter(query), {
+    /**
+     * One page of the directory.
+     *
+     * `profileUserIds` are the accounts behind a PROFILE id the search term named, resolved
+     * by the caller before this runs (`findProfileOwners`). Passing them in rather
+     * than querying here is what keeps `buildFilter` pure.
+     */
+    async search(
+        query: UserSearchQuery,
+        profileUserIds: ObjectId[] = [],
+    ): Promise<Paginated<UserReadModel>> {
+        return this.findPage(buildFilter(query, profileUserIds), {
             page: query.page,
             limit: query.limit,
             // The spec was validated against USER_SORT by the route's schema; this
@@ -102,6 +113,18 @@ export class UserReadRepository extends PlatformReadRepository<UserReadModel> {
         if (!Types.ObjectId.isValid(userId)) return null;
         return this.findOneBy({ _id: new ObjectId(userId) } as Filter<UserReadModel>);
     }
+
+    /**
+     * Whether an account has this id — a count on `_id`, reading no field.
+     *
+     * For `meta.idMatch` (BR-029), which describes a pasted id whatever the other filters
+     * are. It is deliberately NOT `search(...).total > 0`: under `role=vendor` a customer's
+     * own user id produces an empty page and is still a user id.
+     */
+    async existsById(userId: string): Promise<boolean> {
+        if (!isWholeId(userId)) return false;
+        return (await this.countBy({ _id: new ObjectId(userId) } as Filter<UserReadModel>)) > 0;
+    }
 }
 
 /**
@@ -112,8 +135,13 @@ export class UserReadRepository extends PlatformReadRepository<UserReadModel> {
  *
  * Exported for `test-users.ts`, which asserts the search branches without a database —
  * the id branch in particular is the kind of thing that is only ever tested by hand once.
+ *
+ * Pure: `profileUserIds` arrives as a parameter precisely so this function never queries.
  */
-export function buildFilter(query: UserSearchQuery): Filter<UserReadModel> {
+export function buildFilter(
+    query: UserSearchQuery,
+    profileUserIds: ObjectId[] = [],
+): Filter<UserReadModel> {
     const clauses: Record<string, unknown>[] = [];
 
     if (query.role) clauses.push({ roles: query.role });
@@ -129,7 +157,7 @@ export function buildFilter(query: UserSearchQuery): Filter<UserReadModel> {
     }
 
     const search = query.search?.trim();
-    if (search) clauses.push(searchClause(search));
+    if (search) clauses.push(searchClause(search, profileUserIds));
 
     if (clauses.length === 0) return {} as Filter<UserReadModel>;
     if (clauses.length === 1) return clauses[0] as Filter<UserReadModel>;
@@ -153,19 +181,38 @@ export function buildFilter(query: UserSearchQuery): Filter<UserReadModel> {
  * only search box on the user directory is the obvious move, and a directory that
  * answers "no results" to a valid id looks broken rather than strict.
  *
+ * ── A user id, or the id of one of the person's profiles (BR-028) ─────────────
+ * The id on an order is a `customers._id` and the id on a vendor's page is a
+ * `vendors._id`; neither is a `users._id`, and until 2026-10-12 neither found anybody
+ * here. `profileUserIds` carries the accounts those ids belong to, resolved by the caller
+ * from the four role collections. It is empty for a term that is not an id, and for an id
+ * that is nobody's profile.
+ *
+ * An id matches WHOLE or not at all — exactly 24 hexadecimal characters. A shorter term is
+ * never read as part of an id; it is matched against the email and the phone like any other
+ * text. That is deliberate: a run of eight or more digits is far more often part of a phone
+ * number than the start of an id, and reading it as both would return people whose phone
+ * does not contain what was typed.
+ *
  * The term is escaped by `containsInsensitive` before it reaches a `$regex`: an
  * unescaped one is both a correctness bug (`a.b` matching `axb`) and a
  * catastrophic-backtracking pattern the caller supplies.
  */
-function searchClause(term: string): Record<string, unknown> {
+function searchClause(term: string, profileUserIds: ObjectId[]): Record<string, unknown> {
     const pattern = containsInsensitive(term);
     const branches: Record<string, unknown>[] = [
         { login_email: pattern },
         { login_phone: pattern },
     ];
 
-    if (Types.ObjectId.isValid(term) && term.length === 24) {
+    // `isWholeId` is also what decides whether the response carries `meta.idMatch`, so the
+    // filter and the description of the id cannot disagree about what counts as one.
+    if (isWholeId(term)) {
         branches.push({ _id: new ObjectId(term) });
+    }
+
+    if (profileUserIds.length > 0) {
+        branches.push({ _id: { $in: profileUserIds } });
     }
 
     return { $or: branches };

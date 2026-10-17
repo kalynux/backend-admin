@@ -13,7 +13,11 @@ import * as gateway from '../gateways/user.gateway';
 import {
     MissingRoleProfile,
     RoleProfile,
+    ProfileOwner,
+    findProfileOwners,
     findRoleProfiles,
+    idMatchKinds,
+    isWholeId,
 } from '../repositories/role-profile.read.repository';
 import { UserReadModel, UserReadRepository } from '../repositories/user.read.repository';
 import { RoleClosureReadRepository, toRoleClosureDto } from '../repositories/role-closure.read.repository';
@@ -206,25 +210,57 @@ export class UserController {
     /**
      * GET /api/v1/users — search and filter across every role.
      *
-     * `search` matches an email, a phone number or a user id; `role`, `status` and the
-     * `from`/`to` creation range narrow it. Sorting is limited to the indexed fields in
-     * `USER_SORT`, so no query string can ask for a collection scan.
+     * `search` matches an email, a phone number, a user id, or the id of one of the
+     * person's profiles (BR-028); `role`, `status` and the `from`/`to` creation range narrow
+     * it. Sorting is limited to the indexed fields in `USER_SORT`, so no query string can ask
+     * for a collection scan.
+     *
+     * The profile id is resolved to its account FIRST, then the page is served from `users`
+     * on its own index. The resolver answers `[]` for any term that is not id-shaped, so a
+     * name or a phone search pays nothing for it.
+     *
+     * ── `meta.idMatch` (BR-029) ───────────────────────────────────────────────
+     * The row that comes back for a profile id is the ACCOUNT, so its `id` is not the id
+     * that was typed. `meta.idMatch.kinds` says what the typed id was: `user`, `customer`,
+     * `vendor`, `agency`, `agent`. It is present exactly when the term was read as an id,
+     * `[]` when that id is nobody's, and absent for every other term.
+     *
+     * It describes the ID, not the page: both reads behind it ignore `role`, `status` and
+     * the date range. That is what lets the dashboard tell "a filter is hiding this
+     * account" from "this id is nobody's" when the page is empty. It discloses nothing the
+     * caller could not get by sending the same search without the filter.
      */
     static search = asyncHandler(async (req: Request, res: Response) => {
         const query = req.query as unknown as SearchUsersQuery;
 
-        const page = await users.search({
-            search: query.search,
-            role: query.role,
-            status: query.status,
-            from: query.from,
-            to: query.to,
-            page: query.page,
-            limit: query.limit,
-            sort: query.sort,
-        });
+        const idTerm = query.search && isWholeId(query.search) ? query.search : null;
+        const [owners, isUserId] = idTerm
+            ? await Promise.all([findProfileOwners(idTerm), users.existsById(idTerm)])
+            : [[] as ProfileOwner[], false];
+        const profileUserIds = owners.map((owner) => owner.userId);
 
-        sendPaginated(res, page.items.map(toUserDto), toPageMeta(page.total, page.page, page.limit));
+        const page = await users.search(
+            {
+                search: query.search,
+                role: query.role,
+                status: query.status,
+                from: query.from,
+                to: query.to,
+                page: query.page,
+                limit: query.limit,
+                sort: query.sort,
+            },
+            profileUserIds,
+        );
+
+        // `sendSuccess`, not `sendPaginated`: `idMatch` is an object, and the paginated
+        // helper's meta type admits scalars only. Same form as the earnings accounts' `totals`.
+        sendSuccess(res, page.items.map(toUserDto), {
+            meta: {
+                ...toPageMeta(page.total, page.page, page.limit),
+                ...(idTerm ? { idMatch: { kinds: idMatchKinds(isUserId, owners) } } : {}),
+            },
+        });
     });
 
     /**

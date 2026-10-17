@@ -140,6 +140,10 @@ t.assert('every family in PERMISSION_FAMILIES has at least one permission', () =
  */
 const FINANCIAL_READ_ALLOWLIST: ReadonlySet<string> = new Set([
     'money.payouts.destination.read',
+    // The platform's own commission and bargain fee, in amounts (BR-030 § 3a, 2026-10-13).
+    // The owner's rule is that only tier 1 sees them; the flag is what keeps the name out of
+    // `allInFamily('money')` and so out of tier 2's hands.
+    'money.earnings.platform.read',
 ]);
 
 t.assert('every financial permission is a write, or an allowlisted disclosure', () =>
@@ -157,7 +161,7 @@ t.assert('every allowlisted financial read actually exists and is still flagged'
  * land in Support's grant silently.
  */
 t.assert('an allowlisted financial read is NOT swept in by allInFamily', () =>
-    !allInFamily('money').includes('money.payouts.destination.read'));
+    [...FINANCIAL_READ_ALLOWLIST].every((name) => !(allInFamily('money') as string[]).includes(name)));
 
 /**
  * The escalation flag is the narrowest in the catalog, and it must stay narrow.
@@ -1070,5 +1074,28 @@ t.assert('PERMISSION_CATALOG is a frozen shape — names cannot be added at runt
 });
 
 t.assert('TIER_GRANTS is frozen', () => Object.isFrozen(TIER_GRANTS));
+
+// ─────────────────────────────────────────────────────────────────────────────
+t.section('The permission page states the counts the catalog has');
+
+/**
+ * BR-031 (2026-10-15). A new permission was added with a correct re-measure note at the top of
+ * `permissions.md`, and the level table forty lines further down went on saying "142 of 142".
+ * The dashboard's mirror test caught it, which means the dashboard was red on a page this repo
+ * had just shipped. Every "N of TOTAL" on the page is now derived here from the grant table.
+ */
+const PERMISSIONS_PAGE = readFileSync(join(__dirname, '..', '..', 'api-doc', 'api', 'permissions.md'), 'utf8');
+const TOTAL_PERMISSIONS = PERMISSION_NAMES.length;
+
+t.assert(`the level table says "N of ${TOTAL_PERMISSIONS}" for each tier, with N from TIER_GRANTS`, () =>
+    ([[1, 'Developer'], [2, 'Admin'], [3, 'Support']] as const).every(([tier, label]) => {
+        const row = new RegExp(`\\| \\*\\*${tier}\\*\\* \\| ${label} \\| (\\d+) of (\\d+) \\|`).exec(PERMISSIONS_PAGE);
+        return row !== null && Number(row[1]) === TIER_GRANTS[tier].length && Number(row[2]) === TOTAL_PERMISSIONS;
+    }));
+
+t.assert('every other "of N permissions" on the page names the same total', () => {
+    const totals = Array.from(PERMISSIONS_PAGE.matchAll(/of (\d+) permissions/g)).map((match) => Number(match[1]));
+    return totals.length > 0 && totals.every((total) => total === TOTAL_PERMISSIONS);
+});
 
 process.exit(t.finish());

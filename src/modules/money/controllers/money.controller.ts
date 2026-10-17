@@ -66,6 +66,9 @@ import {
     ResumeEarningsBody,
 } from '../validators/money.validator';
 import { ledgerOwnerTypesOf, toPlatformEarnedSummaries } from '../domain/platform-earnings';
+import { withPlatformAmounts, withholdPlatformAmounts } from '../domain/platform-take';
+import { PLATFORM_AMOUNTS_PERMISSION } from '../domain/transaction-sources';
+import { hasPermission } from '../../authorization/domain/permission.resolver';
 import * as clawbackWrites from '../domain/clawback-write-off';
 import { EarningsAccountDebtReadRepository } from '../repositories/earnings-account.read.repository';
 import { toClawbackDebtDto } from '../read-models/money.dto';
@@ -365,7 +368,7 @@ export class MoneyController {
         const nameOf = (type: string, id: string | null): string | null =>
             id ? names.get(ownerKey(type, id)) ?? null : null;
 
-        sendSuccess(res, {
+        const named = {
             ...split,
             order: { ...split.order, vendorName: nameOf('vendor', split.order.vendorId) },
             sections: split.sections.map((section) => ({
@@ -382,7 +385,13 @@ export class MoneyController {
                     beneficiary: { ...line.beneficiary, name: nameOf(line.beneficiary.type, line.beneficiary.id) },
                 })),
             })),
-        });
+        };
+
+        // The owner's rule (BR-030 § 3b): below `money.earnings.platform.read` the platform's
+        // take is shown as rates, never as amounts. Withheld HERE, after the names are added
+        // and before anything is sent — the dashboard used to receive the figures and hide them.
+        const seesPlatformAmounts = hasPermission(requireAdminIdentity(req).tier, PLATFORM_AMOUNTS_PERMISSION);
+        sendSuccess(res, seesPlatformAmounts ? withPlatformAmounts(named) : withholdPlatformAmounts(named));
     });
 
     /**

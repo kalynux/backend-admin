@@ -76,6 +76,7 @@ import { resolveScope, isTicketInScope } from '../../src/modules/authorization/d
 import { AdminIdentity } from '../../src/modules/admin-identity/domain/admin-identity.types';
 import { sanitiseRequestId } from '../../src/api/middlewares/request-id.middleware';
 import { IAuditLog } from '../../src/modules/audit/models/audit-log.model';
+import { AUDIT_SEARCH_FIELDS, auditSearchClause } from '../../src/modules/audit/repositories/audit.repository';
 
 const t = suite('wi-admin audit (Phase 3.5)');
 
@@ -606,6 +607,61 @@ t.assert('a date-only value is refused — an instant is required', () =>
 
 t.assert("sensitiveOnly=false means false, not true", () =>
     ListAuditQuerySchema.parse({ sensitiveOnly: 'false' }).sensitiveOnly === false);
+
+// ─── 8b. What `search` matches (BR-028) ──────────────────────────────────────
+
+t.section('8b. search — three text fields, and a pasted id');
+
+const SEARCH_ID = '665f1c2a9b3e4a91c7d2e5f0';
+
+function searchBranches(term: string): Record<string, unknown>[] {
+    return (auditSearchClause(term).$or ?? []) as Record<string, unknown>[];
+}
+
+/**
+ * `audit.md` documented this parameter as "1–120 characters" and nothing else, and the
+ * dashboard labelled its box "Action, actor, resource" on the strength of that silence. The
+ * three fields are now stated on the page, and this is the pin that keeps the page true.
+ */
+t.assert('a text term reads exactly the three documented fields', () => {
+    const keys = searchBranches('ada').map((branch) => Object.keys(branch)[0]).sort();
+    return JSON.stringify(keys) === JSON.stringify(['actor_display_name', 'actor_email', 'target_label'])
+        && JSON.stringify([...AUDIT_SEARCH_FIELDS].sort()) === JSON.stringify(keys);
+});
+
+t.assert('it does NOT read the action name or the resource type — those are pinned filters', () =>
+    !searchBranches('users.suspend').some((branch) => 'action' in branch || 'target_type' in branch));
+
+t.assert('⭐ a pasted id ALSO matches the target, the related target and the actor', () => {
+    const branches = searchBranches(SEARCH_ID);
+    return branches.length === 6
+        && branches.some((branch) => 'target_id' in branch)
+        && branches.some((branch) => 'related_target_id' in branch)
+        && branches.some((branch) => String(branch.actor_id) === SEARCH_ID);
+});
+
+t.assert('the target id is matched as a STRING — a target may be a UUID or a composite key', () => {
+    const target = searchBranches(SEARCH_ID).find((branch) => 'target_id' in branch)!;
+    const spellings = (target.target_id as { $in: unknown[] }).$in;
+    return spellings.every((value) => typeof value === 'string') && spellings.includes(SEARCH_ID);
+});
+
+t.assert('an id typed in capitals is tried as typed AND lower-cased', () => {
+    const target = searchBranches(SEARCH_ID.toUpperCase()).find((branch) => 'target_id' in branch)!;
+    const spellings = (target.target_id as { $in: string[] }).$in;
+    return spellings.length === 2 && spellings.includes(SEARCH_ID) && spellings.includes(SEARCH_ID.toUpperCase());
+});
+
+t.assert('a PART of an id is text — no id branch', () =>
+    searchBranches(SEARCH_ID.slice(0, 8)).length === 3);
+
+t.assert('⭐ an id search still sits UNDER the tier-3 scope, never beside it', () => {
+    const scope = auditScopeFilter(3, ADMIN_ID)!;
+    const combined = combineFilters(scope, auditSearchClause(SEARCH_ID)) as { $and?: Record<string, unknown>[] };
+    return Array.isArray(combined.$and)
+        && combined.$and.length === 2
+        && JSON.stringify(combined.$and[0]) === JSON.stringify(scope);
+});
 
 // ─── 9. Permission policy ────────────────────────────────────────────────────
 

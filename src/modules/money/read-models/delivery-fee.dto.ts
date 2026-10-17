@@ -126,11 +126,11 @@ export interface DeliveryFeeProposalDto {
     id: string;
     shipmentId: string;
     agencyId: string;
-    /** `agency` · `agent` — who proposed. */
+    /** `agency` · `agent` · `system` — or, since 2026-10-14, the PAYER: `vendor` · `customer`. Who proposed. */
     proposedByRole: string;
-    /** `agency` · `change_agency` · `combined_request` (`agency` on rows written before ADR-A11). */
+    /** `agency` · `change_agency` · `combined_request` · `payer` (2026-10-14) (`agency` on rows written before ADR-A11). */
     origin: string;
-    /** `vendor` (vendor-paid) · `customer` (an increase the customer pays) · `none` (a customer-paid decrease, applied on creation). */
+    /** `vendor` (vendor-paid) · `customer` (an increase the customer pays) · `none` (a customer-paid decrease, applied on creation) · `agency` (a payer's proposal the agency answers, 2026-10-14). */
     approver: string;
     /** `increase` · `decrease` · `null` (older rows). */
     direction: string | null;

@@ -62,7 +62,7 @@ one to a collection this size to serve a sort nobody has asked for is the wrong 
 
 | Parameter | Type | Notes |
 |---|---|---|
-| `search` | string, 1–120 | Order-number **prefix**, or a 24-hex id of an order, customer, vendor or checkout group |
+| `search` | string, 1–120 | Order-number **prefix**, or a 24-hex id of an order, customer, vendor or checkout group. The customer and vendor ids are the **profile** ids (`customerId`, `vendorId`), **not user ids** — a user id matches nothing here. **An id matches only whole:** exactly 24 hexadecimal characters, in either letter case. A part of an id is not read as an id |
 | `orderType` | `physical` \| `digital` | Pinned — a closed two-value set the platform enforces |
 | `paymentMethod` | `online` \| `cash_on_delivery` | |
 | `paymentStatus` | status token | Format-validated, see above |
@@ -270,7 +270,7 @@ decision D-11), except settling a manual refund, which lives on
 | **`payments.checkout`** | **How the order was paid** — the settled non-top-up payment (else the latest attempt). `null` on a COD order or one never paid. `sharedWithOtherOrders: true` = a cart checkout: `amount` is the **group's** charge, not this order's share |
 | **`payments.deliveryTopUps`** | Every `order_delivery_topup` attempt, oldest first, each naming the shipment and proposal it settles |
 | `payments.deliveryTopUpsPaid` | Σ of the top-ups that succeeded. **What the customer paid for this order = the checkout share + this**; `totalAmount` already includes applied top-ups (jovi-mall grows `total_amount` and `priceBreakdown.delivery` when it applies one) |
-| `proposals[]` | Newest first. `approver`: `vendor` (vendor-paid) · `customer` (an increase the customer pays) · `none` (a customer-paid decrease, applied on creation). `origin`: `agency` · `change_agency` · `combined_request`. `status`: `pending` · `approved` · `rejected` · `withdrawn` |
+| `proposals[]` | Newest first. `approver`: `vendor` (vendor-paid) · `customer` (an increase the customer pays) · `none` (a customer-paid decrease, applied on creation) · `agency` (since 2026-10-14: the vendor or the customer — whoever pays the delivery — proposed, and the agency answers). `origin`: `agency` · `change_agency` · `combined_request` · `payer`. `proposedByRole` may then be `vendor` or `customer`. `status`: `pending` · `approved` · `rejected` · `withdrawn` |
 | `refunds[]` | Every delivery-fee refund row of the order — automatic and manual. A row with `settleable: true` is the one the settle button acts on |
 | **`owedManually`** | Σ `manual_required` rows — still owed, a person must send it |
 | `returned` | Σ delivery money returned: completed gateway refunds + manual rows paid by hand. A `covered_by_order_refund` settlement moved nothing and is **not** counted |

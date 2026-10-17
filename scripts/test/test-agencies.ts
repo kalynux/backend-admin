@@ -167,6 +167,19 @@ t.assert('a 24-hex term also matches the id', () => {
     return (filter.$or as Record<string, unknown>[]).some((b) => '_id' in b);
 });
 
+// BR-028. The agency's detail page prints its user id, and the user directory names the
+// business by nothing else. The vendor directory has matched both since it was written.
+t.assert('⭐ a 24-hex term ALSO matches the USER id, as the vendor directory does', () => {
+    const filter = buildAgencyFilter({ ...base, search: OID }) as Record<string, unknown>;
+    return (filter.$or as Record<string, unknown>[]).some((b) => String(b.user_id) === OID);
+});
+
+t.assert('a non-id term, or a PART of an id, adds no id branch of either kind', () =>
+    ['jovi', OID.slice(0, 8)].every((term) => {
+        const filter = buildAgencyFilter({ ...base, search: term }) as Record<string, unknown>;
+        return !(filter.$or as Record<string, unknown>[]).some((b) => '_id' in b || 'user_id' in b);
+    }));
+
 t.assert('`verified` reads kyc_details, the canonical mirror — not the deprecated one', () => {
     const filter = buildAgencyFilter({ ...base, verified: true }) as Record<string, unknown>;
     return filter['kyc_details.legit_verified'] === true && !('legit_verified' in filter);

@@ -168,6 +168,15 @@ class RoleProfileRepository extends PlatformReadRepository<RoleProfileDocument> 
         });
         return new Map(rows.map((row) => [row.user_id.toString(), row.name ?? null]));
     }
+
+    /** The `users._id` that owns this role entity, or `null`. One point read on `_id`. */
+    async findOwnerUserId(profileId: ObjectId): Promise<ObjectId | null> {
+        const [row] = await this.findBy({ _id: profileId } as Filter<RoleProfileDocument>, {
+            projection: { _id: 0, user_id: 1 },
+            limit: 1,
+        });
+        return row?.user_id ?? null;
+    }
 }
 
 const REPOSITORIES: Readonly<Record<UserRoleName, RoleProfileRepository>> = Object.freeze(
@@ -222,6 +231,85 @@ export async function findCustomerNamesByIds(ids: ObjectId[]): Promise<Map<strin
  */
 export async function findCustomerNamesByUserIds(userIds: ObjectId[]): Promise<Map<string, string | null>> {
     return REPOSITORIES.customer.findNamesByUserIds(userIds);
+}
+
+/**
+ * The accounts behind a PROFILE id — for the user directory's search box (BR-028).
+ *
+ * ── Why the directory needs it ────────────────────────────────────────────────
+ * Most ids an administrator can copy for a person are not user ids. A vendor, an agency,
+ * an agent and a customer each have a role entity with its own `_id`, and that is the id
+ * printed on their page, on an order (`customer_id`, `vendor_id`) and on a shipment. Pasted
+ * into the directory it matched nothing, on a screen whose search exists so that "an id
+ * copied out of an order … finds the person". For the customer there was no other route at
+ * all: there is no customer directory, and `customers.user_id` is the only join.
+ *
+ * ── What it costs, and what it reads ──────────────────────────────────────────
+ * Four point reads on `_id`, and only for a term that is id-shaped. Each projects `user_id`
+ * and nothing else, so no field of the richest documents on the platform is read to answer
+ * it. All four are asked rather than the first hit returned: the id spaces are separate
+ * collections, and nothing but probability stops one value existing in two of them.
+ *
+ * A caller passes the owners' ids to `buildFilter`, which keeps that function free of
+ * queries and testable without a database, the same split as the vendor directory's
+ * `storeMatchIds`.
+ *
+ * Each hit keeps its ROLE (BR-029): the directory tells the dashboard which kind of id the
+ * term was, and that is known here and nowhere later. The order is `ROLE_SOURCES`' own.
+ *
+ * Returns `[]` for anything that is not exactly 24 hexadecimal characters.
+ */
+export async function findProfileOwners(term: string): Promise<ProfileOwner[]> {
+    if (!isWholeId(term)) return [];
+
+    const profileId = new ObjectId(term);
+    const roles = Object.keys(REPOSITORIES) as UserRoleName[];
+    const owners = await Promise.all(roles.map((role) => REPOSITORIES[role].findOwnerUserId(profileId)));
+
+    return roles.flatMap((role, index) => {
+        const userId = owners[index];
+        return userId ? [{ role, userId }] : [];
+    });
+}
+
+/** A role entity a search term named, and the account that owns it. */
+export interface ProfileOwner {
+    role: UserRoleName;
+    userId: ObjectId;
+}
+
+/**
+ * Whether a search term is read as an id: exactly 24 hexadecimal characters, either case.
+ *
+ * One definition for the two things that must agree on it. The filter tries such a term as
+ * an id, and the response says what the id turned out to be (`meta.idMatch`); a term the
+ * filter never tried as an id must not be described as one.
+ */
+export function isWholeId(term: string): boolean {
+    return term.length === 24 && ObjectId.isValid(term);
+}
+
+/** What a pasted id can turn out to be: the account's own id, or one of its profiles'. */
+export type IdMatchKind = 'user' | UserRoleName;
+
+/**
+ * The kinds of id a term IS, for `meta.idMatch.kinds` on the user directory (BR-029).
+ *
+ * `user` first, then the profile kinds in `ROLE_SOURCES` order. A list because the five id
+ * spaces are separate collections and nothing but probability stops one value existing in
+ * two of them. Empty when the id is nobody's, which is a different answer from "the term
+ * was not an id" and is why the caller omits the block for the second and sends `[]` for
+ * the first.
+ *
+ * It describes the ID, not the page. A customer id searched under `role=vendor` is still a
+ * customer's id when the page it produced is empty.
+ */
+export function idMatchKinds(isUserId: boolean, owners: readonly ProfileOwner[]): IdMatchKind[] {
+    const kinds: IdMatchKind[] = isUserId ? ['user'] : [];
+    for (const owner of owners) {
+        if (!kinds.includes(owner.role)) kinds.push(owner.role);
+    }
+    return kinds;
 }
 
 /**

@@ -65,7 +65,12 @@ import { AppError } from '../../src/core/errors/app-error';
 import { ERROR_CODES } from '../../src/core/errors/error-codes';
 import { resetEnvCache } from '../../src/config/env';
 import { resetPlatformClient } from '../../src/infra/platform/platform.client';
-import { buildFilter } from '../../src/modules/users/repositories/user.read.repository';
+import { buildFilter, UserReadRepository } from '../../src/modules/users/repositories/user.read.repository';
+import {
+    findProfileOwners,
+    idMatchKinds,
+    isWholeId,
+} from '../../src/modules/users/repositories/role-profile.read.repository';
 import { AUDIT_CATALOG, auditSpec, isAuditAction } from '../../src/modules/audit/domain/audit.catalog';
 import { subjectClassOf } from '../../src/modules/audit/domain/audit-subject';
 import { PERMISSION_CATALOG, permissionSpec } from '../../src/modules/authorization/domain/permission.catalog';
@@ -198,6 +203,70 @@ t.assert('a 24-hex term ALSO matches the user id — a pasted id must find the p
     return branches.length === 3 && branches.some((branch) => '_id' in branch);
 });
 
+/**
+ * BR-028. The id on an order is a `customers._id`, the id on a vendor's page a
+ * `vendors._id`. Neither is a `users._id`, and pasted here neither found anybody. The
+ * controller resolves the account behind a profile id and hands it in; the filter must
+ * carry it as its own branch, beside the user-id branch and never instead of it.
+ */
+const PROFILE_OWNER = new Types.ObjectId('665f1c2a9b3e4a91c7d2e5f0');
+
+function idBranches(filter: Record<string, unknown>): Record<string, unknown>[] {
+    return (filter.$or as Record<string, unknown>[]).filter((branch) => '_id' in branch);
+}
+
+t.assert('⭐ a profile id finds its account — the resolved user id is its own $in branch', () => {
+    const filter = buildFilter(
+        query({ search: '66b0000000000000000000c3' }),
+        [PROFILE_OWNER] as never,
+    ) as Record<string, unknown>;
+    const ids = idBranches(filter);
+    const resolved = ids.find((branch) => Array.isArray((branch._id as { $in?: unknown[] }).$in));
+    return ids.length === 2
+        && resolved !== undefined
+        && String((resolved._id as { $in: unknown[] }).$in[0]) === PROFILE_OWNER.toString();
+});
+
+t.assert('...and the pasted id is still tried as a user id — one branch does not replace the other', () => {
+    const filter = buildFilter(
+        query({ search: '66b0000000000000000000c3' }),
+        [PROFILE_OWNER] as never,
+    ) as Record<string, unknown>;
+    return idBranches(filter).some((branch) => String(branch._id) === '66b0000000000000000000c3');
+});
+
+t.assert('no resolved profile adds no branch — an empty $in is never emitted', () => {
+    const filter = buildFilter(query({ search: '65f0000000000000000000aa' }), []) as Record<string, unknown>;
+    return idBranches(filter).length === 1;
+});
+
+t.assert('the role filter still narrows a profile-id match — it composes under $and', () => {
+    const filter = buildFilter(
+        query({ role: 'vendor', search: '66b0000000000000000000c3' }),
+        [PROFILE_OWNER] as never,
+    ) as Record<string, unknown>;
+    const clauses = (filter.$and ?? []) as Record<string, unknown>[];
+    return clauses.some((clause) => clause.roles === 'vendor')
+        && clauses.some((clause) => Array.isArray(clause.$or));
+});
+
+/**
+ * An id matches WHOLE. A part of one is text, and is matched against the email and the
+ * phone like any other text. Documented on every page whose `search` takes an id; this is
+ * the half of the rule that a reader assumes the opposite of, because a part of an email
+ * does match.
+ */
+t.assert('a PART of an id is not read as an id — 8, 23 and 25 characters add no _id branch', () =>
+    ['665f1c2a', '665f1c2a9b3e4a91c7d2e5f', '665f1c2a9b3e4a91c7d2e5f0a'].every((term) => {
+        const filter = buildFilter(query({ search: term })) as Record<string, unknown>;
+        return idBranches(filter).length === 0;
+    }));
+
+t.assert('an id in the other letter case is still an id', () => {
+    const filter = buildFilter(query({ search: '665F1C2A9B3E4A91C7D2E5F0' })) as Record<string, unknown>;
+    return idBranches(filter).length === 1;
+});
+
 t.assert('regex metacharacters in a term are escaped, not interpreted', () => {
     const filter = buildFilter(query({ search: 'a.b+c' })) as Record<string, unknown>;
     const branches = filter.$or as Record<string, unknown>[];
@@ -269,6 +338,89 @@ t.assert('no role projection reaches an agent’s identity, payout or emergency 
 
 t.assert('the agent projection takes `kyc.status` only — never the documents behind it', () =>
     ROLE_REPO.includes("'kyc.status': 1") && !ROLE_REPO.includes('kyc: 1'));
+
+/**
+ * BR-028. The profile-id resolver reads the four richest collections on the platform to
+ * answer one question, so it must read one field of each. And the route must actually call
+ * it: the filter's branch is dead code if the controller never resolves anything.
+ */
+t.assert('the profile-id resolver projects `user_id` and nothing else', () => {
+    const start = ROLE_REPO.indexOf('async findOwnerUserId');
+    const body = ROLE_REPO.slice(start, ROLE_REPO.indexOf('\n    }\n', start));
+    return start !== -1 && body.includes('projection: { _id: 0, user_id: 1 }');
+});
+
+t.assert('GET /users resolves a profile id before it builds the page', () => {
+    const controller = readCode(SRC, 'modules', 'users', 'controllers', 'user.controller.ts');
+    const search = controller.slice(controller.indexOf('static search ='), controller.indexOf('static get ='));
+    return search.includes('findProfileOwners(idTerm)')
+        && search.includes('const profileUserIds = owners.map((owner) => owner.userId)')
+        && /users\.search\(\s*\{[\s\S]*?\},\s*profileUserIds,?\s*\)/.test(search);
+});
+
+/**
+ * BR-029. `meta.idMatch.kinds` tells the dashboard what a pasted id WAS, because the row
+ * that comes back is the account and carries a different id.
+ *
+ * Three properties the dashboard builds on, each of which a refactor could lose quietly:
+ * the block is ABSENT for a term that is not an id (so absent keeps one meaning, including
+ * "an older service"), it is `[]` for an id that is nobody's, and it describes the id
+ * whatever the other filters are.
+ */
+const OWNER_A = new Types.ObjectId('665f1c2a9b3e4a91c7d2e5f0');
+const OWNER_B = new Types.ObjectId('665f1c2a9b3e4a91c7d2e5f1');
+
+t.assert('idMatch: a customer id is `customer`, and only that', () =>
+    JSON.stringify(idMatchKinds(false, [{ role: 'customer', userId: OWNER_A as never }])) === '["customer"]');
+
+t.assert('idMatch: the account’s own id is `user` — so `[]` keeps ONE meaning', () =>
+    JSON.stringify(idMatchKinds(true, [])) === '["user"]');
+
+t.assert('idMatch: an id that is nobody’s is an EMPTY list, not a missing one', () => {
+    const kinds = idMatchKinds(false, []);
+    return Array.isArray(kinds) && kinds.length === 0;
+});
+
+t.assert('idMatch: an id found in two places lists both, `user` first', () =>
+    JSON.stringify(idMatchKinds(true, [
+        { role: 'vendor', userId: OWNER_A as never },
+        { role: 'agent', userId: OWNER_B as never },
+    ])) === '["user","vendor","agent"]');
+
+t.assert('one definition of "read as an id" — whole, either case, nothing round it', () =>
+    isWholeId('665f1c2a9b3e4a91c7d2e5f0')
+    && isWholeId('665F1C2A9B3E4A91C7D2E5F0')
+    && ['665f1c2a', '665f1c2a9b3e4a91c7d2e5f', '665f1c2a9b3e4a91c7d2e5f0a',
+        '"665f1c2a9b3e4a91c7d2e5f0"', 'zzzzzzzzzzzzzzzzzzzzzzzz', 'ada'].every((term) => !isWholeId(term)));
+
+t.assert('...and the filter and the response both use it, so they cannot disagree', () => {
+    const controller = readCode(SRC, 'modules', 'users', 'controllers', 'user.controller.ts');
+    return USER_REPO.includes('if (isWholeId(term))') && controller.includes('isWholeId(query.search)');
+});
+
+t.assert('⭐ `meta.idMatch` is sent ONLY when the term was read as an id — otherwise no key at all', () => {
+    const controller = readCode(SRC, 'modules', 'users', 'controllers', 'user.controller.ts');
+    const search = controller.slice(controller.indexOf('static search ='), controller.indexOf('static get ='));
+    return search.includes('...(idTerm ? { idMatch: { kinds: idMatchKinds(isUserId, owners) } } : {})')
+        && !/idMatch:\s*null/.test(search);
+});
+
+/**
+ * The property behind the dashboard's "a filter is hiding this account" sentence. If the
+ * `user` kind were read off the PAGE, a customer's own user id searched under `role=vendor`
+ * would report `[]`, the same answer as an id that is nobody's.
+ */
+t.assert('⭐ idMatch describes the ID, not the page — neither read behind it sees a filter', () => {
+    const controller = readCode(SRC, 'modules', 'users', 'controllers', 'user.controller.ts');
+    const search = controller.slice(controller.indexOf('static search ='), controller.indexOf('static get ='));
+    const exists = USER_REPO.slice(USER_REPO.indexOf('async existsById'), USER_REPO.indexOf('export function buildFilter'));
+    // Both inputs to `idMatchKinds` come from the two reads below and from nothing else,
+    // and those reads take the term alone: no `query`, no page.
+    return /const \[owners, isUserId\] = idTerm\s*\? await Promise\.all\(\[findProfileOwners\(idTerm\), users\.existsById\(idTerm\)\]\)/.test(search)
+        && search.includes('idMatchKinds(isUserId, owners)')
+        && exists.includes('this.countBy({ _id: new ObjectId(userId) }')
+        && !exists.includes('buildFilter');
+});
 
 /**
  * ⚠ **NARROWED 2026-08-25 (BR-015). The property is unchanged; the counting was too broad.**
@@ -988,7 +1140,44 @@ const platformEnvelope = (code: string, statusCode: number, category: string) =>
     error: { code, message: `stub ${code}`, statusCode, category },
 });
 
+/**
+ * BR-028. A term that is not exactly an id must cost nothing: the resolver answers `[]`
+ * before it reaches a collection. There is no platform connection in this suite, so a call
+ * that DID query would reject. That is the second assertion, on a whole id.
+ */
+async function runProfileResolverChecks(): Promise<void> {
+    t.section('2b. The profile-id resolver — only a whole id reaches the database');
+
+    const notIds = ['ada', '670112', '665f1c2a', '"665f1c2a9b3e4a91c7d2e5f0"', 'zzzzzzzzzzzzzzzzzzzzzzzz'];
+    const answers = await Promise.all(notIds.map((term) => findProfileOwners(term)));
+    t.assert('a name, a phone part, a part of an id and a quoted id resolve to nothing, unqueried', () =>
+        answers.every((owners) => Array.isArray(owners) && owners.length === 0));
+
+    let queried = false;
+    try {
+        await findProfileOwners('66b0000000000000000000c3');
+    } catch {
+        queried = true;
+    }
+    t.assert('a whole id does go to the role collections', () => queried);
+
+    // BR-029. The `user` kind's read has the same two halves: free for a non-id, real for an id.
+    const exists = new UserReadRepository();
+    const cheap = await Promise.all(notIds.map((term) => exists.existsById(term)));
+    t.assert('existsById answers false for a non-id without a query', () => cheap.every((found) => found === false));
+
+    let counted = false;
+    try {
+        await exists.existsById('66b0000000000000000000c3');
+    } catch {
+        counted = true;
+    }
+    t.assert('...and does go to `users` for a whole id', () => counted);
+}
+
 async function runDrivenChecks(): Promise<void> {
+    await runProfileResolverChecks();
+
     await new Promise<void>((resolve) => stubJovi.listen(0, '127.0.0.1', resolve));
     const { port } = stubJovi.address() as AddressInfo;
 

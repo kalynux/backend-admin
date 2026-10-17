@@ -40,9 +40,7 @@ export class AuditRepository {
         const filter = combineFilters(
             auditScopeFilter(viewer.tier, viewer.adminId),
             buildQueryFilter(query),
-            query.search
-                ? matchAnyField(['actor_email', 'actor_display_name', 'target_label'], query.search)
-                : null,
+            query.search ? auditSearchClause(query.search) : null,
         ) as FilterQuery<IAuditLog>;
 
         const [items, total] = await Promise.all([
@@ -148,6 +146,45 @@ export class AuditRepository {
             .sort({ occurred_at: 1 })
             .limit(limit);
     }
+}
+
+/** The three text fields `search` reads. Stated in `audit.md`; change both together. */
+export const AUDIT_SEARCH_FIELDS = ['actor_email', 'actor_display_name', 'target_label'] as const;
+
+/**
+ * What `?search=` matches on the trail.
+ *
+ * Text: the actor's email, the actor's display name and the target's label. NOT the action
+ * name and NOT the resource type; those have their own pinned filters (`action`,
+ * `actionFamily`, `targetType`), and a typo there is a 400 rather than an empty page.
+ *
+ * ── A pasted id (BR-028) ──────────────────────────────────────────────────────
+ * A term that is exactly 24 hexadecimal characters is also matched as an id: the row's
+ * target, its related target, or its actor. That is what an administrator pasting an id
+ * into the trail means, and before this the three text fields matched it against nothing.
+ *
+ * `target_id` and `related_target_id` are STRINGS on this collection (a target may be a
+ * session UUID or a composite key), stored as the caller sent them, so both the term and
+ * its lower-cased form are tried. `actor_id` is an ObjectId.
+ *
+ * Exported for `test-audit.ts`. Returns an `$or`; `search` composes it under `$and` with
+ * the tier scope, so an id match can never reach a row the scope withholds.
+ */
+export function auditSearchClause(term: string): Record<string, unknown> {
+    const text = matchAnyField(AUDIT_SEARCH_FIELDS, term);
+    const trimmed = term.trim();
+
+    if (trimmed.length !== 24 || !Types.ObjectId.isValid(trimmed)) return text;
+
+    const spellings = [...new Set([trimmed, trimmed.toLowerCase()])];
+    return {
+        $or: [
+            ...((text.$or as Record<string, unknown>[] | undefined) ?? []),
+            { target_id: { $in: spellings } },
+            { related_target_id: { $in: spellings } },
+            { actor_id: new Types.ObjectId(trimmed) },
+        ],
+    };
 }
 
 /**
