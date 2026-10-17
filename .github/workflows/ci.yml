@@ -344,6 +344,11 @@ jobs:
       # later runs without its author touching this file.
       - name: Live suites
         working-directory: admin
+        # `verify:transactions` SEEDS and DROPS its database, and refuses to start unless
+        # VERIFY_MONGO_URI names one ending in `_verify`. Its own database, never jovi_mall_ci
+        # — without this it exited 2 on its guard and read as a failing suite.
+        env:
+          VERIFY_MONGO_URI: mongodb://127.0.0.1:27017/wi_transactions_verify?replicaSet=rs0
         run: |
           set -uo pipefail
           SUITES=$(node -p "Object.keys(require('./package.json').scripts).filter(k => k.startsWith('verify:')).join(' ')")

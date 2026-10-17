@@ -58,6 +58,7 @@ process.env.ADMIN_AUTH_RATE_LIMIT_MAX = '500';
 
 import type { Server } from 'http';
 import { ObjectId } from 'mongodb';
+import { authenticator } from 'otplib';
 import { suite } from './_assert';
 import { env } from '../../src/config/env';
 import { createApp } from '../../src/app';
@@ -76,6 +77,12 @@ import { routeManifest } from '../../src/api/route-manifest';
 const t = suite('money — live');
 
 const PASSWORD = 'verify-money-suite-password-7712';
+/**
+ * The platform ledger is `money.earnings.platform.read` — financial, tier 1 only (BR-027/030:
+ * Admin and Support see the platform's take as RATES, never amounts). So reading it here costs a
+ * Developer fixture and the real TOTP enrolment, exactly as in `verify:files`.
+ */
+const EMAIL_DEV = 'verify-money-dev@example.test';
 const EMAIL_ADMIN = 'verify-money-admin@example.test';
 const EMAIL_SECOND = 'verify-money-second@example.test';
 const EMAIL_SUPPORT = 'verify-money-support@example.test';
@@ -103,12 +110,13 @@ function parseCookies(headers: Headers): Record<string, string> {
 async function call(
     method: string,
     path: string,
-    options: { body?: unknown; cookies?: Record<string, string>; csrf?: string } = {},
+    options: { body?: unknown; cookies?: Record<string, string>; bearer?: string; csrf?: string } = {},
 ): Promise<Res & { cookies: Record<string, string> }> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (options.cookies && Object.keys(options.cookies).length > 0) {
         headers.Cookie = Object.entries(options.cookies).map(([k, v]) => `${k}=${v}`).join('; ');
     }
+    if (options.bearer) headers.Authorization = `Bearer ${options.bearer}`;
     if (options.csrf) headers['X-CSRF-Token'] = options.csrf;
 
     const response = await fetch(`http://127.0.0.1:${port}${path}`, {
@@ -131,6 +139,38 @@ async function signIn(email: string): Promise<Session> {
     }
     const me = await call('GET', '/api/v1/auth/me', { cookies: res.cookies });
     return { adminId: me.body?.data?.admin?.id, cookies: res.cookies, csrf: res.cookies.admin_csrf_token ?? '' };
+}
+
+/**
+ * The Developer sign-in — enrol, activate, re-authenticate with a generated code. Copied from
+ * `verify:files`: the TOTP secret is encrypted at rest, so there is no planting a usable one.
+ * `verify:auth` § 9 asserts this flow; here it is only the price of a tier-1 read, so it throws.
+ */
+async function signInDeveloper(email: string): Promise<Session> {
+    const scoped = await call('POST', '/api/v1/auth/login', { body: { email, password: PASSWORD } });
+    if (scoped.status !== 200 || !scoped.body?.data?.mfaEnrolmentRequired) {
+        throw new Error(`expected a scoped enrolment session for ${email}: ${JSON.stringify(scoped.body)}`);
+    }
+    const bearer: string = scoped.body.data.accessToken;
+
+    const enrol = await call('POST', '/api/v1/auth/mfa/enroll', { bearer });
+    const secret: string = enrol.body?.data?.secret;
+    if (!secret) throw new Error(`enrolment gave no secret for ${email}`);
+
+    const activated = await call('POST', '/api/v1/auth/mfa/activate', {
+        bearer,
+        body: { code: authenticator.generate(secret) },
+    });
+    if (activated.status !== 200) throw new Error(`activation failed: ${JSON.stringify(activated.body)}`);
+
+    const challenge = await call('POST', '/api/v1/auth/login', { body: { email, password: PASSWORD } });
+    const verified = await call('POST', '/api/v1/auth/mfa/verify', {
+        body: { challengeId: challenge.body?.data?.challengeId, code: authenticator.generate(secret) },
+    });
+    if (verified.status !== 200) throw new Error(`TOTP login failed: ${JSON.stringify(verified.body)}`);
+
+    const me = await call('GET', '/api/v1/auth/me', { cookies: verified.cookies });
+    return { adminId: me.body?.data?.admin?.id, cookies: verified.cookies, csrf: verified.cookies.admin_csrf_token ?? '' };
 }
 
 const get = (s: Session, path: string) => call('GET', path, { cookies: s.cookies });
@@ -196,7 +236,7 @@ async function cleanupPlatform(): Promise<void> {
 }
 
 async function cleanupAdmin(): Promise<void> {
-    const emails = [EMAIL_ADMIN, EMAIL_SECOND, EMAIL_SUPPORT];
+    const emails = [EMAIL_DEV, EMAIL_ADMIN, EMAIL_SECOND, EMAIL_SUPPORT];
     const admins = await AdminAccountModel().find({ email: { $in: emails } }, { _id: 1 });
     const ids = admins.map((a) => a._id);
     if (ids.length > 0) {
@@ -427,6 +467,7 @@ async function main(): Promise<number> {
                 await session.endSession();
             }
         };
+        await make(EMAIL_DEV, 'Verify Money Developer', 1);
         await make(EMAIL_ADMIN, 'Verify Money Admin', 2);
         await make(EMAIL_SECOND, 'Verify Money Second Admin', 2);
         await make(EMAIL_SUPPORT, 'Verify Money Support', 3);
@@ -462,14 +503,22 @@ async function main(): Promise<number> {
          * twenty — and CI's live job noticed first again. The platform summary and the
          * order money split (30a6256) took it to twenty-two — and, again, CI noticed first.
          * Earnings pauses (6d10103: list, detail, pause, resume) and clawbacks (6d552f8: list,
-         * write-off) took it to twenty-eight — CI noticed first, for the fifth time.
+         * write-off) took it to twenty-eight — CI noticed first, for the fifth time. The
+         * platform transactions list (BR-027: list, summary, detail) took it to thirty-one —
+         * CI noticed first, for the sixth time.
          *
          * It stays a hand-maintained count ON PURPOSE: every other assertion in this section
          * reads a route out of the manifest and would pass just as happily on an EMPTY one, so
          * a count is the only thing here that catches a mount which quietly stopped happening.
          * Update it deliberately when routes change; never derive it from the manifest it guards.
          */
-        t.assert('twenty-eight /money routes reached Express', () => money.length === 28);
+        t.assert('thirty-one /money routes reached Express', () => money.length === 31);
+
+        /** The three platform transactions routes (BR-027), by path. */
+        t.assert('...including the three transactions routes, named rather than counted', () =>
+            ['/api/v1/money/transactions', '/api/v1/money/transactions/summary',
+                '/api/v1/money/transactions/:kind/:id']
+                .every((p) => money.some((r) => r.fullPath === p)));
 
         /** The platform summary and the order money split, by path. */
         t.assert('...including the platform summary and the order split, named rather than counted', () =>
@@ -505,6 +554,7 @@ async function main(): Promise<number> {
             ['/api/v1/money/payouts/:payoutId/triage', '/api/v1/money/payouts/:payoutId/send']
                 .every((p) => money.some((r) => r.fullPath === p)));
 
+        const developer = await signInDeveloper(EMAIL_DEV);
         const admin = await signIn(EMAIL_ADMIN);
         const second = await signIn(EMAIL_SECOND);
         const support = await signIn(EMAIL_SUPPORT);
@@ -512,8 +562,16 @@ async function main(): Promise<number> {
         // ── 1. Earnings ───────────────────────────────────────────────────────
         t.section('1. The ledger and the allocations — direct reads that RUN');
 
-        const ledger = await get(admin, '/api/v1/money/earnings/platform/ledger?limit=100');
-        t.assert('GET /money/earnings/platform/ledger answers 200', () => ledger.status === 200);
+        const ledger = await get(developer, '/api/v1/money/earnings/platform/ledger?limit=100');
+        t.assert('GET /money/earnings/platform/ledger answers 200 to a Developer', () => ledger.status === 200);
+
+        /**
+         * BR-027/030: `money.earnings.platform.read` is financial and tier 1 only — an Admin sees
+         * the platform's take as RATES, never amounts. Support's refusal is asserted in § 7.
+         */
+        const adminLedger = await get(admin, '/api/v1/money/earnings/platform/ledger?limit=1');
+        t.assert('...and 403 to a tier-2 Admin, since the platform’s amounts are tier-1 only', () =>
+            adminLedger.status === 403);
 
         const ledgerRows: any[] = ledger.body?.data ?? [];
         t.assert('...and carries only the platform singleton, never another owner’s rows', () =>
@@ -534,7 +592,7 @@ async function main(): Promise<number> {
          * `length === 1` assertion would pass on an empty database and fail on a seeded one,
          * which is the wrong way round for a live check.
          */
-        const releases = await get(admin, '/api/v1/money/earnings/platform/ledger?entryType=release&limit=100');
+        const releases = await get(developer, '/api/v1/money/earnings/platform/ledger?entryType=release&limit=100');
         const releaseRows: any[] = releases.body?.data ?? [];
         t.assert('the entryType filter executes and narrows to the release entries', () =>
             releases.status === 200
