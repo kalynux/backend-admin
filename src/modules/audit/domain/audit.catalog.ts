@@ -1228,6 +1228,60 @@ export const AUDIT_CATALOG = Object.freeze({
         summary: 'Deleted an unused product category',
     },
 
+    // ═══ CATALOG — informational service listings, delegated to jovi-mall (2026-10-19) ═══
+    // SERVICE-LISTINGS-PLAN § C-6. Every write is a jovi-mall internal-admin call, so
+    // `delegated` (intent before, outcome after). The contacts read is `external`, like the
+    // payout-destination reveal: the row IS the control on a disclosure, so it commits before
+    // the read and a failed audit write stops it.
+    'catalog.listings.contacts.read': {
+        permission: 'catalog.listings.contacts.read',
+        target: 'listing',
+        transport: 'external',
+        summary: 'Opened a service listing’s hidden contact details',
+    },
+    'catalog.listings.approve': {
+        permission: 'catalog.listings.review',
+        target: 'listing',
+        transport: 'delegated',
+        summary: 'Approved a service listing (or an edit to one); it is live and re-indexed',
+    },
+    'catalog.listings.reject': {
+        permission: 'catalog.listings.review',
+        target: 'listing',
+        transport: 'delegated',
+        summary: 'Rejected a service listing (or an edit to one), with reasons the provider sees',
+    },
+    'catalog.listings.suspend': {
+        permission: 'catalog.listings.suspend',
+        target: 'listing',
+        transport: 'delegated',
+        summary: 'Took a live service listing offline as platform oversight',
+    },
+    'catalog.listings.unsuspend': {
+        permission: 'catalog.listings.suspend',
+        target: 'listing',
+        transport: 'delegated',
+        summary: 'Put a service listing taken offline by an administrator back live',
+    },
+    'catalog.listings.reveals.refund': {
+        permission: 'catalog.listings.reveals.refund',
+        target: 'listing_reveal',
+        transport: 'delegated',
+        summary: 'Refunded the credits a provider paid for one contact reveal',
+    },
+    'catalog.listings.reveal_block': {
+        permission: 'catalog.listings.reveal-block',
+        target: 'listing',
+        transport: 'delegated',
+        summary: 'Blocked one customer from unlocking contacts on a service listing',
+    },
+    'catalog.listings.reveal_unblock': {
+        permission: 'catalog.listings.reveal-block',
+        target: 'listing',
+        transport: 'delegated',
+        summary: 'Lifted a customer’s block on a service listing',
+    },
+
     // ═══ REVIEWS — after-the-fact moderation, delegated to jovi-mall (2026-10-05) ═══
     // Every review publishes on submission. These three are the only things an administrator
     // can do to one, and jovi-mall keeps only the LAST action on the review itself — so this

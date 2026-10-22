@@ -155,6 +155,39 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'Every unpublish / republish / delete recomputes the rating aggregates and nudges an agent\'s trust score; a second writer would flip the status and fire neither',
     },
+    // ── Informational service listings (2026-10-19, SERVICE-LISTINGS-PLAN.md) ──
+    // Read for the review queue and the lead-report screen. Every write is delegated:
+    // approve copies a pending revision AND its contacts in one transaction and triggers the
+    // re-index; a refund moves credits and may resume suspended listings — a second writer
+    // would get the status right and silently skip both.
+    [COLLECTIONS.LISTING]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'Approve/reject/suspend change status, copy the revision and its contacts, and re-index; a second writer would do only the first',
+    },
+    [COLLECTIONS.LISTING_CONTACT]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'A provider\'s hidden contacts. Read ONLY behind catalog.listings.contacts.read, audited per read',
+    },
+    [COLLECTIONS.LISTING_LEAD]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'One row per (customer, listing, 30-day window); written only by the reveal transaction',
+    },
+    [COLLECTIONS.LISTING_REVEAL]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'The money record of a reveal; a refund writes a ledger row and may resume listings',
+    },
+    [COLLECTIONS.LISTING_REVEAL_BLOCK]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'One active block per (customer, listing), enforced by a partial unique index',
+    },
+    [COLLECTIONS.PROVIDER_CONTACT_CONSENT]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'The customer\'s opt-in to messages from one provider; only the customer changes it',
+    },
+    [COLLECTIONS.PROVIDER_CUSTOMER_MESSAGE]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'What a provider sent a customer through Wi-Mall, and the 3-per-30-days cap counts these',
+    },
     [COLLECTIONS.PRODUCT_VARIANT]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'The line an order item actually names; its media and price are what a dispute screen has to show (BR-017)',

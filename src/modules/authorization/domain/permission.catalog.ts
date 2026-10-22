@@ -1222,6 +1222,49 @@ export const PERMISSION_CATALOG = Object.freeze({
         summary: 'Rename, merge or delete a shared product category (a merge moves every product)',
     },
 
+    // ═══ CATALOG — informational service listings (2026-10-19) ═══════════════
+    // A provider vendor's listing is reviewed by an administrator before it goes live, and
+    // its contact details are revealed to customers for credits. Tiers are the owner's
+    // decisions O-12…O-14 (PRODUCTION-READINESS/SERVICE-LISTINGS-PLAN.md § Build round):
+    // everything to all three tiers except the refund, which moves credits.
+    'catalog.listings.read': {
+        family: 'catalog', action: 'read', phase: 6,
+        summary: 'Open the service-listing review queue, a listing, its leads and its reveals — never its hidden contacts',
+    },
+    /**
+     * The provider's hidden contacts (WhatsApp, phone, email, links, exact location, video).
+     * Its own permission because there is no "sensitive" flag: what bounds it is the audit row
+     * written BEFORE every read (`external`, the `money.payouts.destination.read` posture) —
+     * a reviewer who opens forty listings' contacts in an afternoon is visible.
+     */
+    'catalog.listings.contacts.read': {
+        family: 'catalog', action: 'read', phase: 6,
+        summary: 'See a service listing’s hidden contact details — every view is recorded in the audit trail',
+    },
+    'catalog.listings.review': {
+        family: 'catalog', action: 'write', phase: 6,
+        summary: 'Approve or reject a service listing or an edit to one',
+    },
+    /** Reversible, so not `destructive`: an unsuspend restores the exact previous status. */
+    'catalog.listings.suspend': {
+        family: 'catalog', action: 'write', phase: 6,
+        summary: 'Take a live service listing offline, or put it back',
+    },
+    /**
+     * ⚠ `financial`: a refund credits a provider's wallet, and can bring their suspended
+     * listings back. So `allInFamily('catalog')` does NOT sweep it in — tier 2 names it, and
+     * the boot assertion refuses it to Support.
+     */
+    'catalog.listings.reveals.refund': {
+        family: 'catalog', action: 'write', phase: 6, financial: true,
+        summary: 'Refund the credits a provider paid for a customer unlocking their contact',
+    },
+    /** Reversible (a block can be lifted), so unflagged. */
+    'catalog.listings.reveal-block': {
+        family: 'catalog', action: 'write', phase: 6,
+        summary: 'Stop one customer unlocking contacts on one service listing, or lift that block',
+    },
+
     // ═══ REVIEWS ═══ ratings and reviews of products and deliveries (2026-10-05) ═══
     // Every review publishes the moment it is written (owner decision); moderation is AFTER
     // the fact. All three are granted to all three tiers by the owner's decision — Support

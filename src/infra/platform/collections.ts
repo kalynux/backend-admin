@@ -167,6 +167,16 @@ export const COLLECTIONS = Object.freeze({
   // `review_aggregates` is not copied: nothing here reads it.
   REVIEW: 'reviews',
 
+  // Informational service listings (2026-10-19) — read for the review queue and the lead
+  // reports. `listing_contacts` is read only behind `catalog.listings.contacts.read`.
+  LISTING: 'listings',
+  LISTING_CONTACT: 'listing_contacts',
+  LISTING_LEAD: 'listing_leads',
+  LISTING_REVEAL: 'listing_reveals',
+  LISTING_REVEAL_BLOCK: 'listing_reveal_blocks',
+  PROVIDER_CONTACT_CONSENT: 'provider_contact_consents',
+  PROVIDER_CUSTOMER_MESSAGE: 'provider_customer_messages',
+
   // COD (cash on delivery: collections, cash liabilities, reconciliation)
   CASH_COLLECTION: 'cash_collections',
   COD_CASH_ACCOUNT: 'cod_cash_accounts',

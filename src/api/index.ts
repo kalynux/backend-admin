@@ -118,6 +118,12 @@ apiV1.use('/vendors', vendorRoutes);
 import { categoryRoutes } from '../modules/categories/routes/category.routes';
 apiV1.use('/categories', categoryRoutes);
 
+// Informational service listings (2026-10-19). The review queue is a direct read; approve /
+// reject / suspend / unsuspend are delegated (an approval publishes content AND contacts in
+// one jovi-mall transaction). The hidden contacts are a direct read, audited before the read.
+import { listingRoutes } from '../modules/listings/routes/listing.routes';
+apiV1.use('/listings', listingRoutes);
+
 // Ratings and reviews of products and deliveries (2026-10-05). Every review publishes on
 // submission; this is after-the-fact moderation. The list is a direct read, and unpublish /
 // republish / delete are delegated — each recomputes the ratings it moves in jovi-mall.

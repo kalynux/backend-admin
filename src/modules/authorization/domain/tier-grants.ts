@@ -81,6 +81,19 @@ const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
     'catalog.categories.read',
 
     /**
+     * Service listings — the owner's decisions O-12…O-14 (2026-10-19): Support reviews the
+     * queue (seeing the hidden contacts to do it, each view audited), takes a listing offline
+     * and back, and blocks or lifts a customer from a provider's report ticket. All four are
+     * reversible and none moves money. `catalog.listings.reveals.refund` is `financial` and
+     * is NOT here: a refund on the same ticket goes to an Admin.
+     */
+    'catalog.listings.read',
+    'catalog.listings.contacts.read',
+    'catalog.listings.review',
+    'catalog.listings.suspend',
+    'catalog.listings.reveal-block',
+
+    /**
      * Review moderation — all three, by the owner's decision (2026-10-05): every review now
      * publishes the moment it is written, and "somebody wrote something abusive about my
      * shop / my delivery" arrives as a support ticket. Hiding it is the remedy and should
@@ -396,6 +409,10 @@ const ADMIN: readonly PermissionName[] = union(
         'orders.refund.settle_external',
         // Forgiving a refund debt (C-6). Four-eyes at ≥ 2,000,000 via its `dualControl` spec.
         'money.earnings.clawback.write_off',
+        // Refunding a service-listing reveal (SERVICE-LISTINGS-PLAN L-25). `financial` — it
+        // credits a provider's wallet — so the `catalog` sweep above leaves it out and Support
+        // is refused it at boot. The other four listing permissions arrive through that sweep.
+        'catalog.listings.reveals.refund',
         'content.articles.delete',
         'content.authors.delete',
         'shipments.cancel',

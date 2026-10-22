@@ -644,6 +644,10 @@ const CREDIT_TYPE_BY_REASON: Record<string, string> = {
     whatsapp_template: 'credit_usage',
     ai_listing_copy: 'credit_usage',
     admin_adjustment: 'credit_adjustment',
+    // Service listings (SERVICE-LISTINGS-PLAN § C-5) — same labels as jovi-mall's feed.
+    listing_reveal: 'credit_usage',
+    listing_reveal_refund: 'credit_adjustment',
+    credit_debt_written_off: 'credit_adjustment',
 };
 
 const CREDIT_DESCRIPTION_BY_REASON: Record<string, string> = {
@@ -652,6 +656,9 @@ const CREDIT_DESCRIPTION_BY_REASON: Record<string, string> = {
     whatsapp_template: 'WhatsApp template message',
     ai_listing_copy: 'AI listing copy',
     admin_adjustment: 'Admin credit adjustment',
+    listing_reveal: 'Contact revealed to a customer',
+    listing_reveal_refund: 'Contact reveal refunded',
+    credit_debt_written_off: 'Credit debt written off at account closure',
 };
 
 export function toPlanPurchaseActivity(row: PlanPurchaseReadModel): AccountActivityDto {

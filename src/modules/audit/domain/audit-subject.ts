@@ -45,6 +45,11 @@ const SUBJECT_CLASS: Readonly<Record<AuditTargetType, AuditSubjectClass>> = Obje
     // A review is platform data about a product or a delivery, and Support both reads and
     // moderates reviews — so it may read what was done to one.
     review: 'platform_record',
+    // A service listing and one contact reveal on it (2026-10-19). Platform catalogue and
+    // money records, and Support reviews listings and works their report tickets — so it may
+    // read what was done to either.
+    listing: 'platform_record',
+    listing_reveal: 'platform_record',
     // An uploaded file belongs to a vendor, agency, agent or customer — platform data,
     // not this service's machinery, so it classifies with the records rather than with
     // `internal`. Note this governs who may READ the audit row, which is a separate
