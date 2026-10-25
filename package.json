@@ -13,6 +13,7 @@
     "lint": "eslint src scripts --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json",
+    "audit:gate": "ts-node scripts/audit-gate.ts",
     "bootstrap:admin": "ts-node scripts/bootstrap-admin.ts",
     "ensure:indexes": "ts-node scripts/ensure-indexes.ts",
     "migrate:status": "ts-node scripts/migrate-status.ts",

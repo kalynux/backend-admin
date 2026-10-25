@@ -14,8 +14,8 @@
  *
  * Run: npm run test:contract
  */
-import { z } from 'zod';
-import { readFileSync } from 'fs';
+import { z, ZodError } from 'zod';
+import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { Request, Response } from 'express';
 import { suite, throws } from './_assert';
@@ -46,6 +46,7 @@ import {
 import { ERROR_CODES } from '../../src/core/errors/error-codes';
 import { createAppError } from '../../src/core/errors/app-error';
 import { sendCreated, sendPaginated, sendSuccess } from '../../src/core/http/responses';
+import { MAX_BODY_ARRAY_LENGTH, findOversizedArray, validate } from '../../src/core/validation/validate';
 
 // The handler logs through pino; silence it so a passing run is readable.
 process.env.LOG_LEVEL = 'silent';
@@ -394,6 +395,63 @@ t.assert('a plain Error is not mistaken for one', () => classifyBodyParserFailur
 
 t.assert('an object that merely has type+status is not mistaken for one', () =>
     classifyBodyParserFailure({ type: 'user', status: 400 }) === null);
+
+// ─── 7c. The body array ceiling ──────────────────────────────────────────────
+
+t.section('7c. Body arrays — capped before Zod runs (GHSA-mrhx-c7xc-m3w5)');
+
+/** Run `validate({ body })` over one body; returns the error it forwarded, or undefined. */
+function validateBody(schema: z.ZodTypeAny, body: unknown): unknown {
+    let forwarded: unknown;
+    validate({ body: schema })({ body } as Request, {} as Response, (err?: unknown) => {
+        forwarded = err;
+    });
+    return forwarded;
+}
+
+const ItemsSchema = z.object({ items: z.array(z.object({ id: z.string() }).strict()).max(400) }).strict();
+
+t.assert('the reason this guard exists: Zod 3 still parses every element past .max()', () => {
+    const result = ItemsSchema.safeParse({ items: new Array(2000).fill(1) });
+    return !result.success && result.error.issues.length > 2000;
+});
+
+t.assert('an array over the ceiling is refused with ONE issue, not one per element', () => {
+    const err = validateBody(ItemsSchema, { items: new Array(MAX_BODY_ARRAY_LENGTH + 1).fill(1) });
+    return err instanceof ZodError && err.issues.length === 1 && err.issues[0].path.join('.') === 'items';
+});
+
+t.assert('…and renders as the ordinary VALIDATION_ERROR envelope', () => {
+    const err = validateBody(ItemsSchema, { items: new Array(MAX_BODY_ARRAY_LENGTH + 1).fill(1) });
+    const captured = render(err);
+    const fields = (errorOf(captured).details as { fields: { path: string; code: string }[] }).fields;
+    return captured.status === 400
+        && errorOf(captured).code === ERROR_CODES.VALIDATION_ERROR
+        && fields.length === 1 && fields[0].code === 'too_big';
+});
+
+t.assert('a nested array is found, and its path reported', () =>
+    findOversizedArray({ a: [{ b: { c: new Array(MAX_BODY_ARRAY_LENGTH + 1).fill(0) } }] })?.join('.') === 'a.0.b.c');
+
+t.assert('an array AT the ceiling passes through to the schema', () =>
+    validateBody(z.object({ ids: z.array(z.number()) }), { ids: new Array(MAX_BODY_ARRAY_LENGTH).fill(0) }) === undefined);
+
+/** Every `.ts` file under `dir`, walked. */
+function sourceFiles(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) return sourceFiles(full);
+        return entry.isFile() && full.endsWith('.ts') ? [full] : [];
+    });
+}
+
+// Single-line `z.array(…).max(N` only — enough to hold the largest cap (`eventIds`, 1000).
+t.assert('the ceiling is not below any cap a schema in src/ declares', () => {
+    const caps = sourceFiles(join(__dirname, '../../src'))
+        .flatMap((file) => [...readFileSync(file, 'utf8').matchAll(/z\.array\([^\n]*?\.max\((\d+)[,)]/g)])
+        .map((m) => Number(m[1]));
+    return caps.includes(1000) && caps.every((cap) => cap <= MAX_BODY_ARRAY_LENGTH);
+});
 
 // ─── 8. The error-code registry ──────────────────────────────────────────────
 

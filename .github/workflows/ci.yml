@@ -126,8 +126,12 @@ jobs:
       # area — jovi-mall carries googleapis, firebase-admin, stripe, cloudinary, sharp,
       # nodemailer and handlebars; this service carries almost none of it. Keeping the gate
       # hard is what stops that from changing quietly.
+      #
+      # Still any severity, but through `scripts/audit-gate.ts` since 2026-10-25: an advisory
+      # with no non-major fix (zod GHSA-mrhx-c7xc-m3w5, fixed only in zod 4) can be accepted
+      # there by id, with its mitigation written down and an expiry date that fails the build.
       - name: npm audit (production dependencies)
-        run: npm audit --omit=dev
+        run: npm run audit:gate
 
   # ═══════════════════════════════════════════════════════════════════════════
   #  The live suites — the job that needs a database (plan step 24.3)
