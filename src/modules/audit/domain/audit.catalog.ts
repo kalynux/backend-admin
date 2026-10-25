@@ -1021,6 +1021,17 @@ export const AUDIT_CATALOG = Object.freeze({
         transport: 'delegated',
         summary: 'Switched cash on delivery back on for a delivery agency',
     },
+    /**
+     * A damage claim charged to an agency (owner F-8, 2026-10-22). Filed against the AGENCY, so
+     * it lands on its activity feed; the parcel, amount and note are in the payload, and
+     * `after` carries what the agency's balances gave (held, available, debt).
+     */
+    'agencies.claims.charge': {
+        permission: 'agencies.claims.charge',
+        target: 'agency',
+        transport: 'delegated',
+        summary: 'Charged a damage claim to a delivery agency for a parcel damaged in delivery',
+    },
 
     // ═══ USERS — delegated to jovi-mall ═══════════════════════════════════════
     // The reads are not here: a list and a detail are not actions. Three mutations,
@@ -1557,6 +1568,15 @@ export const AUDIT_CATALOG = Object.freeze({
     'money.earnings.resume_booking': {
         permission: 'money.earnings.pause', target: 'booking', transport: 'delegated',
         summary: 'Resumed the earnings of a booking — its hold continues where it stopped',
+    },
+    // 2026-10-22: one DELIVERY — its agency's and rider's shares, nothing else on the order.
+    'money.earnings.pause_shipment': {
+        permission: 'money.earnings.pause', target: 'shipment', transport: 'delegated',
+        summary: "Paused a delivery's earnings — its agency and rider are not paid until resumed",
+    },
+    'money.earnings.resume_shipment': {
+        permission: 'money.earnings.pause', target: 'shipment', transport: 'delegated',
+        summary: "Resumed a delivery's earnings — its agency's and rider's hold continues where it stopped",
     },
 
     // ═══ MONEY — refund debt write-off (REFUND-FLOW-PLAN § 6.4, C-6) ═══════════

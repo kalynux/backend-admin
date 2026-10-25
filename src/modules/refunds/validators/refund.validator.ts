@@ -82,6 +82,16 @@ export const RefundEligibilityQuerySchema = z.object({
     itemDefective: boolFlag.optional(),
     /** Whole XAF — jovi-mall refuses a fraction. */
     amount: z.coerce.number().int().positive().optional(),
+    /**
+     * 2026-10-22: parcels said to be delivered at FAULT, comma-separated. The verdict shows, per
+     * parcel, whether its agency is inside its own window and will give back.
+     */
+    deliveryFaultShipmentIds: z
+        .string()
+        .trim()
+        .transform((v) => v.split(',').map((x) => x.trim()).filter(Boolean))
+        .pipe(z.array(objectId).min(1).max(20))
+        .optional(),
 });
 
 /**
@@ -136,6 +146,12 @@ export const CreateRefundRequestSchema = z
         approveNow: z.boolean().optional(),
         /** The support ticket this refund was raised from — stored on the request as `ticketId`. */
         ticketId: objectId.optional(),
+        /**
+         * 2026-10-22 (owner F-6/F-7): parcels whose DELIVERY was at fault. jovi-mall judges each
+         * against its agency's own window; inside it, the agency and rider fund that parcel's
+         * delivery money. Support may name them (the approver still decides); vendors never can.
+         */
+        deliveryFaultShipmentIds: z.array(objectId).min(1).max(20).optional(),
     })
     .strict()
     .superRefine((body, ctx) => {

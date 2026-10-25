@@ -516,7 +516,9 @@ t.assert('the ledger\'s reason codes and the source types it links are still wha
     const reasons = upstreamEnum(['modules', 'earnings', 'models', 'earnings-ledger.model.ts'], 'reason_code: {');
     const sources = upstreamEnum(['modules', 'earnings', 'models', 'earnings-ledger.model.ts'], 'source_type: {');
     return reasons.includes('order_split') && reasons.includes('hold_release')
-        && json([...sources].sort()) === json(['booking', 'cod_collection', 'order', 'shipment']);
+        // `agency_claim` (2026-10-22): a damage claim's credit to the vendor and fee to the platform.
+        // The feed links no order for it — its `source` carries the type and the claim id.
+        && json([...sources].sort()) === json(['agency_claim', 'booking', 'cod_collection', 'order', 'shipment']);
 });
 
 t.assert('the ledger owner types are the four roles plus the two platform accounts', () => {

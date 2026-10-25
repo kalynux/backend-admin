@@ -84,13 +84,15 @@ export interface PlatformRefundEligibility {
     [key: string]: unknown;
 }
 
-/** The eligibility query, exactly the five keys jovi-mall's STRICT schema accepts. */
+/** The eligibility query, exactly the keys jovi-mall's STRICT schema accepts. */
 export interface RefundEligibilityInput {
     sourceKind: string;
     sourceId: string;
     reasonKind?: string;
     itemDefective?: boolean;
     amount?: number;
+    /** 2026-10-22: parcels said to be delivered at fault; sent comma-separated. */
+    deliveryFaultShipmentIds?: string[];
 }
 
 /** What the caller already read about the request, so the audit row needs no second lookup. */
@@ -173,6 +175,9 @@ export async function refundEligibility(
     if (query.reasonKind !== undefined) forwarded.reasonKind = query.reasonKind;
     if (query.itemDefective !== undefined) forwarded.itemDefective = query.itemDefective ? 'true' : 'false';
     if (query.amount !== undefined) forwarded.amount = String(query.amount);
+    if (query.deliveryFaultShipmentIds && query.deliveryFaultShipmentIds.length > 0) {
+        forwarded.deliveryFaultShipmentIds = query.deliveryFaultShipmentIds.join(',');
+    }
     const result = await platformRequest<PlatformRefundEligibility>({
         method: 'GET',
         path: '/refunds/eligibility',
@@ -200,6 +205,8 @@ export interface CreateRefundInput {
     destinationProofFileId: string | null;
     /** The support ticket the request was raised from, passed through. */
     ticketId: string | null;
+    /** 2026-10-22: parcels whose delivery was at fault (owner F-6/F-7). Null: none named. */
+    deliveryFaultShipmentIds: string[] | null;
     /** Decided by this service from the caller's permissions — never from the body. */
     requestedByRole: 'admin' | 'support';
 }
@@ -243,6 +250,7 @@ export async function createRefundRequest(
             destinationTyped: input.destination !== null,
             destinationProofFileId: input.destinationProofFileId,
             ticketId: input.ticketId,
+            deliveryFaultShipmentIds: input.deliveryFaultShipmentIds,
             requestedByRole: input.requestedByRole,
         },
         {
@@ -266,6 +274,9 @@ export async function createRefundRequest(
                 }),
                 ...(input.destinationProofFileId !== null && { destinationProofFileId: input.destinationProofFileId }),
                 ...(input.ticketId !== null && { ticketId: input.ticketId }),
+                ...(input.deliveryFaultShipmentIds !== null && input.deliveryFaultShipmentIds.length > 0 && {
+                    deliveryFaultShipmentIds: input.deliveryFaultShipmentIds,
+                }),
                 requestedByRole: input.requestedByRole,
                 approveNow: false,
             },

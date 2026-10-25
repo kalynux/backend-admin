@@ -224,6 +224,11 @@ export const SetPaymentSettingsSchema = z.object({
      * only: a request fixes its `fee_rate` when it is created.
      */
     refundFeePercent: z.number().min(0).max(20).optional(),
+    /**
+     * 2026-10-22: the PAY-IN fee (percent, 0–20) every aggregator is assumed to keep when a
+     * customer pays. A refund does not give it back; it changes NEW refund requests only.
+     */
+    payinFeePercent: z.number().min(0).max(20).optional(),
     providers: z.record(ProviderNameSchema, z.object({ enabled: z.boolean() }).strict()).optional(),
     /**
      * Required, and `0` when no document exists yet. The compare-and-set is what stops two

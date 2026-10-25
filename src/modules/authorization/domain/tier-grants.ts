@@ -358,6 +358,8 @@ const ADMIN: readonly PermissionName[] = union(
         // `users.cod.restrict`, is unflagged and arrives through `allInFamily('users')`,
         // the same way `users.suspend` does — Support does not name it.
         'agencies.cod.restrict',
+        // Damage claims (owner F-8, 2026-10-22): charging an agency is money work, named here.
+        'agencies.claims.charge',
         'agents.ban',
         'agencies.deactivate',
         'billing.subscriptions.assign',

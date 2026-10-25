@@ -331,6 +331,19 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'agencies', action: 'write', phase: 9, financial: true,
         summary: 'Switch cash on delivery off for a delivery agency, or back on — it receives no new COD work while restricted',
     },
+    /**
+     * Charge a DAMAGE CLAIM to an agency for one parcel (owner decision F-8, 2026-10-22).
+     *
+     * jovi-mall allows it only inside the agency's own window (its damage-claim deadline from its
+     * parcel's delivery) and up to its own max refund per item; it takes the money from the
+     * agency (held, then available, then debt) and credits the vendor. `financial` — it moves an
+     * agency's money — so it is granted by name in the tier-2 money block and the boot assertion
+     * refuses it to Support. No dual control: the agency's own published terms are the cap.
+     */
+    'agencies.claims.charge': {
+        family: 'agencies', action: 'write', phase: 9, financial: true,
+        summary: 'Charge a damage claim to a delivery agency for a parcel damaged in delivery, up to its own per-item limit',
+    },
 
     // ═══ BILLING ═══ 7 legacy endpoints ═══════════════════════════════════════
     'billing.plans.read': {

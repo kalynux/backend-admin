@@ -41,9 +41,41 @@ One source can have **one open request** at a time (`409 REFUND_ALREADY_OPEN`).
 | Field | Meaning |
 |---|---|
 | `grossAmount` | What the refund is worth. What analytics deduct and what is clawed back from earnings |
-| `feeRate` / `feeAmount` | The refund transfer fee the platform keeps — 2 % by default (owner decision R-3), **0 on a card refund** |
-| `netAmount` | What the customer receives: `grossAmount − feeAmount`. 5 000 → **4 900** |
+| `feeAmount` | 🆕 2026-10-22: **everything deducted from the customer** — the payment fee the aggregator kept when they paid plus the transfer fee. **0 when the seller pays them** |
+| `feeRate` | The TRANSFER fee percent (2 by default); 0 on a card refund |
+| `fees` | 🆕 `{ paidBy: customer|vendor, paymentFeePercent, paymentFee, transferFeePercent, transferFee, vendorCharge }` — the two fees apart (below) |
+| `netAmount` | What the customer receives: `grossAmount − feeAmount`. Mobile money 5 000 → 100 → 98 → **4 802** |
 | `attribution` | `{ goods, delivery }` — which part is goods and which is delivery money (sums to `grossAmount`) |
+| `deliveryFault` | 🆕 parcels named as delivered at fault, each `{ shipmentId, agencyId, trackingNumber, deliveredAt, raisedAt, windowDays, insideWindow, customerDeliveryAmount, claimDeadlineDays, returnsPayer }` |
+
+#### The two fees (owner decisions, 2026-10-22)
+
+Every aggregator is assumed to charge **2% when the customer pays** and **2% to send money**,
+whatever it really charges (both rates are payment settings). Wi-Mall never had the payment fee,
+so a refund does not give it back; the transfer fee is 2% of what is left. Only the fee that
+happened applies:
+
+| Paid by | Payment fee | Transfer fee | 10 000 → customer receives |
+|---|---|---|---|
+| mobile money · plan / credits | 200 | 196 | **9 604** |
+| card (back on the card) | 200 | — | **9 800** |
+| cash on delivery | — | 200 | **9 800** |
+
+**The seller pays both** when the request comes from the seller cancelling an order (or a paid
+booking) after payment: the customer receives **100%** and `fees.vendorCharge` is charged to the
+seller on top of their share. A lost card dispute charges the seller the 2% payment fee too.
+
+#### Delivery at fault (owner decisions, 2026-10-22)
+
+`deliveryFaultShipmentIds` on `POST /refunds` names parcels whose **delivery** was at fault
+(damaged or lost in delivery — never a wrong item or a change of mind). jovi-mall judges each one
+against its agency's **own window**: its damage-claim deadline counted from that parcel's delivery
+(at least 3 days when it pays returns), the problem dated by the order's customer's first problem
+report, else the refund. **Inside it**, the parcel's delivery money is refunded whatever the
+vendor's return-shipping setting, taken from the agency and its rider (their COD handling fee
+stays); on a free delivery it relieves the vendor of the courier cost instead. **Outside it** — or
+an agency with no claim deadline that does not pay returns — nothing changes. To charge the agency
+for the damaged goods themselves, use a damage claim: [agency-claims.md](agency-claims.md).
 
 ### Destination and proofs (R-7, R-7b)
 
@@ -112,8 +144,10 @@ returned (completed refunds) plus this amount (`details.alreadyRefunded`), so tw
   "attribution": { "goods": 5000, "delivery": 0 },
   "grossAmount": 5000,
   "feeRate": 2,
-  "feeAmount": 100,
-  "netAmount": 4900,
+  "feeAmount": 198,
+  "netAmount": 4802,
+  "fees": { "paidBy": "customer", "paymentFeePercent": 2, "paymentFee": 100, "transferFeePercent": 2, "transferFee": 98, "vendorCharge": 0 },
+  "deliveryFault": [],
   "currency": "XAF",
   "paymentChannel": "mobile_money",
   "channel": "payout",
@@ -209,19 +243,25 @@ Only these five are forwarded (jovi-mall's query is strict); any other key is dr
     "goods": 5000, "delivery": 1000,     // of maxRefundable
     "goodsAmount": 5000, "deliveryAmountPaid": 1000, "delivered": false,
     "remaining": 6000,                   // money still refundable, before the attribution rule
-    "feeAmount": 120, "netAmount": 5880, // of maxRefundable
-    "byReasonKind": {                    // the same five numbers for EVERY reason — switch without a second call
-      "cancellation": { "maxRefundable": 6000, "goods": 5000, "delivery": 1000, "feeAmount": 120, "netAmount": 5880 },
-      "return":       { "maxRefundable": 5000, "goods": 5000, "delivery": 0,    "feeAmount": 100, "netAmount": 4900 },
+    "feeAmount": 238, "netAmount": 5762, // of maxRefundable: payment fee 120 + transfer fee 118
+    "paymentFee": 120, "transferFee": 118,
+    "byReasonKind": {                    // the same numbers for EVERY reason — switch without a second call
+      "cancellation": { "maxRefundable": 6000, "goods": 5000, "delivery": 1000, "feeAmount": 238, "netAmount": 5762, "paymentFee": 120, "transferFee": 118 },
+      "return":       { "maxRefundable": 5000, "goods": 5000, "delivery": 0,    "feeAmount": 198, "netAmount": 4802, "paymentFee": 100, "transferFee": 98 },
       "goodwill": { … }, "dispute_settlement": { … }
     }
   },
   "returnShippingPayer": "customer",     // vendor | customer | customer_reimbursed_if_defect | null
   "overrides": [],                       // vendor return-policy gates a refund would cross (orders only)
   "codCoverage": [],                     // COD: one row per cash collection
-  "feePercent": 2                        // 0 for a card payment
+  "feePercent": 2,                       // the TRANSFER fee; 0 for a card payment
+  "paymentFeePercent": 2,                // 🆕 the PAYMENT fee; 0 for cash on delivery
+  "deliveryFault": []                    // 🆕 one verdict per parcel in deliveryFaultShipmentIds (see "Delivery at fault")
 }
 ```
+
+🆕 Query `deliveryFaultShipmentIds` (comma-separated parcel ids, optional): the preview then judges
+each parcel and, inside its agency's window, adds its delivery money to `maxRefundable`.
 
 - `overrides` — `return_window_expired` · `policy_disabled` · `order_not_paid` ·
   `above_policy_maximum`. **Non-empty means `POST /refunds` needs `overridePolicy: true`** — show the
@@ -258,7 +298,8 @@ Raise a request. It is created `awaiting_approval` and the seller's earnings are
   "destination": { "phone": "+237 6XX XXX XXX", "name": "Awa N." },
   "destinationProofFileId": "6702…99",
   "approveNow": false,
-  "ticketId": "66f9…77"
+  "ticketId": "66f9…77",
+  "deliveryFaultShipmentIds": ["66fa…01"]
 }
 ```
 
@@ -272,6 +313,7 @@ Raise a request. It is created `awaiting_approval` and the seller's earnings are
 | `destination` | Only when typing a number: `{ phone, name? }` — `phone` in international form (`+237…`), spaces allowed; `name` optional. **Requires** `destinationProofFileId` |
 | `destinationProofFileId` | A file from `POST /refunds/proofs` — it must be a live file in the private `refund-proofs` tree (else `422 REFUND_DESTINATION_PROOF_REQUIRED`, `details.reason: "proof_not_found"`). Refused without a typed `destination` |
 | `ticketId` | Optional — the support ticket this refund was raised from |
+| `deliveryFaultShipmentIds` | 🆕 Optional, 1–20 parcel ids (orders only): parcels whose **delivery** was at fault — see "Delivery at fault". Support may name them; the approver decides. A parcel not on the order is `422` `REFUND_DELIVERY_FAULT_INVALID` |
 | `approveNow` | Approve straight after creating. Needs `orders.refund` (else `403`). Goes through the same approve path, four-eyes included |
 
 The body is strict: an unknown key is a `400`. There is no `requestedByRole` — it is `admin` when

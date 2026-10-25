@@ -488,6 +488,10 @@ defineRoute(router, {
  * a pause once the customer is refunded or no refund is owed, and may pause any order or
  * booking by hand. Resuming continues the hold where it stopped.
  *
+ * Since 2026-10-22 a `:kind` may also be `shipment` — ONE DELIVERY, its agency's and rider's
+ * shares only. An administrator's ORDER pause no longer reaches an agency whose own terms free
+ * it from the hold (jovi-mall `earnings/domain/courier-hold.ts`); this is how to stop one.
+ *
  * Reads are DELEGATED (the pause record and its hold arithmetic are jovi-mall's) and behind
  * `money.earnings.read`, the permission the rest of `/earnings` uses (tiers 1 + 2 — it comes
  * from `allInFamily('money')` at tier 2, which Support does not hold). The two writes are
@@ -521,7 +525,7 @@ defineRoute(router, {
     path: '/earnings/pauses/:kind/:id/pause',
     access: permission('money.earnings.pause'),
     validate: { params: PauseTargetParamSchema, body: PauseEarningsSchema },
-    audit: records('money.earnings.pause_order', 'money.earnings.pause_booking'),
+    audit: records('money.earnings.pause_order', 'money.earnings.pause_booking', 'money.earnings.pause_shipment'),
     handler: pauseEarnings,
 });
 
@@ -531,7 +535,7 @@ defineRoute(router, {
     path: '/earnings/pauses/:kind/:id/resume',
     access: permission('money.earnings.pause'),
     validate: { params: PauseTargetParamSchema, body: ResumeEarningsSchema },
-    audit: records('money.earnings.resume_order', 'money.earnings.resume_booking'),
+    audit: records('money.earnings.resume_order', 'money.earnings.resume_booking', 'money.earnings.resume_shipment'),
     handler: resumeEarnings,
 });
 

@@ -991,7 +991,8 @@ export const resumeEarnings = asyncHandler(async (req: Request, res: Response) =
     // ⛔ A refund still holding the pause: refused here, before the audit row (jovi-mall refuses
     // the same, 409 EARNINGS_PAUSE_HELD_BY_REFUND, as the backstop). Resuming would release money
     // the refund is about to claw back; the pause lifts by itself when the refund ends.
-    const holding = await refundRequests.findHoldingEarningsPause(kind, id);
+    // A delivery pause is only ever an administrator's — no refund holds one.
+    const holding = kind === 'shipment' ? null : await refundRequests.findHoldingEarningsPause(kind, id);
     if (holding) {
         throw createAppError(ERROR_CODES.EARNINGS_PAUSE_HELD_BY_REFUND, 409, undefined, {
             refundRequestId: holding._id.toString(),

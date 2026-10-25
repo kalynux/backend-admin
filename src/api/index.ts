@@ -141,6 +141,12 @@ apiV1.use('/reviews', reviewRoutes);
 import { agencyRoutes } from '../modules/agencies/routes/agency.routes';
 apiV1.use('/agencies', agencyRoutes);
 
+// Damage claims on an agency (owner F-8, 2026-10-22): charged per PARCEL, inside the agency's
+// own window and under its own per-item limit. Every route delegated to jovi-mall
+// `/api/internal/admin/agency-claims`; the charge is audited fail-closed against the agency.
+import { agencyClaimRoutes } from '../modules/agencies/routes/agency-claim.routes';
+apiV1.use('/agency-claims', agencyClaimRoutes);
+
 /**
  * Support tickets (Phase 17) — the eleven `support.tickets.*` permissions catalogued at
  * Phase 3 finally have a surface. jovi-mall's `/api/admin/tickets` mount is deleted, so this

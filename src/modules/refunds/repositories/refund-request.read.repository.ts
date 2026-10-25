@@ -54,6 +54,28 @@ export interface RefundRequestReadModel extends Document {
     fee_rate?: number;
     fee_amount?: number;
     net_amount?: number;
+    /** 2026-10-22: the two fees and who pays them. Absent on older rows (transfer fee only, customer). */
+    fees?: {
+        paid_by?: string | null;
+        payin_rate?: number | null;
+        payin_amount?: number | null;
+        payout_rate?: number | null;
+        payout_amount?: number | null;
+        vendor_charge?: number | null;
+    } | null;
+    /** 2026-10-22: parcels named as delivered at fault, each judged against its agency's window. */
+    delivery_fault?: Array<{
+        shipment_id?: ObjectId | null;
+        agency_id?: ObjectId | null;
+        tracking_number?: string | null;
+        delivered_at?: Date | null;
+        raised_at?: Date | null;
+        window_days?: number | null;
+        inside_window?: boolean | null;
+        customer_delivery_amount?: number | null;
+        claim_deadline_days?: number | null;
+        returns_payer?: string | null;
+    }> | null;
     currency: string;
     payment_channel?: string | null;
     channel?: string | null;
@@ -128,6 +150,8 @@ export const REFUND_REQUEST_PROJECTION = {
     fee_rate: 1,
     fee_amount: 1,
     net_amount: 1,
+    fees: 1,
+    delivery_fault: 1,
     currency: 1,
     payment_channel: 1,
     channel: 1,

@@ -406,9 +406,12 @@ export type SettleDeliveryFeeRefundBody = z.infer<typeof SettleDeliveryFeeRefund
 
 /**
  * `kind` IS pinned — unlike the read vocabularies above, this service writes against it: it
- * names the record a pause is filed on, and the audit action is chosen from it.
+ * names the record a pause is filed on, and the audit action is chosen from it. `shipment`
+ * (2026-10-22) is ONE DELIVERY: its agency's and rider's shares only — the way to stop an
+ * agency whose own terms free it, which an order pause no longer reaches. Mirrors jovi-mall's
+ * `PAUSE_TARGET_KINDS`.
  */
-export const PAUSE_KINDS = ['order', 'booking'] as const;
+export const PAUSE_KINDS = ['order', 'booking', 'shipment'] as const;
 
 export const PauseTargetParamSchema = z
     .object({ kind: z.enum(PAUSE_KINDS), id: objectId })

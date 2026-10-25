@@ -38,12 +38,44 @@ export interface RefundRequestDto {
     attribution: { goods: number; delivery: number };
     /** What the refund is worth — what analytics deduct and earnings recovery claws back. */
     grossAmount: number;
-    /** Percent; 0 for a card refund (R-3). */
+    /** The TRANSFER fee percent; 0 for a card refund (R-3). */
     feeRate: number;
-    /** The 2% the platform keeps (D-2). */
+    /**
+     * Everything deducted from the customer: the payment fee the provider kept when they paid plus
+     * the transfer fee (2026-10-22). 0 when the seller pays the fees (a seller-cancelled paid order).
+     */
     feeAmount: number;
     /** What the customer receives: `grossAmount − feeAmount`. */
     netAmount: number;
+    /**
+     * The two fees apart and who pays them (owner F-1…F-5, 2026-10-22). On a row written before,
+     * read as: transfer fee only (`feeAmount`), paid by the customer.
+     */
+    fees: {
+        paidBy: 'customer' | 'vendor';
+        paymentFeePercent: number;
+        paymentFee: number;
+        transferFeePercent: number;
+        transferFee: number;
+        /** Charged to the seller beyond their share when THEY pay the fees. */
+        vendorCharge: number;
+    };
+    /**
+     * Parcels named as delivered at fault (owner F-6/F-7): `insideWindow` says whether the
+     * agency (and rider) give back; `customerDeliveryAmount` is what they fund.
+     */
+    deliveryFault: Array<{
+        shipmentId: string | null;
+        agencyId: string | null;
+        trackingNumber: string | null;
+        deliveredAt: Date | null;
+        raisedAt: Date | null;
+        windowDays: number;
+        insideWindow: boolean;
+        customerDeliveryAmount: number;
+        claimDeadlineDays: number | null;
+        returnsPayer: string | null;
+    }>;
     currency: string;
     paymentChannel: string | null;
     /** `null` until it is decided how the money leaves. */
@@ -149,6 +181,35 @@ export function toRefundRequestDto(
         // `?? gross − fee` is the contract's own identity (§ 11.1), applied to a row written
         // before the field was — never a second computation of the fee.
         netAmount,
+        fees: row.fees
+            ? {
+                  paidBy: row.fees.paid_by === 'vendor' ? 'vendor' : 'customer',
+                  paymentFeePercent: row.fees.payin_rate ?? 0,
+                  paymentFee: row.fees.payin_amount ?? 0,
+                  transferFeePercent: row.fees.payout_rate ?? 0,
+                  transferFee: row.fees.payout_amount ?? 0,
+                  vendorCharge: row.fees.vendor_charge ?? 0,
+              }
+            : {
+                  paidBy: 'customer',
+                  paymentFeePercent: 0,
+                  paymentFee: 0,
+                  transferFeePercent: row.fee_rate ?? 0,
+                  transferFee: row.fee_amount ?? 0,
+                  vendorCharge: 0,
+              },
+        deliveryFault: (row.delivery_fault ?? []).map((d) => ({
+            shipmentId: toId(d.shipment_id ?? null),
+            agencyId: toId(d.agency_id ?? null),
+            trackingNumber: d.tracking_number ?? null,
+            deliveredAt: d.delivered_at ?? null,
+            raisedAt: d.raised_at ?? null,
+            windowDays: d.window_days ?? 0,
+            insideWindow: d.inside_window === true,
+            customerDeliveryAmount: d.customer_delivery_amount ?? 0,
+            claimDeadlineDays: d.claim_deadline_days ?? null,
+            returnsPayer: d.returns_payer ?? null,
+        })),
         currency: row.currency,
         paymentChannel: row.payment_channel ?? null,
         channel: row.channel ?? null,

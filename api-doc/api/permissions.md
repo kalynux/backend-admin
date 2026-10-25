@@ -1,5 +1,7 @@
 # Permissions and administrator levels
 
+⚠ **2026-10-22: 144 permissions, tier totals 144 / 121 / 47.** One is new: `agencies.claims.charge` (**financial**, tiers 1 + 2, never Support) — charging a damage claim to a delivery agency ([agency-claims.md](agency-claims.md)).
+
 ⚠ **Re-measured against source 2026-10-15 (`npm run authz:matrix`): 143 permissions across 23 families, tier totals 143 / 120 / 47.** One is new, and **only tier 1 gained it**: `money.earnings.platform.read` (**financial**) — what the platform itself earned, in amounts. It now guards `GET /money/earnings/platform`, `…/platform/ledger` and `…/platform/summary` (previously `money.earnings.read`, which tier 2 keeps), and it decides who is sent the platform's amounts on the order split and its own rows on `/money/transactions`. The owner's rule (2026-10-04, restated 2026-10-13): Admin and Support see the platform's commission and bargain fee as rates, never as amounts ([money.md](money.md#the-platforms-own-amounts-are-tier-1-only-2026-10-15-br-030--3), BR-030). It is the **second** `financial` read in the catalog after `money.payouts.destination.read`, flagged for the same reason: the flag keeps it out of `allInFamily('money')`, so tier 2 does not inherit it, and refuses it to tier 3 at boot.
 
 ⚠ **Re-measured against source 2026-10-10, COD restrictions (`npm run authz:matrix`): 142 permissions across 23 families, tier totals 142 / 120 / 47.** Two are new ([the changelog](../FRONTEND-CHANGELOG-cod-restrictions.md)): `agencies.cod.restrict` (**financial**, named into the tier-2 money block beside `agencies.cod_limit.set` — [agencies.md](agencies.md#the-agencys-cod-restriction)) and `users.cod.restrict` (unflagged, reaching tier 2 through the family grant exactly as `users.suspend` does — [users.md](users.md#the-customers-cod-restriction)). **Both are held by tiers 1 and 2 and not by Support**, so Support's total does not move. Each guards a `PUT …/cod-restriction` and a `POST …/cod-restriction/lift`; the two reads beside them are `agencies.read` and `users.read`. No new family, no new `†`, no dual control. Re-derive rather than quoting.
@@ -39,9 +41,9 @@ Design records: [`../../docs/ADR-003-GRANULAR-PERMISSIONS.md`](../../docs/ADR-00
 
 | Level (`tier`) | Label | Holds | Shape of the job |
 |---|---|---|---|
-| **1** | Developer | 143 of 143 | Everything, including the developer tools and every escalation-flagged action |
-| **2** | Admin | 120 of 143 | The operational tier — runs the platform day to day, including the money |
-| **3** | Support | 47 of 143 | Ticket work, **raising refund requests** for an approver (which holds the seller's earnings), the lookups needed to answer a ticket, sending an account holder their statement, editorial write on articles and bylines, resetting the customer bot's memory of a chat, **moderating reviews** (hide, put back, delete), and **pre-screening** a declared COD handover or a payout request. Nothing destructive except deleting a review (the one named exception), publishing stays a level above, and the two `financial` permissions it holds cannot send money anywhere |
+| **1** | Developer | 144 of 144 | Everything, including the developer tools and every escalation-flagged action |
+| **2** | Admin | 121 of 144 | The operational tier — runs the platform day to day, including the money |
+| **3** | Support | 47 of 144 | Ticket work, **raising refund requests** for an approver (which holds the seller's earnings), the lookups needed to answer a ticket, sending an account holder their statement, editorial write on articles and bylines, resetting the customer bot's memory of a chat, **moderating reviews** (hide, put back, delete), and **pre-screening** a declared COD handover or a payout request. Nothing destructive except deleting a review (the one named exception), publishing stays a level above, and the two `financial` permissions it holds cannot send money anywhere |
 
 A level is an administrator's **entire** authorization state. `tier` appears on the profile
 returned by `GET /auth/me`.
@@ -199,7 +201,7 @@ record were one decision, not two. See [ADR-020](../../docs/ADR-020-ADMIN-DATA-D
 ## The matrix
 
 ● granted  ·  not granted  ·  **†** = catalogued policy with **no endpoint built yet**
-(**4** of 143 permissions — down from 27, and the four that remain each have a written reason
+(**4** of 144 permissions — down from 27, and the four that remain each have a written reason
 below. The policy is decided ahead of the surface, deliberately.)
 
 ### `agents`
