@@ -1219,6 +1219,38 @@ export const AUDIT_CATALOG = Object.freeze({
         summary: 'Changed a vendor’s platform-governed order settings',
     },
 
+    // ═══ BOOKINGS — service bookings, delegated to jovi-mall (2026-10-27) ═══════
+    // jovi-mall now keeps WHO changed a booking's status (`statusHistory`), but not the reason an
+    // administrator had, nor the fault behind a cancellation's fees — this trail does.
+    'bookings.cancel': {
+        permission: 'bookings.settle', target: 'booking', transport: 'delegated',
+        summary: 'Cancelled a booking for a party — the customer is refunded, the fault decides who bears the fees',
+    },
+    'bookings.cancel_session': {
+        permission: 'bookings.settle', target: 'booking', transport: 'delegated',
+        summary: 'Cancelled every booking of one class (same service, same start) — each customer refunded',
+    },
+    'bookings.complete': {
+        permission: 'bookings.settle', target: 'booking', transport: 'delegated',
+        summary: 'Completed a booking for the vendor — the vendor is paid once the hold ends',
+    },
+    'bookings.payment.mark_cash': {
+        permission: 'bookings.settle', target: 'booking', transport: 'delegated',
+        summary: 'Recorded that a booking was paid in cash to the vendor',
+    },
+    'bookings.payment.recheck': {
+        permission: 'bookings.intervene', target: 'booking', transport: 'delegated',
+        summary: 'Re-checked a stuck booking payment with the payment provider',
+    },
+    'bookings.proposal.withdraw': {
+        permission: 'bookings.intervene', target: 'booking', transport: 'delegated',
+        summary: 'Withdrew a proposal of a new time on a booking — the original time stands',
+    },
+    'bookings.reminder.resend': {
+        permission: 'bookings.remind', target: 'booking', transport: 'delegated',
+        summary: 'Sent the customer their appointment reminder again',
+    },
+
     // ═══ CATALOG — the shared category list, delegated to jovi-mall ═══════════
     'catalog.categories.rename': {
         permission: 'catalog.categories.manage',

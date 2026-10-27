@@ -177,6 +177,18 @@ export class PaymentTransactionReadRepository extends PlatformReadRepository<Pay
         if (!Types.ObjectId.isValid(transactionId)) return null;
         return this.findOneBy({ _id: new ObjectId(transactionId) } as Filter<PaymentTransactionReadModel>);
     }
+
+    /**
+     * Every payment attempt on one booking — the original charge, its retries, and any balance
+     * payment (`purpose: 'booking_balance'`) — oldest first. Bounded like `forOrder`.
+     */
+    async forBooking(bookingId: string): Promise<PaymentTransactionReadModel[]> {
+        if (!Types.ObjectId.isValid(bookingId) || bookingId.length !== 24) return [];
+        return this.findBy({ bookingId: new ObjectId(bookingId) } as Filter<PaymentTransactionReadModel>, {
+            sort: { createdAt: 1, _id: 1 },
+            limit: 50,
+        });
+    }
 }
 
 /**

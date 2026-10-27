@@ -48,6 +48,7 @@ the dashboard's behalf and returns the result in its own envelope.
 | [support.md](support.md) | `/support/tickets` — the support queue: assignment, lifecycle, followers, notes, attachments |
 | [orders.md](orders.md) | `/orders` — order directory, timeline, disputes, cancel, dispatch, refund |
 | [shipments.md](shipments.md) | `/shipments` — shipment directory, offer trail, reassign, cancel |
+| [bookings.md](bookings.md) | `/bookings` — 🆕 2026-10-27 service bookings: directory, "needs attention" queues, detail with everyone involved and the status history, the access verdict, the slot list, and cancel / complete / record cash / re-check payment / withdraw a proposal / resend the reminder |
 | [cod.md](cod.md) | `/cod` — cash-on-delivery overview, holders, remittances, deposits, discrepancies, trust |
 | [billing.md](billing.md) | `/billing` — pricing-plan catalog and subscriptions |
 | [money.md](money.md) | `/money` — earnings, allocations, payouts, payments, refunds, refund debt (clawback list, write-off) |

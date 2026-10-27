@@ -142,6 +142,14 @@ const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
     'orders.refund.request',
     'shipments.read',
     /**
+     * Service bookings (ADMIN-BOOKINGS-PLAN, 2026-10-27). "My appointment" tickets land here, so
+     * Support reads the booking and can resend its reminder. NOT `bookings.access.read`: Support
+     * answers "I can't see my link" with the access verdict (on `bookings.read`) and a resent
+     * reminder, never by reading the link out (decision 2).
+     */
+    'bookings.read',
+    'bookings.remind',
+    /**
      * Push a stuck delivery to an agent or an agency — including `force: true`, which skips
      * every eligibility check but an active agent contract (owner decision 2026-10-02:
      * "this should be available to all admin tier levels"). Support is who hears "my
@@ -335,6 +343,8 @@ const ADMIN: readonly PermissionName[] = union(
     // `allInFamily('customers')` was here. Deleted with the family at Phase 5 Part D
     // (ADR-017 D-1) — it was the tier-2 half of a grant that backed no route.
     allInFamily('shipments'),
+    // read, access.read, remind, intervene. `bookings.settle` is financial — named below.
+    allInFamily('bookings'),
     allInFamily('notifications'),
     allInFamily('system'),
     allInFamily('audit'),
@@ -398,6 +408,9 @@ const ADMIN: readonly PermissionName[] = union(
         'orders.refund.settle_external',
         // Forgiving a refund debt (C-6). Four-eyes at ≥ 2,000,000 via its `dualControl` spec.
         'money.earnings.clawback.write_off',
+        // A booking's money: cancel (refund), complete (vendor paid), record cash (2026-10-27).
+        // `financial`, so the family sweep above leaves it out and Support is refused it at boot.
+        'bookings.settle',
         'content.articles.delete',
         'content.authors.delete',
         'shipments.cancel',

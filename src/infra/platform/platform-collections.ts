@@ -190,7 +190,7 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
     },
     [COLLECTIONS.BOOKING]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
-        note: 'Read for account STATEMENTS only (2026-09-27): a vendor\'s booking income is money on their account',
+        note: 'Read for account STATEMENTS (2026-09-27) and the BOOKINGS surface (2026-10-27); every write delegated to /internal/admin/bookings',
     },
     [COLLECTIONS.TRACKING_OUTBOX]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',

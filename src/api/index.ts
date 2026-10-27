@@ -204,6 +204,13 @@ apiV1.use('/orders', orderRoutes);
 import { shipmentRoutes } from '../modules/shipments/routes/shipment.routes';
 apiV1.use('/shipments', shipmentRoutes);
 
+// Service bookings (ADMIN-BOOKINGS-PLAN, 2026-10-27) — the orders surface's counterpart for
+// bookable services. Same split: `bookings` is read directly, every write is delegated to
+// `/api/internal/admin/bookings`, and the two verdict reads (the access gate, the slot list) are
+// delegated for the ADR-008 D-1 reason.
+import { bookingRoutes } from '../modules/bookings/routes/booking.routes';
+apiV1.use('/bookings', bookingRoutes);
+
 // Billing — the subscription catalog and who is on it (Phase 11).
 //
 // The first of the three money mounts, and the one where the read/write split is at its

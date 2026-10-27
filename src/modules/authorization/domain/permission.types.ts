@@ -63,6 +63,12 @@ export type PermissionFamily =
     // the family could not outlive them — and should not: re-declaring it is how a real
     // customers surface announces itself.
     | 'shipments'
+    /**
+     * Service bookings (ADMIN-BOOKINGS-PLAN, 2026-10-27) — the counterpart of `orders` for
+     * bookable services. Its own family: a booking is a different record with its own money
+     * path (the earnings hold starts at completion, a paid no-show waits for an administrator).
+     */
+    | 'bookings'
     | 'administrators'
     | 'notifications'
     | 'system'
@@ -83,7 +89,7 @@ export type PermissionFamily =
 
 export const PERMISSION_FAMILIES: readonly PermissionFamily[] = [
     'agents', 'agencies', 'billing', 'cod', 'money', 'orders', 'support', 'content',
-    'files', 'messaging', 'users', 'vendors', 'catalog', 'reviews', 'shipments', 'administrators',
+    'files', 'messaging', 'users', 'vendors', 'catalog', 'reviews', 'shipments', 'bookings', 'administrators',
     'notifications', 'system', 'developer_tools', 'permissions', 'approvals', 'audit',
     'employees',
 ] as const;

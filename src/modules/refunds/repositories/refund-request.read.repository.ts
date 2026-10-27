@@ -265,6 +265,19 @@ export class RefundRequestReadRepository extends PlatformReadRepository<RefundRe
      * unique index `refund_one_open_per_source`). A delivery-fee refund cannot be settled by hand
      * while its order has one: both come out of the same refundable ceiling.
      */
+    /**
+     * Every refund request on one booking, newest first — the booking detail's refund block.
+     * Bounded: a booking holds at most one OPEN request (`refund_one_open_per_source`) plus the
+     * closed ones before it.
+     */
+    async forBooking(bookingId: string): Promise<RefundRequestReadModel[]> {
+        if (!Types.ObjectId.isValid(bookingId) || bookingId.length !== 24) return [];
+        return this.findBy({
+            source_kind: 'booking',
+            source_id: new ObjectId(bookingId),
+        } as Filter<RefundRequestReadModel>, { sort: { created_at: -1, _id: -1 }, limit: 20 });
+    }
+
     async openForOrders(orderIds: string[]): Promise<Map<string, { id: string; status: string }>> {
         const ids = [...new Set(orderIds)].filter((id) => Types.ObjectId.isValid(id) && id.length === 24);
         const found = new Map<string, { id: string; status: string }>();

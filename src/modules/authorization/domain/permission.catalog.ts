@@ -1326,6 +1326,54 @@ export const PERMISSION_CATALOG = Object.freeze({
         summary: 'Cancel a shipment already in progress',
     },
 
+    // ═══ BOOKINGS ═══ service bookings (ADMIN-BOOKINGS-PLAN, 2026-10-27) ═════════
+    // The orders surface's counterpart for bookable services. Reads are a Support lookup —
+    // "my appointment" tickets land there. Settling a booking's money is tiers 1 + 2.
+    'bookings.read': {
+        family: 'bookings', action: 'read', phase: 6,
+        summary: 'Search bookings and view a booking with everyone involved, its payments, refunds and history',
+    },
+    /**
+     * The meeting link and the vendor's instructions, on the booking detail (decision 2,
+     * 2026-10-27). Unflagged, so `allInFamily('bookings')` gives it to tier 2 — and Support does
+     * NOT name it. A link is a way into the vendor's session; Support answers "I can't see my
+     * link" with the access verdict and a resent reminder instead. Pinned in `test-bookings.ts`.
+     */
+    'bookings.access.read': {
+        family: 'bookings', action: 'read', phase: 6,
+        summary: 'See a booking’s meeting link and the vendor’s instructions',
+    },
+    /** Resend the appointment reminder. Support holds it by name: it changes nothing but an inbox. */
+    'bookings.remind': {
+        family: 'bookings', action: 'write', phase: 6,
+        summary: 'Send the customer their appointment reminder again',
+    },
+    /**
+     * Re-check a payment stuck at `pending` with the provider, and withdraw a stale proposal of a
+     * new time. Neither moves money by decision — the re-check applies the provider's answer, the
+     * withdrawal keeps the time both sides already hold — so it is unflagged and tier 2 receives
+     * it through the family. Support does not name it (tiers 1 + 2, as proposed and accepted).
+     */
+    'bookings.intervene': {
+        family: 'bookings', action: 'write', phase: 6,
+        summary: 'Re-check a stuck booking payment with the provider, or withdraw a stale proposal of a new time',
+    },
+    /**
+     * Decide where a booking's money goes. Cancel → the customer is refunded (`fault` decides who
+     * bears the fees); complete → the vendor is paid when the hold ends; record cash → the vendor's
+     * earnings are split from a payment nobody can verify. A paid no-show waits for exactly this
+     * decision (owner, 2026-10-27).
+     *
+     * `financial`, so no family sweep hands it out and the boot check refuses it to Support.
+     * ⚠ The cancel refund rides the ordinary cancellation refund, which has NO second approver —
+     * the same as a customer's own cancellation. The 2,000,000 four-eyes line lives on the refund
+     * queue, not here.
+     */
+    'bookings.settle': {
+        family: 'bookings', action: 'write', phase: 6, financial: true,
+        summary: 'Cancel a booking (the customer is refunded), complete it (the vendor is paid), or record a cash payment',
+    },
+
     // ═══ ADMINISTRATORS ═══ built in THIS phase ═══════════════════════════════
     // Holding any of these is necessary, never sufficient: escalation.rules.ts refuses
     // self-action and refuses any action on an administrator at or above the caller's own

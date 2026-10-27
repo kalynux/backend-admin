@@ -1,5 +1,7 @@
 # Permissions and administrator levels
 
+⚠ **2026-10-27: 149 permissions across 24 families, tier totals 149 / 126 / 49.** Five are new, in a new `bookings` family ([§ bookings](#bookings), [bookings.md](bookings.md)): `bookings.read` and `bookings.remind` (every tier, Support included), `bookings.access.read` and `bookings.intervene` (unflagged, tiers 1 + 2 through the family grant — Support does **not** name them), and `bookings.settle` (**financial**, named into the tier-2 money block, refused to Support at boot). Re-derive with `npm run authz:matrix` rather than quoting.
+
 ⚠ **2026-10-22: 144 permissions, tier totals 144 / 121 / 47.** One is new: `agencies.claims.charge` (**financial**, tiers 1 + 2, never Support) — charging a damage claim to a delivery agency ([agency-claims.md](agency-claims.md)).
 
 ⚠ **Re-measured against source 2026-10-15 (`npm run authz:matrix`): 143 permissions across 23 families, tier totals 143 / 120 / 47.** One is new, and **only tier 1 gained it**: `money.earnings.platform.read` (**financial**) — what the platform itself earned, in amounts. It now guards `GET /money/earnings/platform`, `…/platform/ledger` and `…/platform/summary` (previously `money.earnings.read`, which tier 2 keeps), and it decides who is sent the platform's amounts on the order split and its own rows on `/money/transactions`. The owner's rule (2026-10-04, restated 2026-10-13): Admin and Support see the platform's commission and bargain fee as rates, never as amounts ([money.md](money.md#the-platforms-own-amounts-are-tier-1-only-2026-10-15-br-030--3), BR-030). It is the **second** `financial` read in the catalog after `money.payouts.destination.read`, flagged for the same reason: the flag keeps it out of `allInFamily('money')`, so tier 2 does not inherit it, and refuses it to tier 3 at boot.
@@ -41,9 +43,9 @@ Design records: [`../../docs/ADR-003-GRANULAR-PERMISSIONS.md`](../../docs/ADR-00
 
 | Level (`tier`) | Label | Holds | Shape of the job |
 |---|---|---|---|
-| **1** | Developer | 144 of 144 | Everything, including the developer tools and every escalation-flagged action |
-| **2** | Admin | 121 of 144 | The operational tier — runs the platform day to day, including the money |
-| **3** | Support | 47 of 144 | Ticket work, **raising refund requests** for an approver (which holds the seller's earnings), the lookups needed to answer a ticket, sending an account holder their statement, editorial write on articles and bylines, resetting the customer bot's memory of a chat, **moderating reviews** (hide, put back, delete), and **pre-screening** a declared COD handover or a payout request. Nothing destructive except deleting a review (the one named exception), publishing stays a level above, and the two `financial` permissions it holds cannot send money anywhere |
+| **1** | Developer | 149 of 149 | Everything, including the developer tools and every escalation-flagged action |
+| **2** | Admin | 126 of 149 | The operational tier — runs the platform day to day, including the money |
+| **3** | Support | 49 of 149 | Ticket work, **reading service bookings and resending their reminder**, **raising refund requests** for an approver (which holds the seller's earnings), the lookups needed to answer a ticket, sending an account holder their statement, editorial write on articles and bylines, resetting the customer bot's memory of a chat, **moderating reviews** (hide, put back, delete), and **pre-screening** a declared COD handover or a payout request. Nothing destructive except deleting a review (the one named exception), publishing stays a level above, and the two `financial` permissions it holds cannot send money anywhere |
 
 A level is an administrator's **entire** authorization state. `tier` appears on the profile
 returned by `GET /auth/me`.
@@ -201,7 +203,7 @@ record were one decision, not two. See [ADR-020](../../docs/ADR-020-ADMIN-DATA-D
 ## The matrix
 
 ● granted  ·  not granted  ·  **†** = catalogued policy with **no endpoint built yet**
-(**4** of 144 permissions — down from 27, and the four that remain each have a written reason
+(**4** of 149 permissions — down from 27, and the four that remain each have a written reason
 below. The policy is decided ahead of the surface, deliberately.)
 
 ### `agents`
@@ -518,6 +520,20 @@ and `reviews.delete` is named by hand for every tier.
 | `shipments.tracking.read` | read | ● | ● | ● | — | Read a delivery’s GPS trail and tracking events from geo-tracker — every trail read is recorded in the audit trail |
 | `shipments.reassign` | write | ● | ● | ● | — | Manually move a shipment to a different agent or agency — incl. `force: true` (Support since 2026-10-02) |
 | `shipments.cancel` | write | ● | ● | · | destructive | Cancel a shipment already in progress |
+
+### `bookings`
+
+Service bookings (2026-10-27) — the counterpart of `orders` for bookable services. See [bookings.md](bookings.md).
+
+| Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
+|---|---|:-:|:-:|:-:|---|---|
+| `bookings.read` | read | ● | ● | ● | — | Search bookings and view a booking with everyone involved, its payments, refunds and history |
+| `bookings.access.read` | read | ● | ● | · | — | See a booking’s meeting link and the vendor’s instructions |
+| `bookings.remind` | write | ● | ● | ● | — | Send the customer their appointment reminder again |
+| `bookings.intervene` | write | ● | ● | · | — | Re-check a stuck booking payment with the provider, or withdraw a stale proposal of a new time |
+| `bookings.settle` | write | ● | ● | · | financial | Cancel a booking (the customer is refunded), complete it (the vendor is paid), or record a cash payment |
+
+Support reads every booking and can resend its reminder, but never sees the meeting link itself: "I can't see my link" is answered with `GET /bookings/:id/access` (why it is locked) and a resent reminder. `bookings.access.read` and `bookings.intervene` are unflagged, so they reach tier 2 through `allInFamily('bookings')`; Support simply does not name them.
 
 ### `administrators`
 
