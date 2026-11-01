@@ -257,7 +257,7 @@ const JOVI_MOUNT = code(JOVI, 'api/routes/internal-admin.routes.ts');
 t.assert('jovi-mall mounts the booking admin router at /bookings, internal only', () =>
     /router\.use\('\/bookings',\s*buildAdminBookingRouter\(\[requireAdminCaller\]\)\)/.test(JOVI_MOUNT));
 const PAIRS: Array<[RegExp, string]> = [
-    [/post<PlatformBookingAck>\(`\/bookings\/\$\{bookingId\}\/cancel`/, "router.post('/:bookingId/cancel'"],
+    [/post<PlatformBookingCancelAck>\(`\/bookings\/\$\{bookingId\}\/cancel`/, "router.post('/:bookingId/cancel'"],
     [/post<PlatformSessionCancel>\(`\/bookings\/services\/\$\{input\.productId\}\/sessions\/cancel`/, "router.post('/services/:productId/sessions/cancel'"],
     [/post<PlatformBookingAck>\(`\/bookings\/\$\{bookingId\}\/complete`/, "router.post('/:bookingId/complete'"],
     [/post<PlatformBookingAck>\(`\/bookings\/\$\{bookingId\}\/payment\/cash`/, "router.post('/:bookingId/payment/cash'"],
@@ -278,6 +278,29 @@ t.assert('every write answers through the projected detail, never jovi-mall\'s e
     const controller = code(SRC, 'modules/bookings/controllers/booking.controller.ts');
     return (controller.match(/await respondAfterWrite\(/g) ?? []).length === 7;
 });
+
+/**
+ * BR-033 § 4 (2026-11-01). The cancel's refund outcome crosses the boundary as a closed set of
+ * words, and the dashboard shows a message per word. A value added on one side only would reach
+ * the client undocumented, or leave a word with no message.
+ */
+const OUTCOME_LIST = (source: string, name: string): string[] =>
+    /\[([^\]]*)\]/.exec(source.slice(source.indexOf(`${name} = `)))?.[1]
+        .split(',').map((value) => value.trim().replace(/'/g, '')).filter(Boolean) ?? [];
+const HERE_REFUNDS = OUTCOME_LIST(GW, 'BOOKING_CANCEL_REFUNDS');
+const THERE_REFUNDS = OUTCOME_LIST(code(JOVI, 'modules/booking/domain/admin-cancel-refund.ts'), 'ADMIN_CANCEL_REFUND_OUTCOMES');
+const BOOKINGS_PAGE = readFileSync(resolve(__dirname, '../../api-doc/api/bookings.md'), 'utf-8');
+
+t.assert('the cancel\'s refund vocabulary is the same on both sides', () =>
+    HERE_REFUNDS.length === 5 && json(HERE_REFUNDS) === json(THERE_REFUNDS));
+t.assert('the cancel has a message for every refund outcome', () => {
+    const controller = code(SRC, 'modules/bookings/controllers/booking.controller.ts');
+    return HERE_REFUNDS.every((value) => controller.includes(`\n    ${value}: '`));
+});
+t.assert('bookings.md documents every refund outcome', () =>
+    HERE_REFUNDS.every((value) => BOOKINGS_PAGE.includes(`| \`${value}\` |`)));
+t.assert('the audit row records the outcome', () =>
+    /for \(const key of \[[^\]]*'refund'/.test(GW));
 
 // ─── §6 ──────────────────────────────────────────────────────────────────────
 t.section('§6 tickets');

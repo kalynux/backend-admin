@@ -140,6 +140,85 @@ The list item, plus:
 - **`sessionSeats`**: the other live bookings of the same class (same service, same start).
   Empty for a one-to-one service.
 
+### The nested blocks, field by field
+
+Added 2026-10-28 (BR-033 § 3). Taken from `bookings/read-models/booking.dto.ts` and the stored
+shapes in `bookings/repositories/booking.read.repository.ts`, checked against jovi-mall's
+`booking.model.ts`. Dates are ISO strings.
+
+#### `proposal` — `null` when none was ever made
+
+The booking's **latest** proposal of a new time, in whatever state it ended. It is not cleared
+when answered, so a non-null `proposal` does not mean one is waiting. `live` is what says that.
+
+| Field | Type | Notes |
+|---|---|---|
+| `status` | `open` · `accepted` · `declined` · `withdrawn` · `lapsed` | `lapsed` is written lazily, on the next write that reads it. Until then an expired one still reads `open`, so use `live` |
+| `live` | boolean | **Computed here**: `status === "open"` and `expiresAt` is in the future. Same value as the list item's `proposalOpen` |
+| `proposedBy` | `vendor` · `customer` | |
+| `startAt`, `endAt` | date | The proposed new time |
+| `previousStartAt`, `previousEndAt` | date | The time it would replace. This is still the booking's time unless the proposal was `accepted` |
+| `proposedAt`, `expiresAt` | date | |
+| `answeredAt` | date \| `null` | Set on `accepted`, `declined` and `withdrawn` (an administrator's withdrawal included); `null` while open and on `lapsed` |
+| `slotId` | string | ⚠ **Also present, and not in wi-admin's own type.** The stored sub-document is passed through whole. It is jovi-mall's opaque slot handle and has no use on this surface, so do not depend on it |
+
+#### `settlement` — `null` unless the vendor settled a final price
+
+Written when the vendor closes a booking at a final price (`fixed`, or by `duration` actually
+spent). Absent on most bookings, and never written by an administrator's **Complete**, which
+completes at the booked price.
+
+| Field | Type | Notes |
+|---|---|---|
+| `finalPrice` | number | The settled price. May be above or below `price` |
+| `pricingMode` | `fixed` · `duration` | |
+| `settledAt` | date | |
+| `balanceDue` | number | `max(0, finalPrice − amount paid)` at settlement: what the customer still owes. Never charged automatically |
+| `balancePaid` | number | How much of `balanceDue` has since been collected |
+| `balancePaidAt` | date | **Absent** (not `null`) until a balance payment lands |
+| `balancePaymentMethod` | `cash` · `online` | **Absent** until a balance payment lands |
+| `creditDue` | number | `max(0, amount paid − finalPrice)`: the customer overpaid. **Recorded, not refunded**, by product decision |
+| `balanceTransactionId` | string | ⚠ **Also present, and not in wi-admin's own type.** Passed through whole, like `slotId`. Absent unless the balance was paid online; the same payment is in `payments[]` with `purpose: "booking_balance"` |
+
+#### `refunds[]` — every refund request on the booking, newest first
+
+A summary. Open the request in the refund queue ([refunds.md](refunds.md)) for its destination,
+fee breakdown and history.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | The refund **request** id: `/refunds/:refundId` |
+| `status` | string | The refund request's status ([refunds.md](refunds.md)) |
+| `reasonKind` | string | e.g. `cancellation` for one opened by a cancel |
+| `grossAmount` | number | |
+| `feeAmount`, `netAmount` | number \| `null` | `null` until the fees are worked out |
+| `feesPaidBy` | `customer` · `vendor` \| `null` | Set by the cancel's `fault` on a cancellation refund |
+| `currency` | string | |
+| `requestedBy` | string \| `null` | The requester's **name**, else their **role**. A cancellation refund is the system's and is named after who cancelled, e.g. `"booking cancelled by admin"` |
+| `createdAt` | date | |
+
+#### `sessionSeats[]` — the list item, in full
+
+Each element is exactly a [`GET /bookings`](#get-apiv1bookings--bookingsread) list item (`id`,
+`bookingNumber`, `status`, `paymentStatus`, `paymentMethod`, `startAt`, `endAt`, `price`,
+`currency`, `requiresPayment`, `locationKind`, `proposalOpen`, `service`, `vendor`, `customer`,
+`createdAt`). Only `pending` and `confirmed` seats are included, and the booking itself is not.
+
+#### `earnings`
+
+| Field | Type | Notes |
+|---|---|---|
+| `state` | see the list above | |
+| `holdReleaseAt` | date \| `null` | |
+| `releasedAt` | date \| `null` | |
+| `pause` | object \| `null` | `null` unless a pause is **active** on the booking |
+| `pause.reason` | string \| `null` | One of jovi-mall's closed set. On a booking: `booking_cancelled_unrefunded` (cancelled after payment and no refund request could be opened, see [What a cancel's refund did](#what-a-cancels-refund-did)) · `refund_in_progress` · `card_dispute` · `customer_problem_reported` · `admin` |
+| `pause.note` | string \| `null` | |
+| `pause.pausedAt` | date \| `null` | |
+
+`state` can read `paused` while `pause` is `null`: the state is also derived from the allocation
+rows' own pause stamp.
+
 ## GET /api/v1/bookings/:bookingId/access — `bookings.read`
 
 Whether the **customer** can see the meeting link and instructions right now. Never the text.
@@ -174,20 +253,110 @@ What **administrators** did to this booking (audit rows, newest first), filtered
 
 ## The writes
 
-Every write answers `{ booking, result }`: `booking` is the **same shape as the detail**, re-read
-after the write, and `result` is jovi-mall's own answer. Bodies are strict (an unknown field is a
-`400`). jovi-mall's refusals reach you as `PLATFORM_OPERATION_REJECTED`, at jovi-mall's original
-status (mostly `409`), with jovi-mall's own code in `details.platformCode`. Branch on that.
+Every write answers `{ booking, result }`. `result` is jovi-mall's own answer (shapes below).
+`booking` is the **same shape as the detail**, re-read after the write. ⚠ **`booking` can be
+`null`**: the re-read runs after jovi-mall committed, and if it misses, the write still answers
+`200` with `booking: null`. The write happened, so do not show it as a failure. Re-fetch the
+detail, or fall back to `result`.
+
+Bodies are strict (an unknown field is a `400`). An unknown booking id is this service's own
+`404` before anything is sent. jovi-mall's refusals reach you as `PLATFORM_OPERATION_REJECTED`,
+at jovi-mall's original status, with jovi-mall's own code in `details.platformCode`. Branch on the
+code, not the status. The status of each code is in the table (from jovi-mall's
+`booking.service.ts` and `admin-booking.service.ts`).
 
 | Route | Permission | Body | Effect | `details.platformCode` refusals |
 |---|---|---|---|---|
-| `POST /:id/cancel` | `bookings.settle` | `{ reason, fault: "vendor" \| "customer" }` | Cancels from `pending`, `confirmed` or `no-show`, ignoring the vendor's cancellation policy. A paid booking is refunded through the ordinary cancellation refund. `fault: "vendor"` → the vendor bears the fees (customer gets 100% back); `"customer"` → the customer bears them. The customer is told "cancelled by Wi-Mall support" | `BOOKING_ALREADY_CANCELLED`, `BOOKING_TERMINAL_STATE` (completed: use the refund queue) |
-| `POST /:id/session/cancel` | `bookings.settle` | `{ reason, fault }` | Every live seat of **this booking's class**. `result.cancelled[]` / `result.failed[]` (a failed seat does not stop the others; retry picks up what is left) | `BOOKING_SESSION_EMPTY` |
-| `POST /:id/complete` | `bookings.settle` | `{ reason }` | `confirmed` or `no-show` → `completed` at the booked price. The vendor is paid when the ordinary hold ends; the customer keeps their protection window | `BOOKING_ADMIN_COMPLETE_UNPAID` (record cash first), `BOOKING_NOT_STARTED`, `BOOKING_INVALID_STATUS_TRANSITION` |
-| `POST /:id/payment/cash` | `bookings.settle` | `{ reason }` (how it was confirmed) | Records that the customer paid the vendor in cash. The vendor's own rules apply | `BOOKING_ALREADY_PAID`, `BOOKING_PAYMENT_NOT_REQUIRED`, `BOOKING_INVALID_PAYMENT_METHOD` |
-| `POST /:id/payment/recheck` | `bookings.intervene` | `{ reason? }` | For `paymentStatus: "pending"`. `result.outcome`: `settled` (now `paid` or `failed`) · `still_pending` · `released` (the last attempt had failed; the customer can pay again) | `BOOKING_PAYMENT_NOT_PENDING`, `BOOKING_PAYMENT_STATE_MISMATCH` (escalate to an engineer) |
-| `POST /:id/proposal/withdraw` | `bookings.intervene` | `{ reason? }` | Withdraws the open proposal of a new time, either side's. The original time stands; nobody is notified | `BOOKING_PROPOSAL_NOT_FOUND` |
-| `POST /:id/reminder` | `bookings.remind` | `{ reason? }` | Sends the appointment reminder again. `result.sent: false` when the account has no customer profile | `BOOKING_REMINDER_NOT_APPLICABLE` (not confirmed, or already started) |
+| `POST /:id/cancel` | `bookings.settle` | `{ reason, fault: "vendor" \| "customer" }` | Cancels from `pending`, `confirmed` or `no-show`, ignoring the vendor's cancellation policy. A paid booking is refunded through the ordinary cancellation refund; [`result.refund`](#what-a-cancels-refund-did) says what it did. `fault: "vendor"` → the vendor bears the fees (customer gets 100% back); `"customer"` → the customer bears them. The customer is told "cancelled by Wi-Mall support" | **409** `BOOKING_ALREADY_CANCELLED`, **409** `BOOKING_TERMINAL_STATE` (completed: use the refund queue) |
+| `POST /:id/session/cancel` | `bookings.settle` | `{ reason, fault }` | Every live seat of **this booking's class**. `result.cancelled[]` / `result.failed[]` (a failed seat does not stop the others; retry picks up what is left) | **404** `BOOKING_SESSION_EMPTY` |
+| `POST /:id/complete` | `bookings.settle` | `{ reason }` | `confirmed` or `no-show` → `completed` at the booked price. The vendor is paid when the ordinary hold ends; the customer keeps their protection window | **409** `BOOKING_ADMIN_COMPLETE_UNPAID` (record cash first), **409** `BOOKING_NOT_STARTED`, **400** `BOOKING_INVALID_STATUS_TRANSITION` |
+| `POST /:id/payment/cash` | `bookings.settle` | `{ reason }` (how it was confirmed) | Records that the customer paid the vendor in cash. The vendor's own rules apply | **409** `BOOKING_ALREADY_PAID`, **400** `BOOKING_PAYMENT_NOT_REQUIRED`, **400** `BOOKING_INVALID_PAYMENT_METHOD` |
+| `POST /:id/payment/recheck` | `bookings.intervene` | `{ reason? }` | For `paymentStatus: "pending"`. `result.outcome`: `settled` (now `paid` or `failed`) · `still_pending` · `released` (the last attempt had failed; the customer can pay again) | **409** `BOOKING_PAYMENT_NOT_PENDING`, **409** `BOOKING_PAYMENT_STATE_MISMATCH` (escalate to an engineer) |
+| `POST /:id/proposal/withdraw` | `bookings.intervene` | `{ reason? }` | Withdraws the open proposal of a new time, either side's. The original time stands; nobody is notified | **404** `BOOKING_PROPOSAL_NOT_FOUND` (none open, it expired, or the booking is no longer `pending`/`confirmed`) |
+| `POST /:id/reminder` | `bookings.remind` | `{ reason? }` | Sends the appointment reminder again. `result.sent: false` when the account has no customer profile | **409** `BOOKING_REMINDER_NOT_APPLICABLE` (not confirmed, or already started) |
+
+Any of them can also answer **404** `BOOKING_NOT_FOUND` if the booking is deleted between this
+service's read and jovi-mall's.
+
+### `result`, per write
+
+**The acknowledgement**: cancel, complete, cash, withdraw. jovi-mall's thin answer, never the
+booking document.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | The booking id |
+| `bookingNumber` | string \| `null` | |
+| `status` | string | After the write |
+| `paymentStatus` | string | After the write. On a cancel, this is read **after** the refund step ran: `refund_pending` or `refunded` when a refund was owed. See [below](#what-a-cancels-refund-did) |
+| `rescheduleProposalStatus` | string \| `null` | The proposal's status, `null` when none was ever made. `withdrawn` after a withdrawal |
+| `refund` | see [below](#what-a-cancels-refund-did) | **Cancel only.** What the refund did. Since 2026-11-01 |
+
+**Session cancel**
+
+| Field | Type | Notes |
+|---|---|---|
+| `productId` | string | The service |
+| `startAt` | date | The class's start |
+| `cancelled[]` | `{ bookingId, bookingNumber, refund }` | Seats cancelled by this call, this booking among them. Each seat is refunded on its own, so each carries its own [`refund`](#what-a-cancels-refund-did) |
+| `failed[]` | `{ bookingId, bookingNumber, code }` | Seats that could not be cancelled. `code` is jovi-mall's error code, `UNEXPECTED` when it had none. Retrying the same call picks up only the seats still live |
+
+**Payment re-check**
+
+| Field | Type | Notes |
+|---|---|---|
+| `outcome` | `settled` · `still_pending` · `released` | |
+| `paymentStatusBefore` | string | Always `pending`. Anything else was refused |
+| `paymentStatusAfter` | string | `paid` or `failed` when `settled`; `pending` when `still_pending`; `failed` when `released` (still `pending` in the rare race where something else moved the booking first) |
+| `transaction` | `{ id, status, gateway }` \| `null` | The attempt that was asked about. `status` is its status **after** the provider was asked. `null` when the booking had no attempt at all (then `released`) |
+
+**Reminder**
+
+| Field | Type | Notes |
+|---|---|---|
+| `sent` | boolean | |
+| `reason` | `"no_customer_profile"` \| `null` | Why it was not sent; `null` when `sent: true` |
+
+### What a cancel's refund did
+
+jovi-mall commits the cancellation **first** and runs the refund after it, best-effort: freeing the
+slot is the more urgent of the two, and money owed can be recovered. So a `200` says nothing about
+the money on its own. `result.refund` says what happened, and the response `message` follows it
+(since 2026-11-01, BR-033 § 4):
+
+| `result.refund` | Means | `paymentStatus` | `refunds[]` | `earnings.pause.reason` | What the operator does |
+|---|---|---|---|---|---|
+| `none` | Nothing owed (free, unpaid, pending, failed) | unchanged | nothing new | — | Nothing |
+| `requested` | A request is open: a new one (the usual case for a paid online booking), or one that was already open | `refund_pending` | the request | `refund_in_progress` | Nothing. It is in the refund queue, sending or awaiting approval |
+| `refunded` | The money is already back | `refunded` | a new request, `completed` | — | Nothing |
+| `manual` | A **cash** booking (always), or no request could be opened | `refund_pending` | **nothing new** | `booking_cancelled_unrefunded` | Follow the **HIGH** `PAYMENT_ISSUE` ticket jovi-mall raises against the booking (it links here, see [Tickets](#tickets)) |
+| `failed` | The refund step threw before recording anything | `paid` | nothing new | — | **No ticket and no flag exist.** Handle the refund by hand, as below |
+
+⚠ **`refund` is absent** while jovi-mall runs a version older than this field. Treat absent as "not
+known" and read the other columns, which tell the same story from the re-read `booking`.
+
+So the manual case reads as **`paymentStatus: "refund_pending"` with no open request in
+`refunds[]`**, with earnings paused as `booking_cancelled_unrefunded` and a ticket raised.
+
+**Cash.** There is nothing to refund from. The vendor holds the money and hands it back, which the
+ticket records. Do not send the operator to *Raise a refund*: the refund queue refunds a payment
+that went through a gateway, a cash booking has none, and it answers `404
+REFUND_PAYMENT_NOT_FOUND`.
+
+**Online, but no request could be opened.** This happens when no payment is on record, the payment
+is already fully refunded, or something unexpected went wrong. *Raise a refund* from the refund
+queue is the right next step: it either opens the request, or refuses with the same reason, which
+the ticket also names.
+
+**A cancelled booking that still reads `paid`** always means a refund is owed and was not flagged.
+`refund: "failed"` is one way to get there. The other is `refund: "manual"` when only the write that
+flags `refund_pending` failed: jovi-mall logs it and carries on, and the ticket is raised
+independently, so it is usually there. Both are handled by hand: `manual` from its ticket, `failed`
+from the refund queue for an online payment, or with the vendor for cash.
+
+The pause reason in the table is the usual one. A booking that was already paused for another
+reason (a customer's problem report, an administrator) shows that pause instead, because one
+booking holds one pause.
 
 ⚠ **The cancel `reason` is public.** It becomes the booking's `cancelledReason`, which the customer
 and the vendor both read on their own booking screens. Say so on the form. The other reasons
@@ -214,4 +383,5 @@ the existing `money.earnings.pause_booking` / `resume_booking`.
 ## Tickets
 
 A ticket whose `about` is `BOOKING` now resolves a label (the booking number) and routes to
-`/bookings/:id`.
+`/bookings/:id`. [support.md](support.md#the-entitytype-vocabulary-is-closed-at-eleven) says the
+same since 2026-10-28. The manual-refund ticket a cancel raises is one of these.

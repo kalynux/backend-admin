@@ -1098,4 +1098,54 @@ t.assert('every other "of N permissions" on the page names the same total', () =
     return totals.length > 0 && totals.every((total) => total === TOTAL_PERMISSIONS);
 });
 
+/**
+ * BR-032 § 1 (2026-10-28). The two assertions above passed while the matrix itself was one row
+ * short: `agencies.claims.charge` was in every count and in no row. The dashboard diffs its
+ * permission list against the rows, so it went red on a page this suite called green.
+ */
+const MATRIX_ROW = /^\| `([a-z_]+(?:\.[a-z_]+)+)`[^|\n]*\| (?:read|write) \|/gm;
+const MATRIX_NAMES = Array.from(PERMISSIONS_PAGE.matchAll(MATRIX_ROW)).map((match) => match[1]);
+
+t.assert('the matrix has exactly one row per catalogued permission, and none for anything else', () =>
+    MATRIX_NAMES.length === TOTAL_PERMISSIONS
+    && new Set(MATRIX_NAMES).size === TOTAL_PERMISSIONS
+    && MATRIX_NAMES.every((name) => (PERMISSION_NAMES as readonly string[]).includes(name)));
+
+/**
+ * BR-033 § 1 (2026-10-28). The composite-guard section said 17 + 4 = 21 while the routes held
+ * 19 + 8 = 27; its own prose matched its own tables, so nothing on either side noticed. Both are
+ * now counted from the route sources, which is what the page's own grep recipe counts.
+ */
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+    'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen',
+    'twenty', 'twenty-one', 'twenty-two', 'twenty-three', 'twenty-four', 'twenty-five', 'twenty-six',
+    'twenty-seven', 'twenty-eight', 'twenty-nine', 'thirty', 'thirty-one', 'thirty-two', 'thirty-three',
+    'thirty-four', 'thirty-five', 'thirty-six', 'thirty-seven', 'thirty-eight', 'thirty-nine', 'forty'];
+
+const ROUTE_SOURCES = SCANNED.map((file) => stripComments(readFileSync(file, 'utf8')));
+const ALL_MODE_GUARDS = ROUTE_SOURCES
+    .reduce((n, code) => n + Array.from(code.matchAll(/access:\s*permission\(([^)]*)\)/g))
+        .filter((match) => match[1].includes(',')).length, 0);
+const ANY_MODE_GUARDS = ROUTE_SOURCES.reduce((n, code) => n + countOf(code, /access:\s*anyPermission\(/g), 0);
+
+const COMPOSITE_SECTION = PERMISSIONS_PAGE.slice(
+    PERMISSIONS_PAGE.indexOf('## Composite guards'),
+    PERMISSIONS_PAGE.indexOf('## Level-specific notes'));
+const ANY_MODE_START = COMPOSITE_SECTION.indexOf('`any`-mode guards\n');
+const guardRows = (text: string) => (text.match(/^\| `(?:GET|POST|PUT|PATCH|DELETE) \//gm) ?? []).length;
+
+t.assert(`the composite-guard tables list ${ALL_MODE_GUARDS} all-mode and ${ANY_MODE_GUARDS} any-mode routes, as the sources hold`, () =>
+    ALL_MODE_GUARDS > 0 && ANY_MODE_GUARDS > 0 && ANY_MODE_START > 0
+    && guardRows(COMPOSITE_SECTION.slice(0, ANY_MODE_START)) === ALL_MODE_GUARDS
+    && guardRows(COMPOSITE_SECTION.slice(ANY_MODE_START)) === ANY_MODE_GUARDS);
+
+t.assert('the composite-guard prose states the same three counts', () => {
+    const word = (n: number) => NUMBER_WORDS[n] ?? String(n);
+    const capital = (s: string) => s[0].toUpperCase() + s.slice(1);
+    return COMPOSITE_SECTION.includes(`**${capital(word(ALL_MODE_GUARDS))}** endpoints require`)
+        && COMPOSITE_SECTION.includes(`### The ${word(ANY_MODE_GUARDS)} \`any\`-mode guards`)
+        && COMPOSITE_SECTION.includes(`${word(ALL_MODE_GUARDS)} \`all\`-mode guards plus ${word(ANY_MODE_GUARDS)}\n`
+            + `\`any\`-mode ones, **${word(ALL_MODE_GUARDS + ANY_MODE_GUARDS)}** composite guards in all`);
+});
+
 process.exit(t.finish());

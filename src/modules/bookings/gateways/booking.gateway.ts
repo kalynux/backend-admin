@@ -64,7 +64,7 @@ function asState(result: unknown): Record<string, unknown> | null {
     if (!result || typeof result !== 'object') return null;
     const r = result as Record<string, unknown>;
     const state: Record<string, unknown> = {};
-    for (const key of ['status', 'paymentStatus', 'rescheduleProposalStatus', 'outcome', 'paymentStatusAfter', 'sent']) {
+    for (const key of ['status', 'paymentStatus', 'rescheduleProposalStatus', 'refund', 'outcome', 'paymentStatusAfter', 'sent']) {
         if (key in r) state[key] = r[key];
     }
     if (Array.isArray(r.cancelled)) state.cancelled = r.cancelled;
@@ -92,6 +92,19 @@ export interface PlatformBookingAck {
     rescheduleProposalStatus: string | null;
 }
 
+/**
+ * What a cancel's refund did (BR-033 § 4). jovi-mall commits the cancellation first and refunds
+ * best-effort after it, so a 200 says nothing about the money on its own. jovi-mall's
+ * `ADMIN_CANCEL_REFUND_OUTCOMES`; no shared package, so `test:bookings` § 5 pins the two lists.
+ */
+export const BOOKING_CANCEL_REFUNDS = ['none', 'requested', 'refunded', 'manual', 'failed'] as const;
+export type BookingCancelRefund = (typeof BOOKING_CANCEL_REFUNDS)[number];
+
+export interface PlatformBookingCancelAck extends PlatformBookingAck {
+    /** Optional only because this service may be deployed ahead of the jovi-mall that sends it. */
+    refund?: BookingCancelRefund;
+}
+
 export interface PlatformPaymentRecheck {
     outcome: 'settled' | 'still_pending' | 'released';
     paymentStatusBefore: string;
@@ -102,7 +115,7 @@ export interface PlatformPaymentRecheck {
 export interface PlatformSessionCancel {
     productId: string;
     startAt: string;
-    cancelled: Array<{ bookingId: string; bookingNumber: string | null }>;
+    cancelled: Array<{ bookingId: string; bookingNumber: string | null; refund?: BookingCancelRefund }>;
     failed: Array<{ bookingId: string; bookingNumber: string | null; code: string }>;
 }
 
@@ -131,9 +144,9 @@ export function cancel(
     input: { reason: string; fault: 'vendor' | 'customer' },
     before: BookingSnapshot,
     context: ActorContext,
-): Promise<PlatformBookingAck> {
+): Promise<PlatformBookingCancelAck> {
     return auditedDelegation('bookings.cancel', context, bookingId, input, before, () =>
-        post<PlatformBookingAck>(`/bookings/${bookingId}/cancel`, input, context));
+        post<PlatformBookingCancelAck>(`/bookings/${bookingId}/cancel`, input, context));
 }
 
 /**

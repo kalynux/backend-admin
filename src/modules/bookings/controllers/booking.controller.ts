@@ -135,6 +135,15 @@ async function readBookingDetail(req: Request, bookingId: string): Promise<Booki
     });
 }
 
+/** The cancel's message says what its refund did: a 200 alone says nothing about the money. */
+const CANCEL_MESSAGES: Record<gateway.BookingCancelRefund, string> = {
+    none: 'Booking cancelled — nothing was owed',
+    requested: 'Booking cancelled — the refund is in the refund queue',
+    refunded: 'Booking cancelled — the customer has been refunded',
+    manual: 'Booking cancelled — the refund must be made by hand; a ticket was raised',
+    failed: 'Booking cancelled — the refund step failed and recorded nothing; the refund must be handled by hand',
+};
+
 /** Answer a write with the fresh detail and jovi-mall's own result beside it. */
 async function respondAfterWrite(req: Request, res: Response, bookingId: string, result: unknown, message: string) {
     const booking = await readBookingDetail(req, bookingId);
@@ -237,7 +246,8 @@ export class BookingController {
         const body = req.body as CancelBookingBody;
         const booking = await loadOr404(req.params.bookingId);
         const result = await gateway.cancel(req.params.bookingId, body, toAuditState(booking), actorContextOf(req));
-        await respondAfterWrite(req, res, req.params.bookingId, result, 'Booking cancelled — the customer’s refund follows the ordinary cancellation refund');
+        const message = result.refund ? CANCEL_MESSAGES[result.refund] : 'Booking cancelled';
+        await respondAfterWrite(req, res, req.params.bookingId, result, message);
     });
 
     /**
@@ -254,14 +264,16 @@ export class BookingController {
             toAuditState(booking),
             actorContextOf(req),
         );
+        const byHand = result.cancelled.filter((seat) => seat.refund === 'manual' || seat.refund === 'failed').length;
+        const refundNote = byHand > 0 ? `; ${byHand} refund(s) must be handled by hand` : '';
         await respondAfterWrite(
             req,
             res,
             req.params.bookingId,
             result,
             result.failed.length === 0
-                ? `Cancelled ${result.cancelled.length} booking(s) in this class`
-                : `Cancelled ${result.cancelled.length} booking(s); ${result.failed.length} could not be cancelled`,
+                ? `Cancelled ${result.cancelled.length} booking(s) in this class${refundNote}`
+                : `Cancelled ${result.cancelled.length} booking(s); ${result.failed.length} could not be cancelled${refundNote}`,
         );
     });
 

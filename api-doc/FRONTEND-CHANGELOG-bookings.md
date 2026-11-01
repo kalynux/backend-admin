@@ -39,6 +39,11 @@ change.
   reason is internal.
 - ⚠ Cancel refunds at once, with **no second approver**. Show the amount and the fault's effect on
   fees before confirming.
+- 🆕 **2026-11-01 (BR-033 § 4): the cancel's `result` says what its refund did.** `result.refund` is
+  `none` · `requested` · `refunded` · `manual` · `failed`, and each seat in a session cancel's
+  `result.cancelled[]` carries its own. The response `message` follows it, so a toast can show it
+  as is. `manual` and `failed` need a person. See
+  [`bookings.md` § What a cancel's refund did](api/bookings.md#what-a-cancels-refund-did).
 - Complete is refused for an unpaid booking (`BOOKING_ADMIN_COMPLETE_UNPAID`): offer Record cash
   first. The full refusal list is in the writes table.
 - An empty `statusHistory` means "not recorded" (bookings from before 2026-10-27), not "nothing

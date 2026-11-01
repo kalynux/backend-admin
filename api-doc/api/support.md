@@ -230,7 +230,8 @@ is no write path by which a twelfth value can be stored.
 | `PRODUCT` | ✅ **since BR-016 § 7** — needs `entity.vendorId`, which is now on the detail |
 | `VENDOR` · `AGENT` · `AGENCY` · `USER` | ✅ each maps to a directory, the id is the parameter |
 | `CUSTOMER` | ⚠ **By search, not by link** — there is no customer directory, but since 2026-10-12 `GET /users?search=<id>` finds the person. See below. This row said ✅ until 2026-08-26 and ❌ until 2026-10-12 |
-| `BOOKING` · `DELIVERY` | ❌ no administrative surface to link to |
+| `BOOKING` | ✅ **since 2026-10-27** — `bookingId`, to `/bookings/:bookingId` behind `bookings.read` ([bookings.md](bookings.md)); `entity.label` is the booking number. This row said ❌ until 2026-10-28 (BR-033 § 2) |
+| `DELIVERY` | ❌ no administrative surface to link to |
 | `OTHER` | ❌ names no entity by definition — jovi-mall lets `entityId` be omitted for it alone |
 
 ⚠ **This service still validates the token by SHAPE, not membership**, exactly as the four
@@ -268,8 +269,8 @@ That last point is why the search suits this case: it does not need to know whic
 ids the ticket carries, because it tries both. An `entityId` that is neither returns an empty
 page, which is the honest answer.
 
-Link `CUSTOMER` to `/users?search=<entityId>`, never to `/users/<entityId>`. `BOOKING` and
-`DELIVERY` stay plain text. Two things on the same
+Link `CUSTOMER` to `/users?search=<entityId>`, never to `/users/<entityId>`. `DELIVERY` stays
+plain text; `BOOKING` links to `/bookings/<entityId>` since 2026-10-27. Two things on the same
 ticket **are** routable directly and are usually the operator's actual destination:
 `createdBy.userId` — a `users._id` whenever `createdBy.role` is not `admin`, so
 `/users/:userId` behind `users.read` — and the `ORDER` or `SHIPMENT` a complaint about a
@@ -479,17 +480,18 @@ an **`admin`** follower (`403`, relayed as `PLATFORM_OPERATION_REJECTED` with
 | Field | Notes |
 |---|---|
 | **`entity.vendorId`** | Set for **`type: "PRODUCT"` only**, `null` on every other type — those are not products, not "unknown vendors". It is what unblocks the link: a product's detail route is `/vendors/:vendorId/products/:productId` and needs **two** ids, where the ticket carries one. There is no vendor-agnostic product read anywhere on this service |
-| **`entity.label`** | Something an operator recognises, where one read can supply it: the **order number** for `ORDER`, the **tracking number** for `SHIPMENT`, the **title** for `PRODUCT`. `null` for every other type and for a missing record. A convenience — never a substitute for the id, and never rendered in its place |
+| **`entity.label`** | Something an operator recognises, where one read can supply it: the **order number** for `ORDER`, the **tracking number** for `SHIPMENT`, the **title** for `PRODUCT`, the **booking number** for `BOOKING` (since 2026-10-27; a soft-deleted booking still resolves, like a product). `null` for every other type and for a missing record. A convenience — never a substitute for the id, and never rendered in its place |
 
 Both are `null` when the record is gone. A deleted listing is exactly what a catalogue complaint
 tends to end in, so the ticket is served with no link rather than a fabricated one — and the
 product lookup deliberately does **not** filter `deletedAt`, so a soft-deleted listing still
 resolves and the ticket most worth reading is not the one with no link.
 
-At most **one** query runs, dispatched on the type. Of the eight remaining types, **four**
+At most **one** query runs, dispatched on the type. Of the seven remaining types, **four**
 (`USER`, `VENDOR`, `AGENT`, `AGENCY`) are resolved by the client from the type alone — each maps
-to a directory — and the other four have no administrative surface to link to: `BOOKING`,
-`DELIVERY`, `OTHER`, and **`CUSTOMER`, which has no directory on this service**. See the table
+to a directory — and the other three have no administrative surface to link to: `DELIVERY`,
+`OTHER`, and **`CUSTOMER`, which has no directory on this service** (reachable by search only).
+This paragraph listed `BOOKING` here until 2026-10-28. See the table
 under [The `entityType` vocabulary](#the-entitytype-vocabulary-is-closed-at-eleven).
 
 ### Errors

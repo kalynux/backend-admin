@@ -243,8 +243,8 @@ Only these five are forwarded (jovi-mall's query is strict); any other key is dr
     "goods": 5000, "delivery": 1000,     // of maxRefundable
     "goodsAmount": 5000, "deliveryAmountPaid": 1000, "delivered": false,
     "remaining": 6000,                   // money still refundable, before the attribution rule
-    "feeAmount": 238, "netAmount": 5762, // of maxRefundable: payment fee 120 + transfer fee 118
-    "paymentFee": 120, "transferFee": 118,
+    "feeAmount": 238, "netAmount": 5762, // of maxRefundable: payment fee 120 + transfer fee 118.
+                                         // The split is on the byReasonKind row only, not at this level
     "byReasonKind": {                    // the same numbers for EVERY reason — switch without a second call
       "cancellation": { "maxRefundable": 6000, "goods": 5000, "delivery": 1000, "feeAmount": 238, "netAmount": 5762, "paymentFee": 120, "transferFee": 118 },
       "return":       { "maxRefundable": 5000, "goods": 5000, "delivery": 0,    "feeAmount": 198, "netAmount": 4802, "paymentFee": 100, "transferFee": 98 },
