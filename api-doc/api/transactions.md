@@ -66,7 +66,7 @@ was collected; on a `pending` one it is what is due; on a `cancelled` one nothin
 
 ### `earnings_adjustment` — which debt movements are this kind
 
-A refund can leave an owner owing the platform money. Five things move that debt, and every one
+A refund can leave an owner owing the platform money. Six things move that debt, and every one
 of them is on this list exactly once:
 
 | Movement | It is listed as |
@@ -76,9 +76,10 @@ of them is on this list exactly once:
 | A refund charges a vendor beyond their share of that sale | `ledger_entry`, reason `refund_clawback` (filed under the vendor's share) |
 | **An administrator forgives the debt** | **`earnings_adjustment`**, reason `debt_write_off` |
 | **A payout is rejected, or its ticket fails, and the money comes back and pays the debt** | **`earnings_adjustment`**, reason `debt_recovered_from_payout` |
+| **A vendor or agency at fault is charged for a partial order's returned parcel** | **`earnings_adjustment`**, reason `partial_return_fault` (`reason.text` says why; that parcel earned nobody anything, so it has no share to file a ledger entry under) |
 
-For an operator: *a write-off and a debt paid by a returned payout are adjustments; everything
-else a refund does to someone's earnings is a ledger entry.*
+For an operator: *a write-off, a debt paid by a returned payout and a returned parcel's fault charge
+are adjustments; everything else a refund does to someone's earnings is a ledger entry.*
 
 ⚠ **One rare case is on neither.** When a refund charges a vendor beyond their share and the
 vendor has **no share at all** on that sale to file it under, nothing writes a ledger entry and
@@ -152,7 +153,7 @@ source projections do not read them. A payout's destination stays behind
 | `cod_deposit` · `cod_remittance` | `confirmed` | `declared` | `rejected` | — |
 | `cod_collection` | `collected` | `pending` | `cancelled` | — |
 | `ledger_entry` | every entry type | — | — | — |
-| `earnings_adjustment` | `write_off` · `clawback_recovery` (its `status` is the adjustment's kind) | — | — | — |
+| `earnings_adjustment` | `write_off` · `clawback_recovery` · `refund_clawback` (its `status` is the adjustment's kind) | — | — | — |
 
 A status this service does not know yet reads **`unknown`**, never another word, and
 `?outcome=unknown` finds exactly those rows. `test:transactions` § 4 reads jovi-mall's status
@@ -174,7 +175,7 @@ here because that is the row an operator filtering for failures is looking for.
 | `cod_deposit` | `cod_deposit_to_platform` · `cod_deposit_to_agency` |
 | `cod_remittance` | `cod_remittance` |
 | `cod_collection` | `cod_order_payment` (the goods, with any delivery fee) · `cod_delivery_fee` (a delivery fee alone, on an order paid online) |
-| `earnings_adjustment` | `debt_write_off` (`reason.text` is the administrator's stated reason) · `debt_recovered_from_payout` |
+| `earnings_adjustment` | `debt_write_off` (`reason.text` is the administrator's stated reason) · `debt_recovered_from_payout` · `partial_return_fault` (`reason.text` explains the charge) |
 | `ledger_entry` | jovi-mall's own, passed through: `order_split` · `cod_split` · `delivery_split` · `hold_release` · `refund_reversal` · `cod_rolling_reserve` · `reserve_matured` · `delivery_fee_adjustment` · `refund_clawback` · `clawback_recovery` — and `clawback_write_off`, which is in the model's vocabulary and **written by nothing**: a write-off is an `earnings_adjustment` |
 
 ---

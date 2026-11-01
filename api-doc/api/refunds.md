@@ -43,7 +43,8 @@ One source can have **one open request** at a time (`409 REFUND_ALREADY_OPEN`).
 | `grossAmount` | What the refund is worth. What analytics deduct and what is clawed back from earnings |
 | `feeAmount` | 🆕 2026-10-22: **everything deducted from the customer** — the payment fee the aggregator kept when they paid plus the transfer fee. **0 when the seller pays them** |
 | `feeRate` | The TRANSFER fee percent (2 by default); 0 on a card refund |
-| `fees` | 🆕 `{ paidBy: customer|vendor, paymentFeePercent, paymentFee, transferFeePercent, transferFee, vendorCharge }` — the two fees apart (below) |
+| `fees` | 🆕 `{ paidBy: customer|vendor|agency, paymentFeePercent, paymentFee, transferFeePercent, transferFee, vendorCharge, agencyCharge }` — the two fees apart (below). `agency` and `agencyCharge` occur only on a partial order's returned parcel |
+| `partialReturn` | A partial order's returned parcel, `null` otherwise: `{ shipmentId, fault, returnFee, prepaidAmount, agentReason, agentNote }`. See [the fault decision](#post-apiv1refundsrefundidpartial-return-fault--ordersrefund) |
 | `netAmount` | What the customer receives: `grossAmount − feeAmount`. Mobile money 5 000 → 100 → 98 → **4 802** |
 | `attribution` | `{ goods, delivery }` — which part is goods and which is delivery money (sums to `grossAmount`) |
 | `deliveryFault` | 🆕 parcels named as delivered at fault, each `{ shipmentId, agencyId, trackingNumber, deliveredAt, raisedAt, windowDays, insideWindow, customerDeliveryAmount, claimDeadlineDays, returnsPayer }` |
