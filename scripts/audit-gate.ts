@@ -36,6 +36,17 @@ const ACCEPTED: AcceptedAdvisory[] = [
             + 'Delete this entry and that guard together when the service moves to zod 4.',
         expires: '2026-12-31',
     },
+    {
+        id: 'GHSA-g3hv-75wg-m249',
+        pkg: 'minimatch',
+        reason:
+            'Reaches production only through exceljs → archiver: minimatch 3.1.5 (glob 7) and 5.1.9 '
+            + '(readdir-glob). Neither copy contains the vulnerable firstPhasePreProcess, and exceljs '
+            + 'never calls archiver.glob() or .directory(), so no pattern reaches them. No exceljs '
+            + 'release moves off these. Do NOT override minimatch to 11: glob 7 crashes on its first '
+            + 'pattern, and npm audit and npm ci both stay clean.',
+        expires: '2026-12-31',
+    },
 ];
 
 interface AuditAdvisory {
