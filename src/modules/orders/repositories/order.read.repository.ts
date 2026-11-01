@@ -47,6 +47,14 @@ export interface OrderReadModel extends Document {
     delivery_payer_reason?: string | null;
     /** How much more of this shop's goods would have made delivery free at checkout. */
     free_delivery_shortfall?: number | null;
+    /** Paid part online, part in cash at delivery (2026-11-01). `null` on every other order. */
+    prepayment?: {
+        min_percent: number;
+        minimum_amount: number;
+        maximum_amount: number;
+        amount?: number | null;
+        paid_at?: Date | null;
+    } | null;
     payment_method: 'online' | 'cash_on_delivery';
     payment_status: string;
     payment_intent_id?: string | null;
@@ -187,6 +195,7 @@ const ORDER_DETAIL_PROJECTION = {
     price_breakdown: 1,
     delivery_payer_reason: 1,
     free_delivery_shortfall: 1,
+    prepayment: 1,
     payment_intent_id: 1,
     dispute_hold: 1,
     completion: 1,

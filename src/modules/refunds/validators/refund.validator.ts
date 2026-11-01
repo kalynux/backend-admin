@@ -192,6 +192,11 @@ export const RejectRefundSchema = z
     })
     .strict();
 
+/** Whose fault a partial order's returned parcel is. */
+export const SetPartialReturnFaultSchema = z
+    .object({ fault: z.enum(['customer', 'vendor', 'agency']) })
+    .strict();
+
 /** Retrying a failed transfer takes no body: the same reference is reused by jovi-mall. */
 export const RetryRefundSchema = z.object({}).strict();
 
@@ -236,6 +241,7 @@ export type ListRefundRequestsQuery = z.infer<typeof ListRefundRequestsQuerySche
 export type RefundEligibilityQuery = z.infer<typeof RefundEligibilityQuerySchema>;
 export type CreateRefundRequestBody = z.infer<typeof CreateRefundRequestSchema>;
 export type RejectRefundBody = z.infer<typeof RejectRefundSchema>;
+export type SetPartialReturnFaultBody = z.infer<typeof SetPartialReturnFaultSchema>;
 export type SettleExternalRefundBody = z.infer<typeof SettleExternalRefundSchema>;
 export type ResolveUnknownRefundBody = z.infer<typeof ResolveUnknownRefundSchema>;
 export type ListRefundActivityQuery = z.infer<typeof ListRefundActivityQuerySchema>;

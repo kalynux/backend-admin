@@ -62,6 +62,16 @@ export interface RefundRequestReadModel extends Document {
         payout_rate?: number | null;
         payout_amount?: number | null;
         vendor_charge?: number | null;
+        agency_charge?: number | null;
+    } | null;
+    /** 2026-11-01: a partial order's returned parcel, and whose fault it is. */
+    partial_return?: {
+        shipment_id?: ObjectId | null;
+        fault?: string | null;
+        return_fee?: number | null;
+        prepaid_amount?: number | null;
+        agent_reason?: string | null;
+        agent_note?: string | null;
     } | null;
     /** 2026-10-22: parcels named as delivered at fault, each judged against its agency's window. */
     delivery_fault?: Array<{
@@ -151,6 +161,7 @@ export const REFUND_REQUEST_PROJECTION = {
     fee_amount: 1,
     net_amount: 1,
     fees: 1,
+    partial_return: 1,
     delivery_fault: 1,
     currency: 1,
     payment_channel: 1,

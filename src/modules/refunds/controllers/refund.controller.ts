@@ -22,6 +22,7 @@ import {
     ListRefundRequestsQuery,
     RefundEligibilityQuery,
     RejectRefundBody,
+    SetPartialReturnFaultBody,
     ResolveUnknownRefundBody,
     SettleExternalRefundBody,
 } from '../validators/refund.validator';
@@ -175,6 +176,15 @@ export class RefundController {
         const row = await actions.reject(req.params.refundId, body.reason, actorContextOf(req));
         sendSuccess(res, await toDto(row, 'detail'), {
             message: 'Refund request rejected — the seller’s earnings are no longer held for it',
+        });
+    });
+
+    /** POST /:refundId/partial-return-fault — answers the REPLACEMENT request, with a new id. */
+    static setPartialReturnFault = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as SetPartialReturnFaultBody;
+        const row = await actions.setPartialReturnFault(req.params.refundId, body.fault, actorContextOf(req));
+        sendSuccess(res, await toDto(row, 'detail'), {
+            message: 'Fault recorded — approve this refund to send it',
         });
     });
 

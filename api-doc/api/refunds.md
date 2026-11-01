@@ -361,6 +361,27 @@ Errors: `404 NOT_FOUND` · `409 REFUND_REQUEST_STATUS_CONFLICT` (`details.status
 `{ "reason": "…" }` (3–500, required). Only from `awaiting_approval` or `failed` — **never from
 `sending`**: the transfer may already be in flight. The earnings pause lifts. Never four-eyed.
 
+## POST /api/v1/refunds/:refundId/partial-return-fault — `orders.refund`
+
+A partial order's parcel came back while the customer had prepaid on it (2026-11-01). The request
+carries `partialReturn`: `fault` is what the agent's report proposed, `null` when it names nobody,
+and `agentReason` / `agentNote` are what you weigh. `null` cannot be approved
+(`422 REFUND_PARTIAL_RETURN_FAULT_REQUIRED`).
+
+Body `{ "fault": "customer" | "vendor" | "agency" }`. Moves no money. **It REPLACES the request**, because
+the amount and who pays the fees depend on it: the old one becomes `rejected`, and the response is the
+new one, **with a new `id`**, still `awaiting_approval`. Approve that one.
+
+| Fault | The customer gets | Who pays the fees | The agency's return fee |
+|---|---|---|---|
+| `customer` | What they prepaid minus the return fee, minus normal refund fees | The customer | Paid from what they prepaid |
+| `vendor` | Everything they prepaid | The vendor | Paid, and charged to the vendor |
+| `agency` | Everything they prepaid | The agency | Not paid: it earns nothing for the trip |
+
+A charge the party cannot cover from its balance is recorded as money it owes (`clawback_balance`).
+`422 REFUND_PARTIAL_RETURN_NOT_APPLICABLE` when the request is not a returned parcel, or no longer
+awaiting approval.
+
 ## POST /api/v1/refunds/:refundId/retry — `orders.refund`
 
 Body `{}`. From `failed`, or from `approved` when the send was refused **before** it was claimed

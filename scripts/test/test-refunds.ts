@@ -131,6 +131,7 @@ const EXPECTED: Array<[string, string, string[], string | null]> = [
     ['get', '/:refundId/activity', ['orders.refund.read', 'audit.read'], null],
     ['post', '/:refundId/approve', ['orders.refund'], 'orders.refund.approve'],
     ['post', '/:refundId/reject', ['orders.refund'], 'orders.refund.reject'],
+    ['post', '/:refundId/partial-return-fault', ['orders.refund'], 'orders.refund.partial_return_fault'],
     ['post', '/:refundId/retry', ['orders.refund'], 'orders.refund.retry'],
     ['post', '/:refundId/settle-external', ['orders.refund.settle_external'], 'orders.refund.settle_external'],
     ['post', '/:refundId/resolve-unknown', ['orders.refund'], 'orders.refund.resolve_unknown'],

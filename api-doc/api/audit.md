@@ -514,6 +514,7 @@ in the permission catalogue record no action of their own (`permissions`, `syste
 | `orders.refund.request` | `refund` | delegated | `orders.refund.request` | Raised a refund request for approval — the seller’s earnings are held until it is decided |
 | `orders.refund.approve` | `refund` | delegated | `orders.refund` | Approved a refund request — the platform sends the money (or waits for COD cash to reach it) |
 | `orders.refund.reject` | `refund` | delegated | `orders.refund` | Rejected a refund request — the seller’s earnings are released from the refund hold |
+| `orders.refund.partial_return_fault` | `refund` | delegated | `orders.refund` | Said whose fault a partly paid order’s returned parcel is — the waiting refund is replaced with the matching amount |
 | `orders.refund.retry` | `refund` | delegated | `orders.refund` | Retried a failed refund transfer — the same transfer reference is reused |
 | `orders.refund.resolve_unknown` | `refund` | delegated | `orders.refund` | Decided a refund transfer whose outcome was unknown — arrived, or failed |
 | `orders.refund.settle_external` | `refund` | delegated | `orders.refund.settle_external` | Recorded a refund as paid outside the platform, with a picture proof |

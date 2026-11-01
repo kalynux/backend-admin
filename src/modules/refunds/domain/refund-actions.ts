@@ -305,6 +305,22 @@ export async function reject(refundId: string, reason: string, context: ActorCon
 }
 
 /**
+ * Whose fault a partial order's returned parcel is (owner decisions D-11, D-12). The refund it
+ * sets up still needs approving through `approve`, so this moves no money. Answers the replacement
+ * request, which is the one the administrator then approves.
+ */
+export async function setPartialReturnFault(
+    refundId: string,
+    fault: 'customer' | 'vendor' | 'agency',
+    context: ActorContext,
+): Promise<RefundRequestReadModel> {
+    const row = await loadRefundOr404(refundId);
+    assertActionable(row, 'approve');
+    const replacement = await gateway.setPartialReturnFault(refundId, fault, auditContextOf(row), context);
+    return (await requests.findById(replacement.id)) ?? reread(row);
+}
+
+/**
  * Retry a failed transfer. Not queued: the money was already approved (four-eyes included when
  * it applied), and jovi-mall reuses the same transfer reference, so a retry cannot pay twice.
  */

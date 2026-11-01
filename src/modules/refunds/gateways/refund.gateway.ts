@@ -317,6 +317,25 @@ export async function rejectRefundRequest(
     );
 }
 
+/**
+ * Say whose fault a partial order's returned parcel is. jovi-mall REPLACES the waiting request,
+ * because the amount and who pays the fees depend on it, and answers the replacement.
+ */
+export async function setPartialReturnFault(
+    refundId: string,
+    fault: 'customer' | 'vendor' | 'agency',
+    audit: RefundAuditContext,
+    context: ActorContext,
+): Promise<PlatformRefundRequest> {
+    return auditedRefundWrite(
+        'orders.refund.partial_return_fault',
+        context,
+        audit,
+        { refundId, fault },
+        { method: 'POST', path: `/refunds/${refundId}/partial-return-fault`, body: { fault } },
+    );
+}
+
 /** Retry a `failed` transfer — jovi-mall claims again and REUSES the transfer reference. */
 export async function retryRefundRequest(
     refundId: string,

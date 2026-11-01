@@ -52,14 +52,28 @@ export interface RefundRequestDto {
      * read as: transfer fee only (`feeAmount`), paid by the customer.
      */
     fees: {
-        paidBy: 'customer' | 'vendor';
+        paidBy: 'customer' | 'vendor' | 'agency';
         paymentFeePercent: number;
         paymentFee: number;
         transferFeePercent: number;
         transferFee: number;
         /** Charged to the seller beyond their share when THEY pay the fees. */
         vendorCharge: number;
+        /** Charged to the delivery agency when a partial order's parcel came back through its fault. */
+        agencyCharge: number;
     };
+    /**
+     * A partial order's returned parcel (2026-11-01). `fault: null` means an administrator must say
+     * whose fault it is before approving; `agentReason` and `agentNote` are what they weigh.
+     */
+    partialReturn: {
+        shipmentId: string | null;
+        fault: string | null;
+        returnFee: number;
+        prepaidAmount: number;
+        agentReason: string | null;
+        agentNote: string | null;
+    } | null;
     /**
      * Parcels named as delivered at fault (owner F-6/F-7): `insideWindow` says whether the
      * agency (and rider) give back; `customerDeliveryAmount` is what they fund.
@@ -183,12 +197,13 @@ export function toRefundRequestDto(
         netAmount,
         fees: row.fees
             ? {
-                  paidBy: row.fees.paid_by === 'vendor' ? 'vendor' : 'customer',
+                  paidBy: row.fees.paid_by === 'vendor' ? 'vendor' : row.fees.paid_by === 'agency' ? 'agency' : 'customer',
                   paymentFeePercent: row.fees.payin_rate ?? 0,
                   paymentFee: row.fees.payin_amount ?? 0,
                   transferFeePercent: row.fees.payout_rate ?? 0,
                   transferFee: row.fees.payout_amount ?? 0,
                   vendorCharge: row.fees.vendor_charge ?? 0,
+                  agencyCharge: row.fees.agency_charge ?? 0,
               }
             : {
                   paidBy: 'customer',
@@ -197,7 +212,18 @@ export function toRefundRequestDto(
                   transferFeePercent: row.fee_rate ?? 0,
                   transferFee: row.fee_amount ?? 0,
                   vendorCharge: 0,
+                  agencyCharge: 0,
               },
+        partialReturn: row.partial_return
+            ? {
+                  shipmentId: toId(row.partial_return.shipment_id ?? null),
+                  fault: row.partial_return.fault ?? null,
+                  returnFee: row.partial_return.return_fee ?? 0,
+                  prepaidAmount: row.partial_return.prepaid_amount ?? 0,
+                  agentReason: row.partial_return.agent_reason ?? null,
+                  agentNote: row.partial_return.agent_note ?? null,
+              }
+            : null,
         deliveryFault: (row.delivery_fault ?? []).map((d) => ({
             shipmentId: toId(d.shipment_id ?? null),
             agencyId: toId(d.agency_id ?? null),

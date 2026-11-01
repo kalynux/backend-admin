@@ -64,6 +64,18 @@ export interface OrderDetailDto extends OrderListItemDto {
      * cap, so the customer paid). `null` where `deliveryPayer` is.
      */
     deliveryPayerReason: string | null;
+    /**
+     * Paid part online, part in cash at delivery (2026-11-01). `null` on every other order.
+     * `amountPaidOnline` is 0 until the online part is paid, and the order cannot dispatch before.
+     */
+    partialPayment: {
+        minPercent: number;
+        minimumAmount: number;
+        maximumAmount: number;
+        amountPaidOnline: number;
+        balanceDue: number;
+        paidAt: string | null;
+    } | null;
     /** How much more of this shop's goods would have made delivery free at checkout; `null` = n/a. */
     freeDeliveryShortfall: number | null;
     paymentIntentId: string | null;
@@ -278,6 +290,16 @@ export function toOrderDetailDto(
             }
             : null,
         deliveryPayerReason: order.delivery_payer_reason ?? null,
+        partialPayment: order.prepayment
+            ? {
+                minPercent: order.prepayment.min_percent,
+                minimumAmount: order.prepayment.minimum_amount,
+                maximumAmount: order.prepayment.maximum_amount,
+                amountPaidOnline: order.prepayment.paid_at ? order.prepayment.amount ?? 0 : 0,
+                balanceDue: order.total_amount - (order.prepayment.paid_at ? order.prepayment.amount ?? 0 : 0),
+                paidAt: toIso(order.prepayment.paid_at),
+            }
+            : null,
         freeDeliveryShortfall: order.free_delivery_shortfall ?? null,
         paymentIntentId: order.payment_intent_id ?? null,
         dispute: everDisputed

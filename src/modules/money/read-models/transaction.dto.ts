@@ -196,7 +196,7 @@ export type TransactionRecordDto =
       }
     | {
           kind: 'earnings_adjustment';
-          /** `write_off` or `clawback_recovery` — the stored kind. */
+          /** `write_off`, `clawback_recovery` or `refund_clawback` (a returned parcel's fault charge) — the stored kind. */
           adjustment: string;
           /** The administrator who forgave the debt. `null` on a recovery, which nobody performs. */
           actor: { id: string | null; name: string | null } | null;

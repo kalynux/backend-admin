@@ -367,7 +367,7 @@ const REFUND_QUEUE_ACTIONS = Object.keys(auditCatalog).filter((action) => action
 t.assert(
     'the activity filter is DERIVED from the catalog, so it cannot drift',
     () => ORDER_AUDIT_ACTIONS.length === ORDER_ACTIONS.length + REFUND_QUEUE_ACTIONS.length
-        && REFUND_QUEUE_ACTIONS.length === 8,
+        && REFUND_QUEUE_ACTIONS.length === 9,
 );
 t.assert(
     'the activity feed refuses an action from another family',

@@ -1388,6 +1388,12 @@ export const AUDIT_CATALOG = Object.freeze({
         transport: 'delegated',
         summary: 'Rejected a refund request — the seller’s earnings are released from the refund hold',
     },
+    'orders.refund.partial_return_fault': {
+        permission: 'orders.refund',
+        target: 'refund',
+        transport: 'delegated',
+        summary: 'Said whose fault a partly paid order’s returned parcel is — the waiting refund is replaced with the matching amount',
+    },
     'orders.refund.retry': {
         permission: 'orders.refund',
         target: 'refund',
