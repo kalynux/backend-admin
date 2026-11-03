@@ -1,5 +1,7 @@
 # Permissions and administrator levels
 
+⚠ **2026-11-02: 153 permissions across 25 families, tier totals 153 / 129 / 51.** Four are new, in a new `referrals` family ([§ referrals](#referrals), [referrals.md](referrals.md)): `referrals.read` and `referrals.partners.decide` (every tier, Support included, by the owner's decision), `referrals.partners.balance` (**financial**, tiers 1 + 2) and `referrals.settings.write` (**financial**, tier 1 only). Re-derive with `npm run authz:matrix` rather than quoting.
+
 ⚠ **2026-10-27: 149 permissions across 24 families, tier totals 149 / 126 / 49.** Five are new, in a new `bookings` family ([§ bookings](#bookings), [bookings.md](bookings.md)): `bookings.read` and `bookings.remind` (every tier, Support included), `bookings.access.read` and `bookings.intervene` (unflagged, tiers 1 + 2 through the family grant — Support does **not** name them), and `bookings.settle` (**financial**, named into the tier-2 money block, refused to Support at boot). Re-derive with `npm run authz:matrix` rather than quoting.
 
 ⚠ **2026-10-22: 144 permissions, tier totals 144 / 121 / 47.** One is new: `agencies.claims.charge` (**financial**, tiers 1 + 2, never Support) — charging a damage claim to a delivery agency ([agency-claims.md](agency-claims.md)).
@@ -43,9 +45,9 @@ Design records: [`../../docs/ADR-003-GRANULAR-PERMISSIONS.md`](../../docs/ADR-00
 
 | Level (`tier`) | Label | Holds | Shape of the job |
 |---|---|---|---|
-| **1** | Developer | 149 of 149 | Everything, including the developer tools and every escalation-flagged action |
-| **2** | Admin | 126 of 149 | The operational tier — runs the platform day to day, including the money |
-| **3** | Support | 49 of 149 | Ticket work, **reading service bookings and resending their reminder**, **raising refund requests** for an approver (which holds the seller's earnings), the lookups needed to answer a ticket, sending an account holder their statement, editorial write on articles and bylines, resetting the customer bot's memory of a chat, **moderating reviews** (hide, put back, delete), and **pre-screening** a declared COD handover or a payout request. Nothing destructive except deleting a review (the one named exception), publishing stays a level above, and the two `financial` permissions it holds cannot send money anywhere |
+| **1** | Developer | 153 of 153 | Everything, including the developer tools and every escalation-flagged action |
+| **2** | Admin | 129 of 153 | The operational tier — runs the platform day to day, including the money |
+| **3** | Support | 51 of 153 | Ticket work, **reading service bookings and resending their reminder**, **reading the referral program and approving, rejecting, suspending or terminating its partners**, **raising refund requests** for an approver (which holds the seller's earnings), the lookups needed to answer a ticket, sending an account holder their statement, editorial write on articles and bylines, resetting the customer bot's memory of a chat, **moderating reviews** (hide, put back, delete), and **pre-screening** a declared COD handover or a payout request. Nothing destructive except deleting a review (the one named exception), publishing stays a level above, and the two `financial` permissions it holds cannot send money anywhere |
 
 A level is an administrator's **entire** authorization state. `tier` appears on the profile
 returned by `GET /auth/me`.
@@ -203,7 +205,7 @@ record were one decision, not two. See [ADR-020](../../docs/ADR-020-ADMIN-DATA-D
 ## The matrix
 
 ● granted  ·  not granted  ·  **†** = catalogued policy with **no endpoint built yet**
-(**4** of 149 permissions — down from 27, and the four that remain each have a written reason
+(**4** of 153 permissions — down from 27, and the four that remain each have a written reason
 below. The policy is decided ahead of the surface, deliberately.)
 
 ### `agents`
@@ -533,6 +535,17 @@ Service bookings (2026-10-27) — the counterpart of `orders` for bookable servi
 | `bookings.remind` | write | ● | ● | ● | — | Send the customer their appointment reminder again |
 | `bookings.intervene` | write | ● | ● | · | — | Re-check a stuck booking payment with the provider, or withdraw a stale proposal of a new time |
 | `bookings.settle` | write | ● | ● | · | financial | Cancel a booking (the customer is refunded), complete it (the vendor is paid), or record a cash payment |
+
+### `referrals`
+
+The referral program (2026-11-02). See [referrals.md](referrals.md).
+
+| Permission | Action | 1 Dev | 2 Admin | 3 Support | Flags | Summary |
+|---|---|:-:|:-:|:-:|---|---|
+| `referrals.read` | read | ● | ● | ● | — | View the referral settings, partners, the accounts they referred and their rewards |
+| `referrals.partners.decide` | write | ● | ● | ● | — | Approve, reject, suspend, reinstate or terminate a referral partner |
+| `referrals.partners.balance` | write | ● | ● | · | financial | Release a suspended or terminated referral partner's frozen balance for withdrawal |
+| `referrals.settings.write` | write | ● | · | · | financial | Change referral rates and durations, globally or for one partner, and switch the program on or off |
 
 Support reads every booking and can resend its reminder, but never sees the meeting link itself: "I can't see my link" is answered with `GET /bookings/:id/access` (why it is locked) and a resent reminder. `bookings.access.read` and `bookings.intervene` are unflagged, so they reach tier 2 through `allInFamily('bookings')`; Support simply does not name them.
 

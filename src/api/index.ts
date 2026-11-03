@@ -211,6 +211,11 @@ apiV1.use('/shipments', shipmentRoutes);
 import { bookingRoutes } from '../modules/bookings/routes/booking.routes';
 apiV1.use('/bookings', bookingRoutes);
 
+// The referral program (REFERRAL-PROGRAM-PLAN, 2026-11-02). Same split: `referral_*` is read
+// directly, every write is delegated to `/api/internal/admin/referrals`.
+import { referralRoutes } from '../modules/referrals/routes/referral.routes';
+apiV1.use('/referrals', referralRoutes);
+
 // Billing — the subscription catalog and who is on it (Phase 11).
 //
 // The first of the three money mounts, and the one where the read/write split is at its

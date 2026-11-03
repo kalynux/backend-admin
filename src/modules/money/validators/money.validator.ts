@@ -437,7 +437,7 @@ export const ListEarningsPausesQuerySchema = z
 // ── Refund debt — clawback (REFUND-FLOW-PLAN § 6, 2026-10-05) ────────────────
 
 /** Owner types that can owe a refund debt — PINNED: this service writes against it (write-off). */
-export const CLAWBACK_OWNER_TYPES = ['vendor', 'agency', 'agent'] as const;
+export const CLAWBACK_OWNER_TYPES = ['vendor', 'agency', 'agent', 'referral_partner'] as const;
 
 export const CLAWBACK_SORT = {
     amount: 'clawback_balance',

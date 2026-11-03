@@ -126,6 +126,7 @@ const QUEUED_ACTION = {
     vendor: 'money.earnings.clawback.write_off_vendor',
     agency: 'money.earnings.clawback.write_off_agency',
     agent: 'money.earnings.clawback.write_off_agent',
+    referral_partner: 'money.earnings.clawback.write_off_referral_partner',
 } as const;
 
 function queuedIntent(
@@ -158,7 +159,7 @@ registerDualControlHandler(
         const amount = Number(approval.payload.amount);
         const reason = String(approval.payload.reason);
 
-        if (!['vendor', 'agency', 'agent'].includes(ownerType)) {
+        if (!['vendor', 'agency', 'agent', 'referral_partner'].includes(ownerType)) {
             throw createAppError(ERROR_CODES.AUTHZ_GRANT_TABLE_INVALID, 500, 'A write-off approval names an unknown owner type');
         }
 

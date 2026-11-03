@@ -69,6 +69,8 @@ export type PermissionFamily =
      * path (the earnings hold starts at completion, a paid no-show waits for an administrator).
      */
     | 'bookings'
+    /** The referral program (REFERRAL-PROGRAM-PLAN). Its own family: partners are no existing role. */
+    | 'referrals'
     | 'administrators'
     | 'notifications'
     | 'system'
@@ -89,7 +91,7 @@ export type PermissionFamily =
 
 export const PERMISSION_FAMILIES: readonly PermissionFamily[] = [
     'agents', 'agencies', 'billing', 'cod', 'money', 'orders', 'support', 'content',
-    'files', 'messaging', 'users', 'vendors', 'catalog', 'reviews', 'shipments', 'bookings', 'administrators',
+    'files', 'messaging', 'users', 'vendors', 'catalog', 'reviews', 'shipments', 'bookings', 'referrals', 'administrators',
     'notifications', 'system', 'developer_tools', 'permissions', 'approvals', 'audit',
     'employees',
 ] as const;

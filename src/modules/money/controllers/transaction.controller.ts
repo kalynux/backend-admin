@@ -16,6 +16,7 @@ import {
     findCustomerNamesByUserIds,
 } from '../../users/repositories/role-profile.read.repository';
 import { StoreReadRepository } from '../../vendors/repositories/store.read.repository';
+import { ReferralPartnerReadRepository } from '../../referrals/repositories/referral.read.repository';
 import {
     PLATFORM_OWNER_TYPES,
     TRANSACTION_SOURCES,
@@ -79,6 +80,7 @@ const allocations = new EarningsAllocationReadRepository();
 const accountCurrencies = new EarningsAccountCurrencyReadRepository();
 const orderNumbers = new OrderReadRepository();
 const stores = new StoreReadRepository();
+const referralPartners = new ReferralPartnerReadRepository();
 const agencies = new AgencyReadRepository();
 const agents = new AgentReadRepository();
 
@@ -164,6 +166,7 @@ async function hydrate(
             candidates.filter((candidate) => candidate.kind === 'ledger_entry').map((candidate) => String(candidate.row.account_id)),
         ),
     ]);
+    const partnerCodes = await referralPartners.findCodesByIds(idsFor('referral_partner'));
     const customersByUserId = await findCustomerNamesByUserIds(
         customerIds.filter((customerId) => !customersById.has(customerId.toString())),
     );
@@ -175,6 +178,7 @@ async function hydrate(
     absorb('vendor', vendorNames);
     absorb('agency', agencyNames);
     absorb('agent', agentNames);
+    absorb('referral_partner', partnerCodes);
     absorb('customer', customersByUserId);
     absorb('customer', customersById);
 

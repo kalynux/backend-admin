@@ -521,9 +521,9 @@ t.assert('the ledger\'s reason codes and the source types it links are still wha
         && json([...sources].sort()) === json(['agency_claim', 'booking', 'cod_collection', 'order', 'shipment']);
 });
 
-t.assert('the ledger owner types are the four roles plus the two platform accounts', () => {
+t.assert('the ledger owner types are the roles, the referral partner and the two platform accounts', () => {
     const owners = upstreamEnum(['modules', 'earnings', 'models', 'earnings-ledger.model.ts'], 'owner_type: {');
-    return json([...owners].sort()) === json(['agency', 'agent', 'platform', 'platform_ai', 'vendor'])
+    return json([...owners].sort()) === json(['agency', 'agent', 'platform', 'platform_ai', 'referral_partner', 'vendor'])
         && PLATFORM_OWNER_TYPES.every((type) => owners.includes(type));
 });
 

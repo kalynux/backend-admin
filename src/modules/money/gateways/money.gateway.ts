@@ -667,7 +667,7 @@ export async function settleDeliveryFeeRefund(
 // Refund debt write-off (REFUND-FLOW-PLAN § 6.4, C-6)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type ClawbackOwnerType = 'vendor' | 'agency' | 'agent';
+export type ClawbackOwnerType = 'vendor' | 'agency' | 'agent' | 'referral_partner';
 
 /**
  * jovi-mall's write-off answer — typed loosely ON PURPOSE: the contract (§ 11.3) fixes the route
@@ -684,6 +684,7 @@ const WRITE_OFF_ACTIONS: Readonly<Record<ClawbackOwnerType, AuditAction>> = {
     vendor: 'money.earnings.clawback.write_off_vendor',
     agency: 'money.earnings.clawback.write_off_agency',
     agent: 'money.earnings.clawback.write_off_agent',
+    referral_partner: 'money.earnings.clawback.write_off_referral_partner',
 };
 
 /**

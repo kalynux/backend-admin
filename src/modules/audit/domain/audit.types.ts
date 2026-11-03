@@ -74,6 +74,10 @@ export const AUDIT_TARGET_TYPES = [
     // request may be about an order, a booking or a billing purchase, and the queue's actions
     // (approve, reject, settle) are about the request. The source rides as `related_target_*`.
     'refund',
+    // A referral partner, and the program's one settings document. Their own types: a partner is
+    // no existing role, and a rate change is the row to find when a reward looks wrong.
+    'referral_partner',
+    'referral_settings',
     // This service's own records
     'administrator', 'admin_session', 'approval_request', 'audit_export',
     // Phase 12 operational targets. Both classify as `internal`: a flag flip and a worker

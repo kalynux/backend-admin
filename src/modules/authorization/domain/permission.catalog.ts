@@ -1374,6 +1374,39 @@ export const PERMISSION_CATALOG = Object.freeze({
         summary: 'Cancel a booking (the customer is refunded), complete it (the vendor is paid), or record a cash payment',
     },
 
+    // ═══ REFERRALS ═══ the referral program (REFERRAL-PROGRAM-PLAN, 2026-11-02) ═══
+    'referrals.read': {
+        family: 'referrals', action: 'read', phase: 6,
+        summary: 'View the referral settings, partners, the accounts they referred and their rewards',
+    },
+    /**
+     * Approve, reject, suspend, reinstate, terminate, and allow a new application. Tiers 1, 2 and
+     * 3 by the owner's decision (R-10). Unflagged, so tier 2 receives it through the family and
+     * Support names it. A rejection or termination writes no money: earned rewards stay recorded.
+     */
+    'referrals.partners.decide': {
+        family: 'referrals', action: 'write', phase: 6,
+        summary: 'Approve, reject, suspend, reinstate or terminate a referral partner',
+    },
+    /**
+     * Let a suspended or terminated partner withdraw what they earned. `financial`, so no family
+     * sweep hands it out and the boot check refuses it to Support. Tiers 1 + 2: the owner's R-10
+     * names the four lifecycle verbs and not this one, which decides about money (plan Q-1).
+     */
+    'referrals.partners.balance': {
+        family: 'referrals', action: 'write', phase: 6, financial: true,
+        summary: 'Release a suspended or terminated referral partner\'s frozen balance for withdrawal',
+    },
+    /**
+     * Global and per-partner rates and durations, and switching the program on or off. Tier 1 only
+     * by the owner's decision (R-10): the flag keeps it out of `allInFamily('referrals')`, it is in
+     * no tier's hand-written list, and only tier 1, derived from the whole catalog, holds it.
+     */
+    'referrals.settings.write': {
+        family: 'referrals', action: 'write', phase: 6, financial: true,
+        summary: 'Change referral rates and durations, globally or for one partner, and switch the program on or off',
+    },
+
     // ═══ ADMINISTRATORS ═══ built in THIS phase ═══════════════════════════════
     // Holding any of these is necessary, never sufficient: escalation.rules.ts refuses
     // self-action and refuses any action on an administrator at or above the caller's own

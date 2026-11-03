@@ -571,6 +571,7 @@ defineRoute(router, {
         'money.earnings.clawback.write_off_vendor',
         'money.earnings.clawback.write_off_agency',
         'money.earnings.clawback.write_off_agent',
+        'money.earnings.clawback.write_off_referral_partner',
     ),
     handler: writeOffClawback,
 });

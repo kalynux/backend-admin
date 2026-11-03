@@ -1966,7 +1966,7 @@ t.section('15. Refund debt: the clawback list, the write-off, and COD/external r
         && writeOff.access.permissions.join() === 'money.earnings.clawback.write_off'
         && writeOff.audit?.kind === 'records'
         && [...writeOff.audit.actions].sort().join()
-            === 'money.earnings.clawback.write_off_agency,money.earnings.clawback.write_off_agent,money.earnings.clawback.write_off_vendor');
+            === 'money.earnings.clawback.write_off_agency,money.earnings.clawback.write_off_agent,money.earnings.clawback.write_off_referral_partner,money.earnings.clawback.write_off_vendor');
     t.assert('write-off: financial, tiers 1 + 2, never Support', () =>
         permissionSpec('money.earnings.clawback.write_off').financial === true
         && TIER_GRANTS[2].includes('money.earnings.clawback.write_off' as never)
@@ -1981,7 +1981,7 @@ t.section('15. Refund debt: the clawback list, the write-off, and COD/external r
     t.assert('write-off: importing the routes registers its dual-control handler', () =>
         dualControlHandlerFor('money.earnings.clawback.write_off') !== undefined);
     t.assert('write-off: the audit actions are delegated and filed against the OWNER', () =>
-        (['vendor', 'agency', 'agent'] as const).every((type) => {
+        (['vendor', 'agency', 'agent', 'referral_partner'] as const).every((type) => {
             const spec = auditSpec(`money.earnings.clawback.write_off_${type}`);
             return spec.transport === 'delegated' && spec.target === type
                 && spec.permission === 'money.earnings.clawback.write_off';

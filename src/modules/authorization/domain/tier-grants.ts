@@ -149,6 +149,10 @@ const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
      */
     'bookings.read',
     'bookings.remind',
+    // The referral program (owner R-10): Support reads it and decides on partners. Rates, durations
+    // and a frozen balance are above it.
+    'referrals.read',
+    'referrals.partners.decide',
     /**
      * Push a stuck delivery to an agent or an agency — including `force: true`, which skips
      * every eligibility check but an active agent contract (owner decision 2026-10-02:
@@ -345,6 +349,8 @@ const ADMIN: readonly PermissionName[] = union(
     allInFamily('shipments'),
     // read, access.read, remind, intervene. `bookings.settle` is financial — named below.
     allInFamily('bookings'),
+    // read and decide. `referrals.settings.write` is tier 1 only; the balance is named below.
+    allInFamily('referrals'),
     allInFamily('notifications'),
     allInFamily('system'),
     allInFamily('audit'),
@@ -411,6 +417,8 @@ const ADMIN: readonly PermissionName[] = union(
         // A booking's money: cancel (refund), complete (vendor paid), record cash (2026-10-27).
         // `financial`, so the family sweep above leaves it out and Support is refused it at boot.
         'bookings.settle',
+        // Unfreezing a suspended or terminated partner's balance (plan Q-1).
+        'referrals.partners.balance',
         'content.articles.delete',
         'content.authors.delete',
         'shipments.cancel',

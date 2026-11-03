@@ -266,6 +266,22 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'Append-only refund clawbacks, debt recoveries and write-offs, each written inside the transaction that moved the balance; unique per (refund, allocation, kind)',
     },
+    [COLLECTIONS.REFERRAL_SETTINGS]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'The referral program\'s global rates and durations; one document',
+    },
+    [COLLECTIONS.REFERRAL_PARTNER]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'Referral partners. Its status history decides whether a commission earned on a given day pays them',
+    },
+    [COLLECTIONS.REFERRAL_RELATIONSHIP]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'Who referred whom; written once at registration, unique per referred user',
+    },
+    [COLLECTIONS.REFERRAL_REWARD]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'One reward per referred account per commission, written with its wallet movement in one transaction',
+    },
     [COLLECTIONS.EARNINGS_RESERVE_HOLD]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'Agency COD rolling reserve, matured on a schedule this service does not run',

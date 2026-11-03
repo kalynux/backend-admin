@@ -1251,6 +1251,44 @@ export const AUDIT_CATALOG = Object.freeze({
         summary: 'Sent the customer their appointment reminder again',
     },
 
+    // ═══ REFERRALS — the referral program, delegated to jovi-mall (2026-11-02) ═══
+    'referrals.settings.update': {
+        permission: 'referrals.settings.write', target: 'referral_settings', transport: 'delegated',
+        summary: 'Changed the referral program’s global settings',
+    },
+    'referrals.partner.approve': {
+        permission: 'referrals.partners.decide', target: 'referral_partner', transport: 'delegated',
+        summary: 'Approved a referral partner — their code became active',
+    },
+    'referrals.partner.reject': {
+        permission: 'referrals.partners.decide', target: 'referral_partner', transport: 'delegated',
+        summary: 'Rejected an application to the referral program',
+    },
+    'referrals.partner.suspend': {
+        permission: 'referrals.partners.decide', target: 'referral_partner', transport: 'delegated',
+        summary: 'Suspended a referral partner — no new rewards, and their balance is frozen',
+    },
+    'referrals.partner.reinstate': {
+        permission: 'referrals.partners.decide', target: 'referral_partner', transport: 'delegated',
+        summary: 'Reinstated a suspended referral partner — the suspended period is not paid',
+    },
+    'referrals.partner.terminate': {
+        permission: 'referrals.partners.decide', target: 'referral_partner', transport: 'delegated',
+        summary: 'Ended a referral partnership — earned rewards stay recorded, the balance is frozen',
+    },
+    'referrals.partner.allow_reapply': {
+        permission: 'referrals.partners.decide', target: 'referral_partner', transport: 'delegated',
+        summary: 'Allowed a rejected or terminated person to apply to the referral program again',
+    },
+    'referrals.partner.release_balance': {
+        permission: 'referrals.partners.balance', target: 'referral_partner', transport: 'delegated',
+        summary: 'Released a suspended or terminated referral partner’s frozen balance for withdrawal',
+    },
+    'referrals.partner.terms_update': {
+        permission: 'referrals.settings.write', target: 'referral_partner', transport: 'delegated',
+        summary: 'Changed one referral partner’s own rates or durations',
+    },
+
     // ═══ CATALOG — the shared category list, delegated to jovi-mall ═══════════
     'catalog.categories.rename': {
         permission: 'catalog.categories.manage',
@@ -1631,6 +1669,10 @@ export const AUDIT_CATALOG = Object.freeze({
     'money.earnings.clawback.write_off_agent': {
         permission: 'money.earnings.clawback.write_off', target: 'agent', transport: 'delegated',
         summary: 'Wrote off refund debt a delivery agent owed the platform — the platform absorbs the loss',
+    },
+    'money.earnings.clawback.write_off_referral_partner': {
+        permission: 'money.earnings.clawback.write_off', target: 'referral_partner', transport: 'delegated',
+        summary: 'Wrote off refund debt a referral partner owed the platform — the platform absorbs the loss',
     },
 
     'money.statements.send_vendor': {
