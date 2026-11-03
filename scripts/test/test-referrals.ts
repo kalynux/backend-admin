@@ -147,7 +147,26 @@ console.log('\n5. Wiring');
 
     const gateway = read('modules/referrals/gateways/referral.gateway.ts');
     assert('writes go through the audited attempt', gateway.includes('auditedAttempt('));
-    assert('and only to jovi-mall', gateway.includes('/api/internal/admin/referrals') && gateway.includes('platformRequest'));
+    assert('and only to jovi-mall', gateway.includes('platformRequest'));
+
+    // ⚠ `platformRequest` adds `/api/internal/admin` itself. This suite once asserted the gateway
+    // CONTAINED that prefix, the doubled path went out, and every write answered 404 in production
+    // on the first attempt (2026-11-03). So the paths are compared with jovi-mall's real routes.
+    const client = read('infra/platform/platform.client.ts');
+    const joviRoutes = readFileSync(join(ROOT, '..', 'jovi-mall', 'src', 'modules', 'referrals', 'routes', 'admin-referral.routes.ts'), 'utf8');
+    const joviMount = readFileSync(join(ROOT, '..', 'jovi-mall', 'src', 'api', 'routes', 'internal-admin.routes.ts'), 'utf8');
+    const served = new Set([...joviRoutes.matchAll(/router\.(patch|post)\('([^']+)'/g)].map((m) => `${m[1].toUpperCase()} ${m[2]}`));
+    const verbs = [...gateway.matchAll(/partnerWrite\('[^']+', '([^']+)'/g)].map((m) => m[1]);
+    assert('the client adds the internal prefix', client.includes("INTERNAL_ADMIN_PREFIX = '/api/internal/admin'"));
+    assert('so no gateway call repeats it', !/'(POST|PATCH)',\s*['`]\/api\//.test(gateway));
+    assert('jovi-mall mounts the surface at /referrals', joviMount.includes("router.use('/referrals', buildAdminReferralRouter("));
+    assert('the settings write is a route jovi-mall serves',
+        gateway.includes("'PATCH', '/referrals/settings'") && served.has('PATCH /settings'));
+    assert('the partner terms write is a route jovi-mall serves',
+        gateway.includes("'PATCH', `/referrals/partners/${id}/terms`") && served.has('PATCH /partners/:partnerId/terms'));
+    assert('every partner verb is a route jovi-mall serves',
+        gateway.includes("'POST', `/referrals/partners/${partnerId}/${verb}`")
+        && verbs.length === 7 && verbs.every((verb) => served.has(`POST /partners/:partnerId/${verb}`)));
 
     const repository = read('modules/referrals/repositories/referral.read.repository.ts');
     assert('payout_details is never projected', !/^\s+payout_details: 1/m.test(repository));

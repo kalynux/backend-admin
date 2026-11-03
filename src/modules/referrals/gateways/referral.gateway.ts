@@ -81,7 +81,7 @@ function partnerWrite(
 ): Promise<PlatformPartnerAck> {
     const label = typeof before?.code === 'string' ? before.code : null;
     return audited(action, { type: 'referral_partner', id: partnerId, label }, context, body, before, () =>
-        send<PlatformPartnerAck>('POST', `/api/internal/admin/referrals/partners/${partnerId}/${verb}`, body, context),
+        send<PlatformPartnerAck>('POST', `/referrals/partners/${partnerId}/${verb}`, body, context),
     );
 }
 
@@ -109,12 +109,12 @@ export const releaseBalance = (id: string, body: RequiredReasonBody, before: Ref
 export function updateTerms(id: string, body: UpdatePartnerTermsBody, before: ReferralSnapshot, context: ActorContext): Promise<PlatformPartnerAck> {
     const label = typeof before?.code === 'string' ? before.code : null;
     return audited('referrals.partner.terms_update', { type: 'referral_partner', id, label }, context, body, before, () =>
-        send<PlatformPartnerAck>('PATCH', `/api/internal/admin/referrals/partners/${id}/terms`, body, context),
+        send<PlatformPartnerAck>('PATCH', `/referrals/partners/${id}/terms`, body, context),
     );
 }
 
 export function updateSettings(body: UpdateSettingsBody, before: ReferralSnapshot, context: ActorContext): Promise<{ enabled: boolean }> {
     return audited('referrals.settings.update', { type: 'referral_settings', id: null, label: 'Referral settings' }, context, body, before, () =>
-        send<{ enabled: boolean }>('PATCH', '/api/internal/admin/referrals/settings', body, context),
+        send<{ enabled: boolean }>('PATCH', '/referrals/settings', body, context),
     );
 }
