@@ -95,8 +95,32 @@ export interface BookingReadModel extends Document {
         proposedAt: Date;
         expiresAt: Date;
         answeredAt?: Date | null;
+        price?: number | null;
+        previousPrice?: number | null;
     } | null;
     statusHistory?: BookingStatusChangeReadModel[];
+    /** The one-time reminders the two sides sent each other, keyed by who RECEIVED them. */
+    partyReminders?: { toCustomerAt?: Date | null; toVendorAt?: Date | null } | null;
+    /** The floor: what the customer booked at. Absent when the price never moved. `priceSnapshot` is the agreed price. */
+    originalPrice?: number | null;
+    /** The vendor's latest proposal of a price (BOOKING-PRICE-PROPOSAL-PLAN). */
+    priceProposal?: {
+        status: string;
+        amount: number;
+        previousAmount: number;
+        proposedAt: Date;
+        expiresAt: Date;
+        answeredAt?: Date | null;
+    } | null;
+    /** What a paid booking still owes after its agreed price went up. */
+    priceTopup?: {
+        status: string;
+        amount: number;
+        dueAt: Date;
+        paidAt?: Date | null;
+        method?: string | null;
+    } | null;
+    priceHistory?: Array<{ from: number; to: number; at: Date; kind: string }>;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -153,6 +177,11 @@ export const BOOKING_DETAIL_PROJECTION = {
     'location.formattedAddress': 1,
     access: 1,
     statusHistory: 1,
+    partyReminders: 1,
+    originalPrice: 1,
+    priceProposal: 1,
+    priceTopup: 1,
+    priceHistory: 1,
 } as const;
 
 /** How long a payment may sit at `pending` before the `payment_stuck` list shows it. */

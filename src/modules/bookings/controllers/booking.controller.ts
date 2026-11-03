@@ -327,4 +327,12 @@ export class BookingController {
             result.sent ? 'Reminder sent to the customer' : 'Nothing sent — this booking has no customer profile to notify',
         );
     });
+
+    /** POST /api/v1/bookings/:bookingId/reminder/vendor */
+    static remindVendor = asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as OptionalNoteBody;
+        const booking = await loadOr404(req.params.bookingId);
+        const result = await gateway.remindVendor(req.params.bookingId, body.reason, toAuditState(booking), actorContextOf(req));
+        await respondAfterWrite(req, res, req.params.bookingId, result, 'Reminder sent to the vendor');
+    });
 }

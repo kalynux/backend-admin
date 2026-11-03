@@ -254,6 +254,19 @@ export interface BookingDetailDto extends BookingListItemDto {
     proposal: (NonNullable<BookingReadModel['rescheduleProposal']> & { live: boolean }) | null;
     /** Oldest first. An empty list means "not recorded" (bookings from before 2026-10-27), not "nothing happened". */
     statusHistory: BookingStatusChangeDto[];
+    /** When each side was sent the other's one-time reminder. Null when it has not been. */
+    partyReminders: { toCustomerAt: Date | null; toVendorAt: Date | null };
+    /**
+     * The agreed price (`price`, above) against what the customer booked at, the vendor's latest
+     * proposal, anything still owed for it, and each agreed change, oldest first. Amounts are on the
+     * list already, so this shows Support nothing new about money.
+     */
+    pricing: {
+        originalPrice: number;
+        proposal: NonNullable<BookingReadModel['priceProposal']> | null;
+        topup: NonNullable<BookingReadModel['priceTopup']> | null;
+        history: NonNullable<BookingReadModel['priceHistory']>;
+    };
     earnings: BookingEarningsDto;
     payments: BookingPaymentDto[];
     refunds: BookingRefundDto[];
@@ -319,6 +332,17 @@ export function toBookingDetailDto(
             : null,
         proposal,
         statusHistory: (booking.statusHistory ?? []).map((row) => toStatusChangeDto(row, ctx.actorNames)),
+        partyReminders: {
+            toCustomerAt: booking.partyReminders?.toCustomerAt ?? null,
+            toVendorAt: booking.partyReminders?.toVendorAt ?? null,
+        },
+        pricing: {
+            // Absent means the price never moved, so the agreed price is the floor.
+            originalPrice: booking.originalPrice ?? booking.priceSnapshot,
+            proposal: booking.priceProposal ?? null,
+            topup: booking.priceTopup ?? null,
+            history: booking.priceHistory ?? [],
+        },
         earnings: deriveEarnings(booking, ctx.allocations),
         payments: ctx.payments.map(toBookingPaymentDto),
         refunds: ctx.refunds.map(toBookingRefundDto),

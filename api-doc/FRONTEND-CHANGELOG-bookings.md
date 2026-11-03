@@ -5,6 +5,12 @@
 
 No other dashboard changes. Customer, vendor, agency and agent responses are byte-identical.
 
+**Added 2026-11-03:** the detail carries `partyReminders: { toCustomerAt, toVendorAt }`, the one-time reminders the vendor and the customer can send each other. Each is `null` until sent. Worth showing, since "I did remind them" is a real ticket. The administrator's own reminder buttons are neither limited by these nor recorded in them.
+
+**Added 2026-11-03:** `POST /bookings/:id/reminder/vendor` reminds the **vendor**, beside the existing reminder to the customer. Same permission (`bookings.remind`, all three tiers), same `{ reason? }` body, same `{ booking, result }` answer. Draw two buttons and name who each one reaches.
+
+**Added 2026-11-03:** the detail carries `pricing: { originalPrice, proposal, topup, history }`. On a `manual` service the vendor can now propose a higher price than the customer booked at, so `price` is the **agreed** price and may differ from `originalPrice`. Show both when they differ, any open proposal, and any difference still owed. It is read-only: administrators do not set prices. A `refund` with `reasonKind: "goodwill"` and a small amount can now come from a rescheduled price going down, on a booking that stays `paid`.
+
 ## What is new
 
 1. **A Bookings section** on `/api/v1/bookings`. It has a list with search and filters, seven

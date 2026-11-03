@@ -76,6 +76,17 @@ t.assert('the detail still carries the whole proposal and the list only its two 
     && 'rescheduleProposal.status' in BOOKING_LIST_PROJECTION
     && 'rescheduleProposal.expiresAt' in BOOKING_LIST_PROJECTION
     && !('rescheduleProposal' in BOOKING_LIST_PROJECTION));
+t.assert('the detail reads the one-time reminders, under the names jovi-mall writes (no shared package)', () => {
+    const model = code(JOVI, 'modules/booking/models/booking.model.ts');
+    return 'partyReminders' in BOOKING_DETAIL_PROJECTION
+        && !('partyReminders' in BOOKING_LIST_PROJECTION)
+        && model.includes('partyReminders: {') && model.includes('toCustomerAt:') && model.includes('toVendorAt:');
+});
+t.assert('the detail reads the price fields, under the names jovi-mall writes (no shared package)', () => {
+    const model = code(JOVI, 'modules/booking/models/booking.model.ts');
+    return ['originalPrice', 'priceProposal', 'priceTopup', 'priceHistory'].every((field) =>
+        field in BOOKING_DETAIL_PROJECTION && !(field in BOOKING_LIST_PROJECTION) && model.includes(`${field}:`));
+});
 t.assert('the filter pins deletedAt: null with nothing else asked', () =>
     json(buildBookingFilter({}, undefined, NOW)) === json({ $and: [{ deletedAt: null }] }));
 t.assert('…and still pins it first alongside every other filter', () => {
@@ -173,6 +184,7 @@ const ACTIONS: Array<[string, string]> = [
     ['bookings.payment.recheck', 'bookings.intervene'],
     ['bookings.proposal.withdraw', 'bookings.intervene'],
     ['bookings.reminder.resend', 'bookings.remind'],
+    ['bookings.reminder.vendor', 'bookings.remind'],
 ];
 for (const [action, permission] of ACTIONS) {
     t.assert(`${action}: delegated, target booking, under ${permission}`, () => {
@@ -276,6 +288,7 @@ const PAIRS: Array<[RegExp, string]> = [
     [/post<PlatformPaymentRecheck>\(`\/bookings\/\$\{bookingId\}\/payment\/recheck`/, "router.post('/:bookingId/payment/recheck'"],
     [/post<PlatformBookingAck>\(`\/bookings\/\$\{bookingId\}\/proposal\/withdraw`/, "router.post('/:bookingId/proposal/withdraw'"],
     [/`\/bookings\/\$\{bookingId\}\/reminder`/, "router.post('/:bookingId/reminder'"],
+    [/`\/bookings\/\$\{bookingId\}\/reminder\/vendor`/, "router.post('/:bookingId/reminder/vendor'"],
     [/path: `\/bookings\/\$\{bookingId\}\/access-state`/, "router.get('/:bookingId/access-state'"],
     [/path: `\/bookings\/services\/\$\{productId\}\/availability`/, "router.get('/services/:productId/availability'"],
 ];
@@ -288,7 +301,7 @@ t.assert('the fault vocabulary is the same on both sides', () =>
     && code(JOVI, 'modules/booking/controllers/admin-booking.controller.ts').includes("z.enum(['vendor', 'customer'])"));
 t.assert('every write answers through the projected detail, never jovi-mall\'s echo', () => {
     const controller = code(SRC, 'modules/bookings/controllers/booking.controller.ts');
-    return (controller.match(/await respondAfterWrite\(/g) ?? []).length === 7;
+    return (controller.match(/await respondAfterWrite\(/g) ?? []).length === 8;
 });
 
 /**

@@ -1250,6 +1250,10 @@ export const AUDIT_CATALOG = Object.freeze({
         permission: 'bookings.remind', target: 'booking', transport: 'delegated',
         summary: 'Sent the customer their appointment reminder again',
     },
+    'bookings.reminder.vendor': {
+        permission: 'bookings.remind', target: 'booking', transport: 'delegated',
+        summary: 'Reminded the vendor of an appointment',
+    },
 
     // ═══ REFERRALS — the referral program, delegated to jovi-mall (2026-11-02) ═══
     'referrals.settings.update': {

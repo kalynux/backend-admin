@@ -232,6 +232,17 @@ export function resendReminder(
         post<{ sent: boolean; reason: string | null }>(`/bookings/${bookingId}/reminder`, reason ? { reason } : {}, context));
 }
 
+/** Remind the vendor of the appointment. */
+export function remindVendor(
+    bookingId: string,
+    reason: string | undefined,
+    before: BookingSnapshot,
+    context: ActorContext,
+): Promise<{ sent: boolean; reason: string | null }> {
+    return auditedDelegation('bookings.reminder.vendor', context, bookingId, reason ? { reason } : null, before, () =>
+        post<{ sent: boolean; reason: string | null }>(`/bookings/${bookingId}/reminder/vendor`, reason ? { reason } : {}, context));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // The two VERDICT reads — not audited, not wrapped (ADR-008 D-1)
 // ─────────────────────────────────────────────────────────────────────────────

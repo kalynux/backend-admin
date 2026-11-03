@@ -1343,10 +1343,10 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'bookings', action: 'read', phase: 6,
         summary: 'See a booking’s meeting link and the vendor’s instructions',
     },
-    /** Resend the appointment reminder. Support holds it by name: it changes nothing but an inbox. */
+    /** Remind either side of the appointment. Support holds it by name: it changes nothing but an inbox. */
     'bookings.remind': {
         family: 'bookings', action: 'write', phase: 6,
-        summary: 'Send the customer their appointment reminder again',
+        summary: 'Remind the customer or the vendor of an appointment',
     },
     /**
      * Re-check a payment stuck at `pending` with the provider, and withdraw a stale proposal of a

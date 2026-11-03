@@ -17,7 +17,7 @@ and which times can be booked.
 | Permission | 1 | 2 | 3 | Guards |
 |---|:-:|:-:|:-:|---|
 | `bookings.read` | ● | ● | ● | the list, the queues, the detail, `/access`, `/services/:id/availability`, `/activity` (with `audit.read`) |
-| `bookings.remind` | ● | ● | ● | `POST /:id/reminder` |
+| `bookings.remind` | ● | ● | ● | `POST /:id/reminder` · `POST /:id/reminder/vendor` |
 | `bookings.access.read` | ● | ● | · | the meeting link and instructions **on the detail** — no route of its own |
 | `bookings.intervene` | ● | ● | · | `POST /:id/payment/recheck`, `POST /:id/proposal/withdraw` |
 | `bookings.settle` | ● | ● | · | `POST /:id/cancel`, `/:id/session/cancel`, `/:id/complete`, `/:id/payment/cash` — **financial** |
@@ -126,6 +126,9 @@ The list item, plus:
   then `visible` is `false`. Whether the **customer** can see them yet is `GET /:id/access`.
 - **`location`** never carries coordinates. On a `customer_address` service it is the customer's
   own address.
+- **`pricing`**: `{ originalPrice, proposal, topup, history }`. `price` above is the **agreed** price, and `originalPrice` is what the customer booked at. On a `manual` service the vendor can propose a higher one before approving, and propose again with a new time, never below `originalPrice`. `proposal` is the latest (`status`: `open` · `accepted` · `declined` · `withdrawn` · `lapsed`; a stored `open` past `expiresAt` has lapsed). `topup` is what a paid booking owes after the price went up (`status`: `due` · `paid` · `superseded`). `history` is every agreed change, oldest first. **Read-only: administrators do not set prices.**
+- **`partyReminders`**: `{ toCustomerAt, toVendorAt }`, when each side was sent the other's one-time
+  reminder, `null` until then. `POST /:id/reminder` below neither sets nor is limited by these.
 - **`statusHistory`**: oldest first. `actorRole` is `customer` · `vendor` · `admin` · `system`.
   `actorName` is the customer's name, the shop's name or the administrator's display name.
   ⚠ An **empty list means "not recorded"**: bookings created before 2026-10-27 have no history.
@@ -273,7 +276,8 @@ code, not the status. The status of each code is in the table (from jovi-mall's
 | `POST /:id/payment/cash` | `bookings.settle` | `{ reason }` (how it was confirmed) | Records that the customer paid the vendor in cash. The vendor's own rules apply | **409** `BOOKING_ALREADY_PAID`, **400** `BOOKING_PAYMENT_NOT_REQUIRED`, **400** `BOOKING_INVALID_PAYMENT_METHOD` |
 | `POST /:id/payment/recheck` | `bookings.intervene` | `{ reason? }` | For `paymentStatus: "pending"`. `result.outcome`: `settled` (now `paid` or `failed`) · `still_pending` · `released` (the last attempt had failed; the customer can pay again) | **409** `BOOKING_PAYMENT_NOT_PENDING`, **409** `BOOKING_PAYMENT_STATE_MISMATCH` (escalate to an engineer) |
 | `POST /:id/proposal/withdraw` | `bookings.intervene` | `{ reason? }` | Withdraws the open proposal of a new time, either side's. The original time stands; nobody is notified | **404** `BOOKING_PROPOSAL_NOT_FOUND` (none open, it expired, or the booking is no longer `pending`/`confirmed`) |
-| `POST /:id/reminder` | `bookings.remind` | `{ reason? }` | Sends the appointment reminder again. `result.sent: false` when the account has no customer profile | **409** `BOOKING_REMINDER_NOT_APPLICABLE` (not confirmed, or already started) |
+| `POST /:id/reminder` | `bookings.remind` | `{ reason? }` | Sends the customer the appointment reminder again. `result.sent: false` when the account has no customer profile | **409** `BOOKING_REMINDER_NOT_APPLICABLE` (not confirmed, or already started) |
+| `POST /:id/reminder/vendor` | `bookings.remind` | `{ reason? }` | Reminds the vendor of the appointment. Audited as `bookings.reminder.vendor` | **409** `BOOKING_REMINDER_NOT_APPLICABLE` (not confirmed, or already started) |
 
 Any of them can also answer **404** `BOOKING_NOT_FOUND` if the booking is deleted between this
 service's read and jovi-mall's.

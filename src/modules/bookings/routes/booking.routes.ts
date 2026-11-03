@@ -26,7 +26,7 @@ import {
  * | Permission | Tiers | What |
  * |---|---|---|
  * | `bookings.read`        | 1 2 3 | the directory, the detail, the verdict reads |
- * | `bookings.remind`      | 1 2 3 | resend the appointment reminder |
+ * | `bookings.remind`      | 1 2 3 | remind the customer or the vendor of the appointment |
  * | `bookings.access.read` | 1 2   | the meeting link and instructions themselves (on the detail) |
  * | `bookings.intervene`   | 1 2   | re-check a stuck payment, withdraw a stale proposal |
  * | `bookings.settle`      | 1 2   | cancel (refund), complete (vendor paid), record cash — `financial` |
@@ -165,6 +165,16 @@ defineRoute(router, {
     validate: { params: BookingIdParamSchema, body: OptionalNoteSchema },
     audit: records('bookings.reminder.resend'),
     handler: BookingController.resendReminder,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/:bookingId/reminder/vendor',
+    access: permission('bookings.remind'),
+    validate: { params: BookingIdParamSchema, body: OptionalNoteSchema },
+    audit: records('bookings.reminder.vendor'),
+    handler: BookingController.remindVendor,
 });
 
 export const bookingRoutes = router;
