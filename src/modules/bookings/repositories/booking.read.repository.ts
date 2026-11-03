@@ -101,8 +101,8 @@ export interface BookingReadModel extends Document {
     updatedAt: Date;
 }
 
-/** The list: who, what, when, and the two statuses — nothing that needs a detail screen. */
-const BOOKING_LIST_PROJECTION = {
+/** What the list and the detail both carry. */
+const BOOKING_COMMON_PROJECTION = {
     _id: 1,
     bookingNumber: 1,
     productId: 1,
@@ -116,15 +116,24 @@ const BOOKING_LIST_PROJECTION = {
     priceSnapshot: 1,
     currency: 1,
     requiresPayment: 1,
-    'rescheduleProposal.status': 1,
-    'rescheduleProposal.expiresAt': 1,
     'location.kind': 1,
     createdAt: 1,
     updatedAt: 1,
 } as const;
 
-const BOOKING_DETAIL_PROJECTION = {
-    ...BOOKING_LIST_PROJECTION,
+/** The list: who, what, when, and the two statuses — nothing that needs a detail screen. */
+export const BOOKING_LIST_PROJECTION = {
+    ...BOOKING_COMMON_PROJECTION,
+    'rescheduleProposal.status': 1,
+    'rescheduleProposal.expiresAt': 1,
+} as const;
+
+/**
+ * ⚠ Built on the common fields, NOT the list: the list's `rescheduleProposal.status` beside this
+ * `rescheduleProposal` is a path collision, and Mongo refuses the whole query (error 31250).
+ */
+export const BOOKING_DETAIL_PROJECTION = {
+    ...BOOKING_COMMON_PROJECTION,
     paymentTransactionId: 1,
     paidAt: 1,
     cancelledAt: 1,

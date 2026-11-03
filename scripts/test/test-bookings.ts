@@ -30,6 +30,8 @@ import { readFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { ObjectId } from 'mongodb';
 import {
+    BOOKING_DETAIL_PROJECTION,
+    BOOKING_LIST_PROJECTION,
     buildBookingFilter,
     bookingQueueClause,
     BookingReadModel,
@@ -64,6 +66,16 @@ const json = (v: unknown) => JSON.stringify(v);
 // ─── §1 ──────────────────────────────────────────────────────────────────────
 t.section('§1 the read');
 
+t.assert('⛔ neither projection names a field beside its own sub-path — Mongo refuses the whole query (31250)', () =>
+    [BOOKING_LIST_PROJECTION, BOOKING_DETAIL_PROJECTION].every((projection) => {
+        const paths = Object.keys(projection);
+        return !paths.some((path) => paths.some((other) => other.startsWith(`${path}.`)));
+    }));
+t.assert('the detail still carries the whole proposal and the list only its two fields', () =>
+    'rescheduleProposal' in BOOKING_DETAIL_PROJECTION
+    && 'rescheduleProposal.status' in BOOKING_LIST_PROJECTION
+    && 'rescheduleProposal.expiresAt' in BOOKING_LIST_PROJECTION
+    && !('rescheduleProposal' in BOOKING_LIST_PROJECTION));
 t.assert('the filter pins deletedAt: null with nothing else asked', () =>
     json(buildBookingFilter({}, undefined, NOW)) === json({ $and: [{ deletedAt: null }] }));
 t.assert('…and still pins it first alongside every other filter', () => {
