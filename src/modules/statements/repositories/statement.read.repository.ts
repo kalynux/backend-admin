@@ -717,6 +717,8 @@ export interface BookingRow extends Document {
     priceSnapshot?: number;
     currency?: string;
     createdAt?: Date;
+    settlement?: { balanceTransactionId?: ObjectId | null } | null;
+    topupTransactionIds?: ObjectId[];
 }
 
 export class StatementBookingRepository extends PlatformReadRepository<BookingRow> {
@@ -724,11 +726,25 @@ export class StatementBookingRepository extends PlatformReadRepository<BookingRo
         super(COLLECTIONS.BOOKING, {
             _id: 1, bookingNumber: 1, userId: 1, startAt: 1, status: 1, paymentStatus: 1,
             paymentMethod: 1, paidAt: 1, priceSnapshot: 1, currency: 1, createdAt: 1,
+            'settlement.balanceTransactionId': 1, topupTransactionIds: 1,
         });
     }
 
-    byIds(ids: ObjectId[]): Promise<BookingRow[]> {
+    /**
+     * The bookings behind a vendor's booking earnings. ⚠ A row's source is not always the booking's
+     * own id: a later payment on a booking (a balance, a price difference) is split under that
+     * PAYMENT's id, so looking up by `_id` alone left those rows naming no booking at all.
+     */
+    forEarningSources(ids: ObjectId[], vendorId: string): Promise<BookingRow[]> {
         if (ids.length === 0) return Promise.resolve([]);
-        return this.findBy({ _id: { $in: uniq(ids) } } as Filter<BookingRow>);
+        const sources = uniq(ids);
+        return this.findBy({
+            vendorId: new ObjectId(vendorId),
+            $or: [
+                { _id: { $in: sources } },
+                { 'settlement.balanceTransactionId': { $in: sources } },
+                { topupTransactionIds: { $in: sources } },
+            ],
+        } as Filter<BookingRow>);
     }
 }

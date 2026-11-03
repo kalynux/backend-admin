@@ -408,6 +408,16 @@ async function main(): Promise<number> {
     t.assert('xlsx: an empty section says so', () =>
         wb.getWorksheet('Orders')?.getRow(5).getCell(1).value === 'No entries in this period.');
 
+    t.assert('a later payment on a booking still names its booking: a balance or a price difference is split under the id of the PAYMENT', () => {
+        const repository = read('repositories/statement.read.repository.ts');
+        const statement = read('domain/vendor-statement.ts');
+        return repository.includes("{ 'settlement.balanceTransactionId': { $in: sources } }")
+            && repository.includes('{ topupTransactionIds: { $in: sources } }')
+            && repository.includes('vendorId: new ObjectId(vendorId)')
+            && statement.includes('bookings.forEarningSources(bookingIncome.map((a) => a.source_id), vendorId)')
+            && statement.includes('(b.topupTransactionIds ?? []).map((id) => [idOf(id), b] as const)');
+    });
+
     const pdf = await renderPdf(doc);
     t.assert('pdf: renders a PDF', () => pdf.subarray(0, 5).toString() === '%PDF-' && pdf.length > 1_000);
 
