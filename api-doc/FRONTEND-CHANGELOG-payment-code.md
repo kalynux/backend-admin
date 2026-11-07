@@ -1,3 +1,5 @@
+> ⚠ **AMENDED 2026-11-04 after a live test with real money.** Orange through NovaSend takes no payment code: `flow` is `PUSH`, and no `codeUssd` or `orangeCodeUssd` is sent any more. Limits are **301–500,000 FCFA**. The confirmation warning below should now read: *Customers will be asked to confirm a request from Moon SARL; Orange Money customers must dial #150*50# to see it. Payments above {limits.max} FCFA will be refused while NovaSend is active.* Everything else on this page stands.
+
 # Admin dashboard — NovaSend, the Orange "code first" flow, and amount limits
 
 > **Date:** 2026-10-05 · **Status:** ✅ built in jovi-mall; **no wi-admin code changed** (the

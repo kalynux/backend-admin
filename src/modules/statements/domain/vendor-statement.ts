@@ -139,7 +139,7 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
         collections.forOrders(orderIds),
         payments.forOrders(orderIds),
         timeline.forOrders(orderIds),
-        bookings.byIds(bookingIncome.map((a) => a.source_id)),
+        bookings.forEarningSources(bookingIncome.map((a) => a.source_id), vendorId),
     ]);
     const [customerRows, confirmedRemittances, names] = await Promise.all([
         customers.byIds(orderRows.map((o) => o.customer_id)),
@@ -473,7 +473,12 @@ export async function vendorStatement(vendorId: string, range: Range): Promise<V
         totals: ['amount', 'net'],
     };
 
-    const bookingById = new Map(bookingRows.map((b) => [idOf(b._id), b]));
+    // Keyed by every id a row's source can be: the booking's own, or a later payment's on it.
+    const bookingById = new Map(bookingRows.flatMap((b) => [
+        [idOf(b._id), b] as const,
+        ...(b.settlement?.balanceTransactionId ? [[idOf(b.settlement.balanceTransactionId), b] as const] : []),
+        ...(b.topupTransactionIds ?? []).map((id) => [idOf(id), b] as const),
+    ]));
     const bookingsSection: StatementSection = {
         key: 'bookings',
         title: 'Service bookings',

@@ -24,10 +24,10 @@ import { PlatformReadRepository } from '../../../infra/platform/platform.reposit
  * hundred lookups across three collections for a column that shows an id.
  *
  * ── What is deliberately NOT resolved ────────────────────────────────────────
- * The eight remaining types answer `{ vendorId: null, label: null }` rather than growing a
+ * The seven remaining types answer `{ vendorId: null, label: null }` rather than growing a
  * lookup each. `USER`, `VENDOR`, `AGENT` and `AGENCY` already have a directory the dashboard
- * routes to from the type alone, so a label buys nothing a click does not; `BOOKING` and
- * `DELIVERY` have no admin surface to link to at all; `OTHER` names no entity by definition —
+ * routes to from the type alone, so a label buys nothing a click does not; `DELIVERY`
+ * has no admin surface to link to at all; `OTHER` names no entity by definition —
  * jovi-mall's own create validator lets `entityId` be omitted for it.
  *
  * ⚠ `CUSTOMER` was listed in the first group until 2026-08-26 and belongs in the second. There
@@ -130,10 +130,28 @@ class TicketShipmentRefRepository extends PlatformReadRepository<TicketShipmentR
     }
 }
 
+interface TicketBookingReadModel extends Document {
+    _id: ObjectId;
+    bookingNumber?: string | null;
+}
+
+/** `bookings` is camelCase, like `products`. Soft-deleted rows are named too — the product rule above. */
+class TicketBookingRefRepository extends PlatformReadRepository<TicketBookingReadModel> {
+    constructor() {
+        super(COLLECTIONS.BOOKING, { _id: 1, bookingNumber: 1 });
+    }
+
+    async findLabel(bookingId: string): Promise<string | null> {
+        if (!Types.ObjectId.isValid(bookingId)) return null;
+        const row = await this.findOneBy({ _id: new ObjectId(bookingId) } as Filter<TicketBookingReadModel>);
+        return row?.bookingNumber ?? null;
+    }
+}
+
 /**
  * The facade the ticket detail calls. One switch, at most one query.
  *
- * The three cases are named literals rather than a map keyed by the whole vocabulary: the
+ * The cases are named literals rather than a map keyed by the whole vocabulary: the
  * token set is jovi-mall's `EntityType` enum and this service validates it by SHAPE, not
  * membership (ADR-005 D-17), so a type added there must land in the default branch — a
  * `null` label — rather than in a lookup somebody has to remember to write.
@@ -142,6 +160,7 @@ export class TicketEntityReadRepository {
     private readonly products = new TicketProductRefRepository();
     private readonly orders = new TicketOrderRefRepository();
     private readonly shipments = new TicketShipmentRefRepository();
+    private readonly bookings = new TicketBookingRefRepository();
 
     async resolve(entityType: string, entityId: string): Promise<TicketEntityRef> {
         if (!entityId) return UNRESOLVED;
@@ -153,6 +172,10 @@ export class TicketEntityReadRepository {
                 return { vendorId: null, label: await this.orders.findLabel(entityId) };
             case 'SHIPMENT':
                 return { vendorId: null, label: await this.shipments.findLabel(entityId) };
+            // Routable since 2026-10-27 (`/bookings/:bookingId`) — the booking-refund path files
+            // its "manual refund required" tickets against one.
+            case 'BOOKING':
+                return { vendorId: null, label: await this.bookings.findLabel(entityId) };
             default:
                 return UNRESOLVED;
         }

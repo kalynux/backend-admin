@@ -147,6 +147,12 @@ apiV1.use('/reviews', reviewRoutes);
 import { agencyRoutes } from '../modules/agencies/routes/agency.routes';
 apiV1.use('/agencies', agencyRoutes);
 
+// Damage claims on an agency (owner F-8, 2026-10-22): charged per PARCEL, inside the agency's
+// own window and under its own per-item limit. Every route delegated to jovi-mall
+// `/api/internal/admin/agency-claims`; the charge is audited fail-closed against the agency.
+import { agencyClaimRoutes } from '../modules/agencies/routes/agency-claim.routes';
+apiV1.use('/agency-claims', agencyClaimRoutes);
+
 /**
  * Support tickets (Phase 17) — the eleven `support.tickets.*` permissions catalogued at
  * Phase 3 finally have a surface. jovi-mall's `/api/admin/tickets` mount is deleted, so this
@@ -203,6 +209,18 @@ apiV1.use('/orders', orderRoutes);
 
 import { shipmentRoutes } from '../modules/shipments/routes/shipment.routes';
 apiV1.use('/shipments', shipmentRoutes);
+
+// Service bookings (ADMIN-BOOKINGS-PLAN, 2026-10-27) — the orders surface's counterpart for
+// bookable services. Same split: `bookings` is read directly, every write is delegated to
+// `/api/internal/admin/bookings`, and the two verdict reads (the access gate, the slot list) are
+// delegated for the ADR-008 D-1 reason.
+import { bookingRoutes } from '../modules/bookings/routes/booking.routes';
+apiV1.use('/bookings', bookingRoutes);
+
+// The referral program (REFERRAL-PROGRAM-PLAN, 2026-11-02). Same split: `referral_*` is read
+// directly, every write is delegated to `/api/internal/admin/referrals`.
+import { referralRoutes } from '../modules/referrals/routes/referral.routes';
+apiV1.use('/referrals', referralRoutes);
 
 // Billing — the subscription catalog and who is on it (Phase 11).
 //

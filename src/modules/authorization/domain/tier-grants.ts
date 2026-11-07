@@ -155,6 +155,18 @@ const SUPPORT: readonly PermissionName[] = union(allInFamily('support'), [
     'orders.refund.request',
     'shipments.read',
     /**
+     * Service bookings (ADMIN-BOOKINGS-PLAN, 2026-10-27). "My appointment" tickets land here, so
+     * Support reads the booking and can resend its reminder. NOT `bookings.access.read`: Support
+     * answers "I can't see my link" with the access verdict (on `bookings.read`) and a resent
+     * reminder, never by reading the link out (decision 2).
+     */
+    'bookings.read',
+    'bookings.remind',
+    // The referral program (owner R-10): Support reads it and decides on partners. Rates, durations
+    // and a frozen balance are above it.
+    'referrals.read',
+    'referrals.partners.decide',
+    /**
      * Push a stuck delivery to an agent or an agency — including `force: true`, which skips
      * every eligibility check but an active agent contract (owner decision 2026-10-02:
      * "this should be available to all admin tier levels"). Support is who hears "my
@@ -348,6 +360,10 @@ const ADMIN: readonly PermissionName[] = union(
     // `allInFamily('customers')` was here. Deleted with the family at Phase 5 Part D
     // (ADR-017 D-1) — it was the tier-2 half of a grant that backed no route.
     allInFamily('shipments'),
+    // read, access.read, remind, intervene. `bookings.settle` is financial — named below.
+    allInFamily('bookings'),
+    // read and decide. `referrals.settings.write` is tier 1 only; the balance is named below.
+    allInFamily('referrals'),
     allInFamily('notifications'),
     allInFamily('system'),
     allInFamily('audit'),
@@ -371,6 +387,8 @@ const ADMIN: readonly PermissionName[] = union(
         // `users.cod.restrict`, is unflagged and arrives through `allInFamily('users')`,
         // the same way `users.suspend` does — Support does not name it.
         'agencies.cod.restrict',
+        // Damage claims (owner F-8, 2026-10-22): charging an agency is money work, named here.
+        'agencies.claims.charge',
         'agents.ban',
         'agencies.deactivate',
         'billing.subscriptions.assign',
@@ -413,6 +431,11 @@ const ADMIN: readonly PermissionName[] = union(
         // credits a provider's wallet — so the `catalog` sweep above leaves it out and Support
         // is refused it at boot. The other four listing permissions arrive through that sweep.
         'catalog.listings.reveals.refund',
+        // A booking's money: cancel (refund), complete (vendor paid), record cash (2026-10-27).
+        // `financial`, so the family sweep above leaves it out and Support is refused it at boot.
+        'bookings.settle',
+        // Unfreezing a suspended or terminated partner's balance (plan Q-1).
+        'referrals.partners.balance',
         'content.articles.delete',
         'content.authors.delete',
         'shipments.cancel',

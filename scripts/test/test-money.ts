@@ -1899,11 +1899,18 @@ t.section('14. One order\'s money split (2026-10-04)');
     t.assert('pauses: pausing and resuming stand behind money.earnings.pause ALONE', () =>
         [pause, resume].every((r) => r !== undefined && r.access.kind === 'permission'
             && r.access.permissions.length === 1 && r.access.permissions[0] === 'money.earnings.pause'));
-    t.assert('pauses: each verb records the order OR the booking action, never the other verb', () =>
+    t.assert('pauses: each verb records the order, booking OR delivery action, never the other verb', () =>
         pause?.audit?.kind === 'records'
-        && [...pause.audit.actions].sort().join() === 'money.earnings.pause_booking,money.earnings.pause_order'
+        && [...pause.audit.actions].sort().join()
+            === 'money.earnings.pause_booking,money.earnings.pause_order,money.earnings.pause_shipment'
         && resume?.audit?.kind === 'records'
-        && [...resume.audit.actions].sort().join() === 'money.earnings.resume_booking,money.earnings.resume_order');
+        && [...resume.audit.actions].sort().join()
+            === 'money.earnings.resume_booking,money.earnings.resume_order,money.earnings.resume_shipment');
+    t.assert('pauses: a DELIVERY pause (2026-10-22) is delegated and filed against the shipment', () =>
+        (['pause_shipment', 'resume_shipment'] as const).every((a) => {
+            const spec = auditSpec(`money.earnings.${a}`);
+            return spec.transport === 'delegated' && spec.target === 'shipment' && spec.permission === 'money.earnings.pause';
+        }));
     t.assert('pauses: the four audit actions are delegated, filed against an order or a booking', () =>
         (['pause_order', 'resume_order'] as const).every((a) => {
             const spec = auditSpec(`money.earnings.${a}`);
@@ -1927,11 +1934,16 @@ t.section('14. One order\'s money split (2026-10-04)');
         !PauseEarningsSchema.safeParse({ note: 'abc', reason: 'admin' }).success
         && !ResumeEarningsSchema.safeParse({ pausedBy: 'x' }).success
         && ResumeEarningsSchema.safeParse({}).success);
-    t.assert('pause target: only order or booking, with an ObjectId', () =>
+    t.assert('pause target: order, booking or shipment (one delivery), with an ObjectId', () =>
         PauseTargetParamSchema.safeParse({ kind: 'order', id: 'a'.repeat(24) }).success
         && PauseTargetParamSchema.safeParse({ kind: 'booking', id: 'b'.repeat(24) }).success
-        && !PauseTargetParamSchema.safeParse({ kind: 'shipment', id: 'a'.repeat(24) }).success
+        && PauseTargetParamSchema.safeParse({ kind: 'shipment', id: 'a'.repeat(24) }).success
+        && !PauseTargetParamSchema.safeParse({ kind: 'agency', id: 'a'.repeat(24) }).success
         && !PauseTargetParamSchema.safeParse({ kind: 'order', id: 'nope' }).success);
+    t.assert("pause kinds equal jovi-mall's PAUSE_TARGET_KINDS (a kind one side lacks is a wrapped 400)", () => {
+        const v = read(JOVI, 'modules', 'earnings', 'validators', 'admin-earnings.validator.ts');
+        return /PAUSE_TARGET_KINDS = \['order', 'booking', 'shipment'\] as const/.test(v);
+    });
     t.assert("pause body bounds equal jovi-mall's PauseEarningsBodySchema (3..500)", () => {
         const v = read(JOVI, 'modules', 'earnings', 'validators', 'admin-earnings.validator.ts');
         return /PauseEarningsBodySchema = z\s*\.object\(\{ note: z\.string\(\)\.trim\(\)\.min\(3\)\.max\(500\) \}\)/.test(v);
@@ -1954,7 +1966,7 @@ t.section('15. Refund debt: the clawback list, the write-off, and COD/external r
         && writeOff.access.permissions.join() === 'money.earnings.clawback.write_off'
         && writeOff.audit?.kind === 'records'
         && [...writeOff.audit.actions].sort().join()
-            === 'money.earnings.clawback.write_off_agency,money.earnings.clawback.write_off_agent,money.earnings.clawback.write_off_vendor');
+            === 'money.earnings.clawback.write_off_agency,money.earnings.clawback.write_off_agent,money.earnings.clawback.write_off_referral_partner,money.earnings.clawback.write_off_vendor');
     t.assert('write-off: financial, tiers 1 + 2, never Support', () =>
         permissionSpec('money.earnings.clawback.write_off').financial === true
         && TIER_GRANTS[2].includes('money.earnings.clawback.write_off' as never)
@@ -1969,7 +1981,7 @@ t.section('15. Refund debt: the clawback list, the write-off, and COD/external r
     t.assert('write-off: importing the routes registers its dual-control handler', () =>
         dualControlHandlerFor('money.earnings.clawback.write_off') !== undefined);
     t.assert('write-off: the audit actions are delegated and filed against the OWNER', () =>
-        (['vendor', 'agency', 'agent'] as const).every((type) => {
+        (['vendor', 'agency', 'agent', 'referral_partner'] as const).every((type) => {
             const spec = auditSpec(`money.earnings.clawback.write_off_${type}`);
             return spec.transport === 'delegated' && spec.target === type
                 && spec.permission === 'money.earnings.clawback.write_off';

@@ -337,6 +337,11 @@ export interface PaymentSettingsView {
      * type only because a jovi-mall older than the refund flow sends no such key.
      */
     refundFeePercent?: number;
+    /**
+     * 2026-10-22: the PAY-IN fee every aggregator is assumed to keep when a customer pays (0–20,
+     * default 2); a refund does not give it back. Optional in the type for an older jovi-mall.
+     */
+    payinFeePercent?: number;
     providers: Record<string, { enabled: boolean }>;
     version: number;
     updatedAt: string | null;
@@ -390,6 +395,7 @@ export interface SetPaymentSettingsInput {
     payoutAggregator?: string;
     stripeEnabled?: boolean;
     refundFeePercent?: number;
+    payinFeePercent?: number;
     providers?: Record<string, { enabled: boolean }>;
     expectedVersion: number;
     reason: string;
@@ -497,6 +503,7 @@ export async function setPaymentSettings(
                 payoutAggregator: input.payoutAggregator ?? null,
                 stripeEnabled: input.stripeEnabled ?? null,
                 refundFeePercent: input.refundFeePercent ?? null,
+                payinFeePercent: input.payinFeePercent ?? null,
                 providers: input.providers ?? null,
                 expectedVersion: input.expectedVersion,
                 reason: input.reason,

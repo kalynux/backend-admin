@@ -669,17 +669,31 @@ if no refund is owed, **resume** the earnings. Resuming continues the hold where
 paused time never counts. Since 2026-10-05 the hold is **3 days from delivery**
 (the courier finishing the order's last parcel).
 
+🆕 **Agencies and riders are held by their agency's own terms (2026-10-22).** An agency's and its
+rider's share of a delivery is held for 3 days if the agency pays for returns, otherwise for its
+damage-claim deadline capped at 3 days (4 → 3, 2 → 2). With neither, the share is released the night
+after the delivery is **confirmed** (by the customer, by the COD code, or by the auto-confirm). The
+clock is the agency's own parcel. Two consequences for this screen:
+
+- **An administrator's ORDER pause no longer stops a free agency** (one held 0 days) or its rider.
+  Every *other* order pause still does: a refund, a customer problem report, a seller cancel, a card dispute.
+- **To stop an agency's money, pause the delivery:** `:kind = shipment` with the shipment id. It
+  reaches only that parcel's agency and rider shares, never the seller's. Label suggestion: "Pause
+  this delivery's payment". A share held by both an order pause and a delivery pause stays held until
+  both are lifted.
+
 | Route | Permission | Audit |
 |---|---|---|
-| `GET /money/earnings/pauses` — the queue, newest pause first. Query `kind?` (`order`/`booking`), `page`, `limit` | `money.earnings.read` (tiers 1 + 2) | — |
+| `GET /money/earnings/pauses` — the queue, newest pause first. Query `kind?` (`order`/`booking`/🆕`shipment`), `page`, `limit` | `money.earnings.read` (tiers 1 + 2) | — |
 | `GET /money/earnings/pauses/:kind/:id` — one record; `pause: null` if never paused | `money.earnings.read` | — |
-| `POST /money/earnings/pauses/:kind/:id/pause` — body `{ "note": string (3–500) }` | `money.earnings.pause` (financial — tiers 1 + 2, **never Support**) | `money.earnings.pause_order` / `pause_booking`, fail-closed |
-| `POST /money/earnings/pauses/:kind/:id/resume` — body `{ "note"?: string (1–500) }` | `money.earnings.pause` | `money.earnings.resume_order` / `resume_booking`, fail-closed |
+| `POST /money/earnings/pauses/:kind/:id/pause` — body `{ "note": string (3–500) }` | `money.earnings.pause` (financial — tiers 1 + 2, **never Support**) | `money.earnings.pause_order` / `pause_booking` / 🆕`pause_shipment`, fail-closed |
+| `POST /money/earnings/pauses/:kind/:id/resume` — body `{ "note"?: string (1–500) }` | `money.earnings.pause` | `money.earnings.resume_order` / `resume_booking` / 🆕`resume_shipment`, fail-closed |
 
 All four are **delegated** to jovi-mall, which holds the pause record and the hold arithmetic.
 
 **Queue row:** `{ kind, id, reference, vendorId, amount, currency, pause }` — `reference` is the order
-number (`ORD-…`) or booking number (`BKG-…`); `amount` is what the customer paid.
+number (`ORD-…`) or booking number (`BKG-…`); `amount` is what the customer paid. 🆕 A `shipment` row
+has `reference` = the tracking number, `amount` = its delivery fee, and also `orderId` and `agencyId`.
 
 **`pause`:** `{ active, reason, note, paused_at, paused_by_user_id, paused_by_source, paused_by_name,
 resumed_at, resumed_by_user_id, resumed_by_source, resumed_by_name, resume_note }`. A pause the

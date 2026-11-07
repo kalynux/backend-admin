@@ -516,12 +516,14 @@ t.assert('the ledger\'s reason codes and the source types it links are still wha
     const reasons = upstreamEnum(['modules', 'earnings', 'models', 'earnings-ledger.model.ts'], 'reason_code: {');
     const sources = upstreamEnum(['modules', 'earnings', 'models', 'earnings-ledger.model.ts'], 'source_type: {');
     return reasons.includes('order_split') && reasons.includes('hold_release')
-        && json([...sources].sort()) === json(['booking', 'cod_collection', 'order', 'shipment']);
+        // `agency_claim` (2026-10-22): a damage claim's credit to the vendor and fee to the platform.
+        // The feed links no order for it — its `source` carries the type and the claim id.
+        && json([...sources].sort()) === json(['agency_claim', 'booking', 'cod_collection', 'order', 'shipment']);
 });
 
-t.assert('the ledger owner types are the four roles plus the two platform accounts', () => {
+t.assert('the ledger owner types are the roles, the referral partner and the two platform accounts', () => {
     const owners = upstreamEnum(['modules', 'earnings', 'models', 'earnings-ledger.model.ts'], 'owner_type: {');
-    return json([...owners].sort()) === json(['agency', 'agent', 'platform', 'platform_ai', 'vendor'])
+    return json([...owners].sort()) === json(['agency', 'agent', 'platform', 'platform_ai', 'referral_partner', 'vendor'])
         && PLATFORM_OWNER_TYPES.every((type) => owners.includes(type));
 });
 
@@ -957,11 +959,19 @@ t.assert('the records say who forgave it, or which payout event paid it', () => 
         && recovery.kind === 'earnings_adjustment' && recovery.actor === null && recovery.payoutEvent === 'ticket_failed';
 });
 
-t.assert('⚠ the base filter is exactly "a write-off, or a recovery with no allocation" — never a clawback', () =>
+t.assert('⚠ the base filter is exactly "a write-off, a recovery with no allocation, or a returned parcel\'s fault charge" — never an ordinary clawback', () =>
     json(clauses(filterFor('earnings_adjustment'))[0]) === json({
-        kind: { $in: ['write_off', 'clawback_recovery'] },
-        $or: [{ kind: 'write_off' }, { allocation_id: null }],
+        $or: [
+            { kind: 'write_off' },
+            { kind: 'clawback_recovery', allocation_id: null },
+            { kind: 'refund_clawback', reason_code: 'partial_return_fault' },
+        ],
     }));
+
+t.assert('a fault charge says what it is, and why', () => {
+    const row = rowOf('earnings_adjustment', { kind: 'refund_clawback', reason_code: 'partial_return_fault', explanation: 'A parcel came back through your fault' });
+    return row.reason.code === 'partial_return_fault' && row.reason.text === 'A parcel came back through your fault' && row.party.role === 'vendor';
+});
 
 /**
  * The "no adjustment appears twice" claim rests on facts about jovi-mall's WRITERS, read out of
@@ -995,8 +1005,13 @@ t.assert('jovi-mall: a recovery WITH an allocation writes a ledger row beside it
     return body.includes('ledgerRepo.create') && body.includes("entry_type: 'clawback_recovery'") && body.includes('allocation_id: allocation._id');
 });
 
-t.assert('jovi-mall: exactly three adjustment writers set `allocation_id: null` — write-off, payout recovery, vendor overflow', () =>
-    (ACCOUNT_SERVICE.match(/allocation_id: null/g) ?? []).length + (CLAWBACK_SERVICE.match(/allocation_id: null/g) ?? []).length === 3);
+t.assert('jovi-mall: exactly four adjustment writers set `allocation_id: null` — write-off, payout recovery, vendor overflow, partial-return charge', () =>
+    (ACCOUNT_SERVICE.match(/allocation_id: null/g) ?? []).length + (CLAWBACK_SERVICE.match(/allocation_id: null/g) ?? []).length === 4);
+
+t.assert('jovi-mall: a partial-return charge passes no ledger home, so it writes NO ledger row (so it is this kind)', () => {
+    const body = bodyOf(CLAWBACK_SERVICE, 'async chargeForPartialReturn(');
+    return body.includes('input.amount, null, session') && body.includes('explainPartialReturnCharge');
+});
 
 t.assert('jovi-mall: the vendor-overflow clawback files a ledger row when it has a share to file it under (so it is NOT this kind)', () =>
     /if \(ledgerHome\)\s*\{[\s\S]*ledgerRepo\.create/.test(bodyOf(ACCOUNT_SERVICE, 'async clawBeyondInSession(')));

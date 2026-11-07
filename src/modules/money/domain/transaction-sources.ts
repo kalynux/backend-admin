@@ -948,11 +948,15 @@ const EARNINGS_ADJUSTMENT_ROW_PROJECTION = {
     'actor.id': 1,
     'actor.name': 1,
     reason: 1,
+    reason_code: 1,
+    explanation: 1,
     created_at: 1,
 } as const;
 
 /** `recovery:payout:<payoutRequestId>:<event>` — jovi-mall's key for debt paid down by a returned payout. */
 const PAYOUT_RECOVERY_KEY = /^recovery:payout:([a-f\d]{24}):([a-z_]+)$/;
+/** jovi-mall's `reason_code` on a charge for a partial order's returned parcel. */
+const PARTIAL_RETURN_FAULT_REASON = 'partial_return_fault';
 
 /**
  * Refund debt forgiven, or paid down by a payout that came back — the eleventh kind (owner
@@ -970,12 +974,15 @@ const PAYOUT_RECOVERY_KEY = /^recovery:payout:([a-f\d]{24}):([a-z_]+)$/;
  *                                       writes a ledger row whenever the vendor has a share
  *                                       on that sale to file it under — which is the normal
  *                                       case — so it is NOT here: listing it would repeat it.
+ *   refund_clawback, `partial_return_fault`  a vendor or agency charged for a partial order's
+ *                                       returned parcel (2026-11-01). That parcel earned nobody
+ *                                       anything, so it has no share and NEVER a ledger row → THIS kind
  *
- * So the base filter names the two cases outright. `test:transactions` § 4 reads the writers
- * and fails if either starts writing a ledger row, or a third allocation-less writer appears.
+ * So the base filter names the three cases outright. `test:transactions` § 4 reads the writers
+ * and fails if any starts writing a ledger row, or another allocation-less writer appears.
  *
- * A debt is an owner's running balance, not one refund's: neither movement names an order or
- * a refund request, so those links are empty. A recovery names its payout, parsed from the key.
+ * A debt is an owner's running balance, not one refund's: these movements name no order or
+ * refund request, so those links are empty. A recovery names its payout, parsed from the key.
  */
 const EARNINGS_ADJUSTMENT: TransactionSource = {
     kind: 'earnings_adjustment',
@@ -985,10 +992,13 @@ const EARNINGS_ADJUSTMENT: TransactionSource = {
     projection: EARNINGS_ADJUSTMENT_ROW_PROJECTION,
     // The stored `kind` stands where a status would: an adjustment has no lifecycle.
     fields: { createdAt: 'created_at', amount: 'amount', status: 'kind', currency: 'currency' },
-    outcomes: { succeeded: ['write_off', 'clawback_recovery'], pending: [], failed: [], reversed: [] },
+    outcomes: { succeeded: ['write_off', 'clawback_recovery', 'refund_clawback'], pending: [], failed: [], reversed: [] },
     base: {
-        kind: { $in: ['write_off', 'clawback_recovery'] },
-        $or: [{ kind: 'write_off' }, { allocation_id: null }],
+        $or: [
+            { kind: 'write_off' },
+            { kind: 'clawback_recovery', allocation_id: null },
+            { kind: 'refund_clawback', reason_code: PARTIAL_RETURN_FAULT_REASON },
+        ],
     },
     direction: 'internal',
     role: { field: 'beneficiary_type' },
@@ -998,6 +1008,7 @@ const EARNINGS_ADJUSTMENT: TransactionSource = {
         codes: {
             debt_write_off: { kind: 'write_off' },
             debt_recovered_from_payout: { kind: 'clawback_recovery' },
+            partial_return_fault: { kind: 'refund_clawback', reason_code: PARTIAL_RETURN_FAULT_REASON },
         },
     },
     party: (row) => ({ role: String(row.beneficiary_type), id: id(row.beneficiary_id) }),
@@ -1010,8 +1021,10 @@ const EARNINGS_ADJUSTMENT: TransactionSource = {
             provider: null,
             method: null,
             reason: {
-                code: row.kind === 'write_off' ? 'debt_write_off' : 'debt_recovered_from_payout',
-                text: text(row.reason),
+                code: row.kind === 'write_off'
+                    ? 'debt_write_off'
+                    : row.kind === 'refund_clawback' ? PARTIAL_RETURN_FAULT_REASON : 'debt_recovered_from_payout',
+                text: text(row.reason ?? row.explanation),
             },
             reference: null,
             merchantRef: null,

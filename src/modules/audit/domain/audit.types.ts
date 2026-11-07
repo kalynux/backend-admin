@@ -80,6 +80,10 @@ export const AUDIT_TARGET_TYPES = [
     // One contact reveal on a listing — the money record a refund acts on. Its own type rather
     // than `listing`: a refund names exactly one reveal, and a provider's dispute is about it.
     'listing_reveal',
+    // A referral partner, and the program's one settings document. Their own types: a partner is
+    // no existing role, and a rate change is the row to find when a reward looks wrong.
+    'referral_partner',
+    'referral_settings',
     // This service's own records
     'administrator', 'admin_session', 'approval_request', 'audit_export',
     // Phase 12 operational targets. Both classify as `internal`: a flag flip and a worker

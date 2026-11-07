@@ -1,0 +1,58 @@
+# Frontend changelog — service bookings (2026-10-27)
+
+**For: the admin dashboard.** Not deployed yet; ships with jovi-mall. Endpoint reference:
+[api/bookings.md](api/bookings.md). Record: `../../PRODUCTION-READINESS/ADMIN-BOOKINGS-PLAN.md`.
+
+No other dashboard changes. Customer, vendor, agency and agent responses are byte-identical.
+
+**Added 2026-11-03:** the detail carries `partyReminders: { toCustomerAt, toVendorAt }`, the one-time reminders the vendor and the customer can send each other. Each is `null` until sent. Worth showing, since "I did remind them" is a real ticket. The administrator's own reminder buttons are neither limited by these nor recorded in them.
+
+**Added 2026-11-03:** `POST /bookings/:id/reminder/vendor` reminds the **vendor**, beside the existing reminder to the customer. Same permission (`bookings.remind`, all three tiers), same `{ reason? }` body, same `{ booking, result }` answer. Draw two buttons and name who each one reaches.
+
+**Added 2026-11-03:** the detail carries `pricing: { originalPrice, proposal, topup, history }`. On a `manual` service the vendor can now propose a higher price than the customer booked at, so `price` is the **agreed** price and may differ from `originalPrice`. Show both when they differ, any open proposal, and any difference still owed. It is read-only: administrators do not set prices. A `refund` with `reasonKind: "goodwill"` and a small amount can now come from a rescheduled price going down, on a booking that stays `paid`.
+
+## What is new
+
+1. **A Bookings section** on `/api/v1/bookings`. It has a list with search and filters, seven
+   "needs attention" queues with counts (`GET /bookings/queues`), and a detail screen. The detail
+   shows the customer, shop and service, the place, the meeting link (tiers 1 + 2), the proposal of
+   a new time, **who changed the status and when**, where the vendor's money stands, payments,
+   refunds, the other seats of a class, and the administrators' activity.
+2. **Two lookup panels** on the detail: "Can the customer see the link yet?"
+   (`GET /bookings/:id/access`) and the service's bookable times
+   (`GET /bookings/services/:productId/availability`).
+3. **Seven actions**: cancel (with fault), cancel the whole class, complete, record cash, re-check
+   payment, withdraw proposal, resend reminder. Each answers `{ booking, result }`. Re-render from
+   `booking`.
+4. **A paid no-show waits for an administrator.** It shows in `?queue=paid_no_show`. The only two
+   ways out are Complete (the vendor is paid after the hold) or Cancel (the customer is refunded).
+5. **Tickets about a booking** (`about.type: BOOKING`) now carry a label (the booking number). Route
+   them to the booking detail.
+
+## Permissions — 144 → 149, tiers 149 / 126 / 49
+
+New family `bookings`: `bookings.read`, `bookings.remind` (all tiers) · `bookings.access.read`,
+`bookings.intervene` (tiers 1 + 2) · `bookings.settle` (financial, tiers 1 + 2). See
+[api/permissions.md § bookings](api/permissions.md#bookings). Add the five names to your
+permission type. Your copy of `permissions.md` is parsed by your tests, so refresh it in the same
+change.
+
+## Rules the screens must respect
+
+- ⛔ The meeting link and instructions are **absent** from the detail for Support. Show "has a
+  link" from `access.hasMeetingUrl`, never an empty field.
+- ⚠ The **cancel reason is shown to the customer and the vendor**. Say so on the form. Every other
+  reason is internal.
+- ⚠ Cancel refunds at once, with **no second approver**. Show the amount and the fault's effect on
+  fees before confirming.
+- 🆕 **2026-11-01 (BR-033 § 4): the cancel's `result` says what its refund did.** `result.refund` is
+  `none` · `requested` · `refunded` · `manual` · `failed`, and each seat in a session cancel's
+  `result.cancelled[]` carries its own. The response `message` follows it, so a toast can show it
+  as is. `manual` and `failed` need a person. See
+  [`bookings.md` § What a cancel's refund did](api/bookings.md#what-a-cancels-refund-did).
+- Complete is refused for an unpaid booking (`BOOKING_ADMIN_COMPLETE_UNPAID`): offer Record cash
+  first. The full refusal list is in the writes table.
+- An empty `statusHistory` means "not recorded" (bookings from before 2026-10-27), not "nothing
+  happened".
+- `earnings.state` has no amounts. Link to `/money` for callers holding `money.earnings.read`.
+- Branch refusals on `error.details.platformCode`, never on the message.

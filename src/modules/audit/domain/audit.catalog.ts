@@ -1021,6 +1021,17 @@ export const AUDIT_CATALOG = Object.freeze({
         transport: 'delegated',
         summary: 'Switched cash on delivery back on for a delivery agency',
     },
+    /**
+     * A damage claim charged to an agency (owner F-8, 2026-10-22). Filed against the AGENCY, so
+     * it lands on its activity feed; the parcel, amount and note are in the payload, and
+     * `after` carries what the agency's balances gave (held, available, debt).
+     */
+    'agencies.claims.charge': {
+        permission: 'agencies.claims.charge',
+        target: 'agency',
+        transport: 'delegated',
+        summary: 'Charged a damage claim to a delivery agency for a parcel damaged in delivery',
+    },
 
     // ═══ USERS — delegated to jovi-mall ═══════════════════════════════════════
     // The reads are not here: a list and a detail are not actions. Three mutations,
@@ -1206,6 +1217,80 @@ export const AUDIT_CATALOG = Object.freeze({
         target: 'vendor',
         transport: 'delegated',
         summary: 'Changed a vendor’s platform-governed order settings',
+    },
+
+    // ═══ BOOKINGS — service bookings, delegated to jovi-mall (2026-10-27) ═══════
+    // jovi-mall now keeps WHO changed a booking's status (`statusHistory`), but not the reason an
+    // administrator had, nor the fault behind a cancellation's fees — this trail does.
+    'bookings.cancel': {
+        permission: 'bookings.settle', target: 'booking', transport: 'delegated',
+        summary: 'Cancelled a booking for a party — the customer is refunded, the fault decides who bears the fees',
+    },
+    'bookings.cancel_session': {
+        permission: 'bookings.settle', target: 'booking', transport: 'delegated',
+        summary: 'Cancelled every booking of one class (same service, same start) — each customer refunded',
+    },
+    'bookings.complete': {
+        permission: 'bookings.settle', target: 'booking', transport: 'delegated',
+        summary: 'Completed a booking for the vendor — the vendor is paid once the hold ends',
+    },
+    'bookings.payment.mark_cash': {
+        permission: 'bookings.settle', target: 'booking', transport: 'delegated',
+        summary: 'Recorded that a booking was paid in cash to the vendor',
+    },
+    'bookings.payment.recheck': {
+        permission: 'bookings.intervene', target: 'booking', transport: 'delegated',
+        summary: 'Re-checked a stuck booking payment with the payment provider',
+    },
+    'bookings.proposal.withdraw': {
+        permission: 'bookings.intervene', target: 'booking', transport: 'delegated',
+        summary: 'Withdrew a proposal of a new time on a booking — the original time stands',
+    },
+    'bookings.reminder.resend': {
+        permission: 'bookings.remind', target: 'booking', transport: 'delegated',
+        summary: 'Sent the customer their appointment reminder again',
+    },
+    'bookings.reminder.vendor': {
+        permission: 'bookings.remind', target: 'booking', transport: 'delegated',
+        summary: 'Reminded the vendor of an appointment',
+    },
+
+    // ═══ REFERRALS — the referral program, delegated to jovi-mall (2026-11-02) ═══
+    'referrals.settings.update': {
+        permission: 'referrals.settings.write', target: 'referral_settings', transport: 'delegated',
+        summary: 'Changed the referral program’s global settings',
+    },
+    'referrals.partner.approve': {
+        permission: 'referrals.partners.decide', target: 'referral_partner', transport: 'delegated',
+        summary: 'Approved a referral partner — their code became active',
+    },
+    'referrals.partner.reject': {
+        permission: 'referrals.partners.decide', target: 'referral_partner', transport: 'delegated',
+        summary: 'Rejected an application to the referral program',
+    },
+    'referrals.partner.suspend': {
+        permission: 'referrals.partners.decide', target: 'referral_partner', transport: 'delegated',
+        summary: 'Suspended a referral partner — no new rewards, and their balance is frozen',
+    },
+    'referrals.partner.reinstate': {
+        permission: 'referrals.partners.decide', target: 'referral_partner', transport: 'delegated',
+        summary: 'Reinstated a suspended referral partner — the suspended period is not paid',
+    },
+    'referrals.partner.terminate': {
+        permission: 'referrals.partners.decide', target: 'referral_partner', transport: 'delegated',
+        summary: 'Ended a referral partnership — earned rewards stay recorded, the balance is frozen',
+    },
+    'referrals.partner.allow_reapply': {
+        permission: 'referrals.partners.decide', target: 'referral_partner', transport: 'delegated',
+        summary: 'Allowed a rejected or terminated person to apply to the referral program again',
+    },
+    'referrals.partner.release_balance': {
+        permission: 'referrals.partners.balance', target: 'referral_partner', transport: 'delegated',
+        summary: 'Released a suspended or terminated referral partner’s frozen balance for withdrawal',
+    },
+    'referrals.partner.terms_update': {
+        permission: 'referrals.settings.write', target: 'referral_partner', transport: 'delegated',
+        summary: 'Changed one referral partner’s own rates or durations',
     },
 
     // ═══ CATALOG — the shared category list, delegated to jovi-mall ═══════════
@@ -1398,6 +1483,12 @@ export const AUDIT_CATALOG = Object.freeze({
         target: 'refund',
         transport: 'delegated',
         summary: 'Rejected a refund request — the seller’s earnings are released from the refund hold',
+    },
+    'orders.refund.partial_return_fault': {
+        permission: 'orders.refund',
+        target: 'refund',
+        transport: 'delegated',
+        summary: 'Said whose fault a partly paid order’s returned parcel is — the waiting refund is replaced with the matching amount',
     },
     'orders.refund.retry': {
         permission: 'orders.refund',
@@ -1612,6 +1703,15 @@ export const AUDIT_CATALOG = Object.freeze({
         permission: 'money.earnings.pause', target: 'booking', transport: 'delegated',
         summary: 'Resumed the earnings of a booking — its hold continues where it stopped',
     },
+    // 2026-10-22: one DELIVERY — its agency's and rider's shares, nothing else on the order.
+    'money.earnings.pause_shipment': {
+        permission: 'money.earnings.pause', target: 'shipment', transport: 'delegated',
+        summary: "Paused a delivery's earnings — its agency and rider are not paid until resumed",
+    },
+    'money.earnings.resume_shipment': {
+        permission: 'money.earnings.pause', target: 'shipment', transport: 'delegated',
+        summary: "Resumed a delivery's earnings — its agency's and rider's hold continues where it stopped",
+    },
 
     // ═══ MONEY — refund debt write-off (REFUND-FLOW-PLAN § 6.4, C-6) ═══════════
     // One action per owner type, so each row lands on that owner's own activity feed — the
@@ -1627,6 +1727,10 @@ export const AUDIT_CATALOG = Object.freeze({
     'money.earnings.clawback.write_off_agent': {
         permission: 'money.earnings.clawback.write_off', target: 'agent', transport: 'delegated',
         summary: 'Wrote off refund debt a delivery agent owed the platform — the platform absorbs the loss',
+    },
+    'money.earnings.clawback.write_off_referral_partner': {
+        permission: 'money.earnings.clawback.write_off', target: 'referral_partner', transport: 'delegated',
+        summary: 'Wrote off refund debt a referral partner owed the platform — the platform absorbs the loss',
     },
 
     'money.statements.send_vendor': {

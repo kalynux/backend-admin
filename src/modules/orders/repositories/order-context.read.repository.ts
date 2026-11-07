@@ -35,6 +35,8 @@ export interface IdMatchResult {
 
 interface CustomerRefReadModel extends Document {
     _id: ObjectId;
+    /** The `users._id` this customer profile belongs to — unique (`customers.user_id`). */
+    user_id?: ObjectId;
     name?: string | null;
     phone?: string | null;
     email?: string | null;
@@ -65,6 +67,41 @@ export class CustomerRefReadRepository extends PlatformReadRepository<CustomerRe
             limit: ids.length,
         });
         return new Map(rows.map((row) => [row._id.toString(), row.name ?? null]));
+    }
+
+    /**
+     * The same term, resolved to USER ids — for bookings, which store the customer's
+     * `users._id` (`bookings.userId`) rather than a `customers._id`. Same cap, same report.
+     */
+    async findUserIdsMatching(term: string): Promise<IdMatchResult> {
+        const pattern = containsInsensitive(term);
+        const rows = await this.findBy(
+            { $or: [{ name: pattern }, { phone: pattern }, { email: pattern }] } as Filter<CustomerRefReadModel>,
+            { projection: { _id: 0, user_id: 1 }, limit: SEARCH_MATCH_LIMIT + 1 },
+        );
+        return {
+            ids: rows.slice(0, SEARCH_MATCH_LIMIT).map((row) => row.user_id as ObjectId).filter(Boolean),
+            truncated: rows.length > SEARCH_MATCH_LIMIT,
+        };
+    }
+
+    /** Name, phone and email by USER id — a page of bookings, or one booking's detail. */
+    async findContactsByUserIds(
+        userIds: ObjectId[],
+    ): Promise<Map<string, { customerId: string; name: string | null; phone: string | null; email: string | null }>> {
+        if (userIds.length === 0) return new Map();
+        const rows = await this.findBy({ user_id: { $in: userIds } } as Filter<CustomerRefReadModel>, {
+            projection: { _id: 1, user_id: 1, name: 1, phone: 1, email: 1 },
+            limit: userIds.length,
+        });
+        return new Map(
+            rows
+                .filter((row) => row.user_id)
+                .map((row) => [
+                    (row.user_id as ObjectId).toString(),
+                    { customerId: row._id.toString(), name: row.name ?? null, phone: row.phone ?? null, email: row.email ?? null },
+                ]),
+        );
     }
 }
 

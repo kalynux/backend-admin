@@ -331,6 +331,19 @@ export const PERMISSION_CATALOG = Object.freeze({
         family: 'agencies', action: 'write', phase: 9, financial: true,
         summary: 'Switch cash on delivery off for a delivery agency, or back on — it receives no new COD work while restricted',
     },
+    /**
+     * Charge a DAMAGE CLAIM to an agency for one parcel (owner decision F-8, 2026-10-22).
+     *
+     * jovi-mall allows it only inside the agency's own window (its damage-claim deadline from its
+     * parcel's delivery) and up to its own max refund per item; it takes the money from the
+     * agency (held, then available, then debt) and credits the vendor. `financial` — it moves an
+     * agency's money — so it is granted by name in the tier-2 money block and the boot assertion
+     * refuses it to Support. No dual control: the agency's own published terms are the cap.
+     */
+    'agencies.claims.charge': {
+        family: 'agencies', action: 'write', phase: 9, financial: true,
+        summary: 'Charge a damage claim to a delivery agency for a parcel damaged in delivery, up to its own per-item limit',
+    },
 
     // ═══ BILLING ═══ 7 legacy endpoints ═══════════════════════════════════════
     'billing.plans.read': {
@@ -1354,6 +1367,87 @@ export const PERMISSION_CATALOG = Object.freeze({
     'shipments.cancel': {
         family: 'shipments', action: 'write', phase: 6, destructive: true,
         summary: 'Cancel a shipment already in progress',
+    },
+
+    // ═══ BOOKINGS ═══ service bookings (ADMIN-BOOKINGS-PLAN, 2026-10-27) ═════════
+    // The orders surface's counterpart for bookable services. Reads are a Support lookup —
+    // "my appointment" tickets land there. Settling a booking's money is tiers 1 + 2.
+    'bookings.read': {
+        family: 'bookings', action: 'read', phase: 6,
+        summary: 'Search bookings and view a booking with everyone involved, its payments, refunds and history',
+    },
+    /**
+     * The meeting link and the vendor's instructions, on the booking detail (decision 2,
+     * 2026-10-27). Unflagged, so `allInFamily('bookings')` gives it to tier 2 — and Support does
+     * NOT name it. A link is a way into the vendor's session; Support answers "I can't see my
+     * link" with the access verdict and a resent reminder instead. Pinned in `test-bookings.ts`.
+     */
+    'bookings.access.read': {
+        family: 'bookings', action: 'read', phase: 6,
+        summary: 'See a booking’s meeting link and the vendor’s instructions',
+    },
+    /** Remind either side of the appointment. Support holds it by name: it changes nothing but an inbox. */
+    'bookings.remind': {
+        family: 'bookings', action: 'write', phase: 6,
+        summary: 'Remind the customer or the vendor of an appointment',
+    },
+    /**
+     * Re-check a payment stuck at `pending` with the provider, and withdraw a stale proposal of a
+     * new time. Neither moves money by decision — the re-check applies the provider's answer, the
+     * withdrawal keeps the time both sides already hold — so it is unflagged and tier 2 receives
+     * it through the family. Support does not name it (tiers 1 + 2, as proposed and accepted).
+     */
+    'bookings.intervene': {
+        family: 'bookings', action: 'write', phase: 6,
+        summary: 'Re-check a stuck booking payment with the provider, or withdraw a stale proposal of a new time',
+    },
+    /**
+     * Decide where a booking's money goes. Cancel → the customer is refunded (`fault` decides who
+     * bears the fees); complete → the vendor is paid when the hold ends; record cash → the vendor's
+     * earnings are split from a payment nobody can verify. A paid no-show waits for exactly this
+     * decision (owner, 2026-10-27).
+     *
+     * `financial`, so no family sweep hands it out and the boot check refuses it to Support.
+     * ⚠ The cancel refund rides the ordinary cancellation refund, which has NO second approver —
+     * the same as a customer's own cancellation. The 2,000,000 four-eyes line lives on the refund
+     * queue, not here.
+     */
+    'bookings.settle': {
+        family: 'bookings', action: 'write', phase: 6, financial: true,
+        summary: 'Cancel a booking (the customer is refunded), complete it (the vendor is paid), or record a cash payment',
+    },
+
+    // ═══ REFERRALS ═══ the referral program (REFERRAL-PROGRAM-PLAN, 2026-11-02) ═══
+    'referrals.read': {
+        family: 'referrals', action: 'read', phase: 6,
+        summary: 'View the referral settings, partners, the accounts they referred and their rewards',
+    },
+    /**
+     * Approve, reject, suspend, reinstate, terminate, and allow a new application. Tiers 1, 2 and
+     * 3 by the owner's decision (R-10). Unflagged, so tier 2 receives it through the family and
+     * Support names it. A rejection or termination writes no money: earned rewards stay recorded.
+     */
+    'referrals.partners.decide': {
+        family: 'referrals', action: 'write', phase: 6,
+        summary: 'Approve, reject, suspend, reinstate or terminate a referral partner',
+    },
+    /**
+     * Let a suspended or terminated partner withdraw what they earned. `financial`, so no family
+     * sweep hands it out and the boot check refuses it to Support. Tiers 1 + 2: the owner's R-10
+     * names the four lifecycle verbs and not this one, which decides about money (plan Q-1).
+     */
+    'referrals.partners.balance': {
+        family: 'referrals', action: 'write', phase: 6, financial: true,
+        summary: 'Release a suspended or terminated referral partner\'s frozen balance for withdrawal',
+    },
+    /**
+     * Global and per-partner rates and durations, and switching the program on or off. Tier 1 only
+     * by the owner's decision (R-10): the flag keeps it out of `allInFamily('referrals')`, it is in
+     * no tier's hand-written list, and only tier 1, derived from the whole catalog, holds it.
+     */
+    'referrals.settings.write': {
+        family: 'referrals', action: 'write', phase: 6, financial: true,
+        summary: 'Change referral rates and durations, globally or for one partner, and switch the program on or off',
     },
 
     // ═══ ADMINISTRATORS ═══ built in THIS phase ═══════════════════════════════

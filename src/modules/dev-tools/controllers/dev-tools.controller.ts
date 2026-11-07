@@ -172,6 +172,9 @@ export class DevToolsController {
               + (result.changed.includes('refundFeePercent') && result.settings.refundFeePercent !== undefined
                   ? `Refund fee: ${result.settings.refundFeePercent}% (new refund requests only). `
                   : '')
+              + (result.changed.includes('payinFeePercent') && result.settings.payinFeePercent !== undefined
+                  ? `Payment fee kept on refunds: ${result.settings.payinFeePercent}% (new refund requests only). `
+                  : '')
               + `Other jovi-mall instances converge within ${result.convergenceSeconds}s.`;
 
         sendSuccess(res, result, {

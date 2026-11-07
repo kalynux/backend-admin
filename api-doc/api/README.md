@@ -41,12 +41,14 @@ the dashboard's behalf and returns the result in its own envelope.
 | [categories.md](categories.md) | `/categories` — the shared product-category list: usage, rename, merge, delete |
 | [reviews.md](reviews.md) | `/reviews` — product and delivery reviews: list, hide (unpublish), show again (republish), delete |
 | [agencies.md](agencies.md) | `/agencies` — delivery agencies, verification, rosters, contracts |
+| [agency-claims.md](agency-claims.md) | `/agency-claims` — 🆕 2026-10-22 damage claims charged to an agency for a parcel, inside its own window, up to its own per-item limit |
 | [agents.md](agents.md) | `/agents` — delivery agents, KYC, tracking, COD threshold, bans, transfer |
 | [verification.md](verification.md) | **The evidence behind a KYC verdict**, for all three parties — identity scans, the selfie, the geocoded addresses, the sketches. ⚠ Read the "the backend grades nothing" section before building the badge: there is deliberately no `estimatedVerdict` field, and the required/optional rules are the dashboard's |
 | [contracts.md](contracts.md) | `/contracts` — one agent↔agency contract: the full terms, and the three administrative interventions |
 | [support.md](support.md) | `/support/tickets` — the support queue: assignment, lifecycle, followers, notes, attachments |
 | [orders.md](orders.md) | `/orders` — order directory, timeline, disputes, cancel, dispatch, refund |
 | [shipments.md](shipments.md) | `/shipments` — shipment directory, offer trail, reassign, cancel |
+| [bookings.md](bookings.md) | `/bookings` — 🆕 2026-10-27 service bookings: directory, "needs attention" queues, detail with everyone involved and the status history, the access verdict, the slot list, and cancel / complete / record cash / re-check payment / withdraw a proposal / resend the reminder |
 | [cod.md](cod.md) | `/cod` — cash-on-delivery overview, holders, remittances, deposits, discrepancies, trust |
 | [billing.md](billing.md) | `/billing` — pricing-plan catalog and subscriptions |
 | [money.md](money.md) | `/money` — earnings, allocations, payouts, payments, refunds, refund debt (clawback list, write-off) |
@@ -428,6 +430,8 @@ by grep, and re-derivable the same way:
 | Route | Takes |
 |---|---|
 | `GET /accounts/:ownerType/:ownerId/activity` | `before`, `limit` |
+| `GET /agency-claims` | `agencyId`, `vendorId`, `shipmentId`, `page`, `limit` (2026-10-22) |
+| `GET /agency-claims/eligibility` | `shipmentId` (**required**), `refundRequestId` (2026-10-22) |
 | `GET /agents/:agentId/assignability` | its documented query |
 | `GET /agents/:agentId/eligibility` | its documented query |
 | `GET /agents/:agentId/live-position` | `reason` (**required**) |
@@ -436,7 +440,7 @@ by grep, and re-derivable the same way:
 | `GET /content/authors` | **nothing, and refuses any.** Not paginated — `?page=1&limit=20` is a `400` |
 | `GET /money/earnings/accounts` | its documented query |
 | `GET /money/earnings/platform/summary` | `from`, `to` (both optional) |
-| `GET /money/earnings/pauses` | `kind` (`order`/`booking`), `page`, `limit` (2026-10-05) |
+| `GET /money/earnings/pauses` | `kind` (`order`/`booking`/`shipment`), `page`, `limit` (2026-10-05; `shipment` 2026-10-22) |
 | `GET /money/transactions` | its documented filters, `limit`, `cursor`, `sort` — **no `page`** ([`transactions.md`](transactions.md), 2026-10-12) |
 | `GET /money/transactions/summary` | the same filters and **no paging parameter at all** — `limit` is a `400` here |
 | `GET /shipments/:shipmentId/tracking-events` | its documented query |

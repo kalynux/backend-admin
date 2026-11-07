@@ -13,6 +13,7 @@ import { ListAuditQuery } from '../../audit/validators/audit.validator';
 import { AgencyReadRepository } from '../../agencies/repositories/agency.read.repository';
 import { AgentReadRepository } from '../../agents/repositories/agent.read.repository';
 import { StoreReadRepository } from '../../vendors/repositories/store.read.repository';
+import { ReferralPartnerReadRepository } from '../../referrals/repositories/referral.read.repository';
 import { VendorReadRepository } from '../../vendors/repositories/vendor.read.repository';
 import { verificationOf } from '../domain/owner-verification';
 import * as disclosure from '../domain/payout-disclosure';
@@ -123,6 +124,7 @@ const debtAccounts = new EarningsAccountDebtReadRepository();
 // `payout_details`, so a second projection of it declared here would be a second thing to
 // get right. Same rule `hydrateNames` follows in the COD and billing controllers.
 const stores = new StoreReadRepository();
+const referralPartners = new ReferralPartnerReadRepository();
 const vendors = new VendorReadRepository();
 const agencies = new AgencyReadRepository();
 const agents = new AgentReadRepository();
@@ -167,10 +169,11 @@ async function hydrateOwnerNames(rows: OwnerRow[]): Promise<MoneyOwnerNames> {
     const agencyIds = idsFor('agency');
     const agentIds = idsFor('agent');
 
-    const [vendorStores, agencyNames, agentNames] = await Promise.all([
+    const [vendorStores, agencyNames, agentNames, partnerCodes] = await Promise.all([
         stores.findForVendors(vendorIds),
         agencies.findNamesByIds(agencyIds),
         agents.findNamesByIds(agentIds),
+        referralPartners.findCodesByIds(idsFor('referral_partner')),
     ]);
 
     const names: MoneyOwnerNames = new Map();
@@ -179,6 +182,8 @@ async function hydrateOwnerNames(rows: OwnerRow[]): Promise<MoneyOwnerNames> {
     });
     agencyNames.forEach((name, agencyId) => names.set(ownerKey('agency', agencyId), name));
     agentNames.forEach((name, agentId) => names.set(ownerKey('agent', agentId), name));
+    // A partner is a person with a code; the code is what an administrator can look up.
+    partnerCodes.forEach((code, partnerId) => names.set(ownerKey('referral_partner', partnerId), code));
 
     return names;
 }
@@ -991,7 +996,8 @@ export const resumeEarnings = asyncHandler(async (req: Request, res: Response) =
     // ⛔ A refund still holding the pause: refused here, before the audit row (jovi-mall refuses
     // the same, 409 EARNINGS_PAUSE_HELD_BY_REFUND, as the backstop). Resuming would release money
     // the refund is about to claw back; the pause lifts by itself when the refund ends.
-    const holding = await refundRequests.findHoldingEarningsPause(kind, id);
+    // A delivery pause is only ever an administrator's — no refund holds one.
+    const holding = kind === 'shipment' ? null : await refundRequests.findHoldingEarningsPause(kind, id);
     if (holding) {
         throw createAppError(ERROR_CODES.EARNINGS_PAUSE_HELD_BY_REFUND, 409, undefined, {
             refundRequestId: holding._id.toString(),

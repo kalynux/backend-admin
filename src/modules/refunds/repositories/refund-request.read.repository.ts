@@ -54,6 +54,38 @@ export interface RefundRequestReadModel extends Document {
     fee_rate?: number;
     fee_amount?: number;
     net_amount?: number;
+    /** 2026-10-22: the two fees and who pays them. Absent on older rows (transfer fee only, customer). */
+    fees?: {
+        paid_by?: string | null;
+        payin_rate?: number | null;
+        payin_amount?: number | null;
+        payout_rate?: number | null;
+        payout_amount?: number | null;
+        vendor_charge?: number | null;
+        agency_charge?: number | null;
+    } | null;
+    /** 2026-11-01: a partial order's returned parcel, and whose fault it is. */
+    partial_return?: {
+        shipment_id?: ObjectId | null;
+        fault?: string | null;
+        return_fee?: number | null;
+        prepaid_amount?: number | null;
+        agent_reason?: string | null;
+        agent_note?: string | null;
+    } | null;
+    /** 2026-10-22: parcels named as delivered at fault, each judged against its agency's window. */
+    delivery_fault?: Array<{
+        shipment_id?: ObjectId | null;
+        agency_id?: ObjectId | null;
+        tracking_number?: string | null;
+        delivered_at?: Date | null;
+        raised_at?: Date | null;
+        window_days?: number | null;
+        inside_window?: boolean | null;
+        customer_delivery_amount?: number | null;
+        claim_deadline_days?: number | null;
+        returns_payer?: string | null;
+    }> | null;
     currency: string;
     payment_channel?: string | null;
     channel?: string | null;
@@ -128,6 +160,9 @@ export const REFUND_REQUEST_PROJECTION = {
     fee_rate: 1,
     fee_amount: 1,
     net_amount: 1,
+    fees: 1,
+    partial_return: 1,
+    delivery_fault: 1,
     currency: 1,
     payment_channel: 1,
     channel: 1,
@@ -241,6 +276,19 @@ export class RefundRequestReadRepository extends PlatformReadRepository<RefundRe
      * unique index `refund_one_open_per_source`). A delivery-fee refund cannot be settled by hand
      * while its order has one: both come out of the same refundable ceiling.
      */
+    /**
+     * Every refund request on one booking, newest first — the booking detail's refund block.
+     * Bounded: a booking holds at most one OPEN request (`refund_one_open_per_source`) plus the
+     * closed ones before it.
+     */
+    async forBooking(bookingId: string): Promise<RefundRequestReadModel[]> {
+        if (!Types.ObjectId.isValid(bookingId) || bookingId.length !== 24) return [];
+        return this.findBy({
+            source_kind: 'booking',
+            source_id: new ObjectId(bookingId),
+        } as Filter<RefundRequestReadModel>, { sort: { created_at: -1, _id: -1 }, limit: 20 });
+    }
+
     async openForOrders(orderIds: string[]): Promise<Map<string, { id: string; status: string }>> {
         const ids = [...new Set(orderIds)].filter((id) => Types.ObjectId.isValid(id) && id.length === 24);
         const found = new Map<string, { id: string; status: string }>();

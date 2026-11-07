@@ -667,7 +667,7 @@ export async function settleDeliveryFeeRefund(
 // Refund debt write-off (REFUND-FLOW-PLAN § 6.4, C-6)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type ClawbackOwnerType = 'vendor' | 'agency' | 'agent';
+export type ClawbackOwnerType = 'vendor' | 'agency' | 'agent' | 'referral_partner';
 
 /**
  * jovi-mall's write-off answer — typed loosely ON PURPOSE: the contract (§ 11.3) fixes the route
@@ -684,6 +684,7 @@ const WRITE_OFF_ACTIONS: Readonly<Record<ClawbackOwnerType, AuditAction>> = {
     vendor: 'money.earnings.clawback.write_off_vendor',
     agency: 'money.earnings.clawback.write_off_agency',
     agent: 'money.earnings.clawback.write_off_agent',
+    referral_partner: 'money.earnings.clawback.write_off_referral_partner',
 };
 
 /**
@@ -761,7 +762,8 @@ export interface PlatformEarningsPause {
     resume_note: string | null;
 }
 
-export type PauseKind = 'order' | 'booking';
+/** `shipment` (2026-10-22): one delivery — its agency's and rider's shares only. */
+export type PauseKind = 'order' | 'booking' | 'shipment';
 
 export interface PlatformPauseView {
     kind: PauseKind;
@@ -773,10 +775,15 @@ export interface PlatformPauseView {
 export interface PlatformActivePause {
     kind: PauseKind;
     id: string;
+    /** Order number, booking number, or a delivery's tracking number. */
     reference: string | null;
     vendorId: string | null;
+    /** What the customer paid; for a delivery, its delivery fee. */
     amount: number | null;
     currency: string | null;
+    /** A delivery only: its order and its agency. Absent on an order or a booking. */
+    orderId?: string | null;
+    agencyId?: string | null;
     pause: PlatformEarningsPause;
 }
 
@@ -809,6 +816,7 @@ export async function earningsPause(kind: PauseKind, id: string, context: ActorC
 const PAUSE_ACTIONS: Readonly<Record<PauseKind, { pause: AuditAction; resume: AuditAction }>> = {
     order: { pause: 'money.earnings.pause_order', resume: 'money.earnings.resume_order' },
     booking: { pause: 'money.earnings.pause_booking', resume: 'money.earnings.resume_booking' },
+    shipment: { pause: 'money.earnings.pause_shipment', resume: 'money.earnings.resume_shipment' },
 };
 
 function pauseState(result: PlatformPauseView | null): Record<string, unknown> | null {

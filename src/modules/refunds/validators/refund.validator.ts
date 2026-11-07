@@ -82,6 +82,16 @@ export const RefundEligibilityQuerySchema = z.object({
     itemDefective: boolFlag.optional(),
     /** Whole XAF — jovi-mall refuses a fraction. */
     amount: z.coerce.number().int().positive().optional(),
+    /**
+     * 2026-10-22: parcels said to be delivered at FAULT, comma-separated. The verdict shows, per
+     * parcel, whether its agency is inside its own window and will give back.
+     */
+    deliveryFaultShipmentIds: z
+        .string()
+        .trim()
+        .transform((v) => v.split(',').map((x) => x.trim()).filter(Boolean))
+        .pipe(z.array(objectId).min(1).max(20))
+        .optional(),
 });
 
 /**
@@ -136,6 +146,12 @@ export const CreateRefundRequestSchema = z
         approveNow: z.boolean().optional(),
         /** The support ticket this refund was raised from — stored on the request as `ticketId`. */
         ticketId: objectId.optional(),
+        /**
+         * 2026-10-22 (owner F-6/F-7): parcels whose DELIVERY was at fault. jovi-mall judges each
+         * against its agency's own window; inside it, the agency and rider fund that parcel's
+         * delivery money. Support may name them (the approver still decides); vendors never can.
+         */
+        deliveryFaultShipmentIds: z.array(objectId).min(1).max(20).optional(),
     })
     .strict()
     .superRefine((body, ctx) => {
@@ -174,6 +190,11 @@ export const RejectRefundSchema = z
     .object({
         reason: reasonText('A reason is required to reject a refund request', { min: 3, max: 500 }),
     })
+    .strict();
+
+/** Whose fault a partial order's returned parcel is. */
+export const SetPartialReturnFaultSchema = z
+    .object({ fault: z.enum(['customer', 'vendor', 'agency']) })
     .strict();
 
 /** Retrying a failed transfer takes no body: the same reference is reused by jovi-mall. */
@@ -220,6 +241,7 @@ export type ListRefundRequestsQuery = z.infer<typeof ListRefundRequestsQuerySche
 export type RefundEligibilityQuery = z.infer<typeof RefundEligibilityQuerySchema>;
 export type CreateRefundRequestBody = z.infer<typeof CreateRefundRequestSchema>;
 export type RejectRefundBody = z.infer<typeof RejectRefundSchema>;
+export type SetPartialReturnFaultBody = z.infer<typeof SetPartialReturnFaultSchema>;
 export type SettleExternalRefundBody = z.infer<typeof SettleExternalRefundSchema>;
 export type ResolveUnknownRefundBody = z.infer<typeof ResolveUnknownRefundSchema>;
 export type ListRefundActivityQuery = z.infer<typeof ListRefundActivityQuerySchema>;

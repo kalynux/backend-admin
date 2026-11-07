@@ -541,9 +541,10 @@ t.assert('Admin holds all five writes (incl. the COD-limit pin and the COD switc
 
 // Four until 2026-10-02; the COD-limit pin and release made six; the COD restriction and
 // its lift (2026-10-10) made eight.
-t.assert('eight agencies.* audit actions exist, all delegated, all targeting an agency', () => {
+// Nine since 2026-10-22: `agencies.claims.charge` (a damage claim) is filed against the agency too.
+t.assert('nine agencies.* audit actions exist, all delegated, all targeting an agency', () => {
     const rows = Object.entries(AUDIT_CATALOG).filter(([name]) => name.startsWith('agencies.'));
-    return rows.length === 8
+    return rows.length === 9
         && rows.every(([, spec]) => spec.transport === 'delegated' && spec.target === 'agency');
 });
 

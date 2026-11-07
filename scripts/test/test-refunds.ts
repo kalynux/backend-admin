@@ -131,6 +131,7 @@ const EXPECTED: Array<[string, string, string[], string | null]> = [
     ['get', '/:refundId/activity', ['orders.refund.read', 'audit.read'], null],
     ['post', '/:refundId/approve', ['orders.refund'], 'orders.refund.approve'],
     ['post', '/:refundId/reject', ['orders.refund'], 'orders.refund.reject'],
+    ['post', '/:refundId/partial-return-fault', ['orders.refund'], 'orders.refund.partial_return_fault'],
     ['post', '/:refundId/retry', ['orders.refund'], 'orders.refund.retry'],
     ['post', '/:refundId/settle-external', ['orders.refund.settle_external'], 'orders.refund.settle_external'],
     ['post', '/:refundId/resolve-unknown', ['orders.refund'], 'orders.refund.resolve_unknown'],
@@ -474,16 +475,17 @@ t.assert('eligibility: the three optional steering keys are accepted (strings fr
     return parsed.success && parsed.data.itemDefective === true && parsed.data.amount === 5000
         && !RefundEligibilityQuerySchema.safeParse({ sourceKind: 'order', sourceId: 'd'.repeat(24), amount: '50.5' }).success;
 });
-t.assert("eligibility: the gateway forwards ONLY jovi-mall's five strict keys", () => {
+// Six since 2026-10-22: `deliveryFaultShipmentIds` (parcels delivered at fault, comma-separated).
+t.assert("eligibility: the gateway forwards ONLY jovi-mall's six strict keys", () => {
     const gw = read(MODULE, 'gateways', 'refund.gateway.ts');
     const body = gw.slice(gw.indexOf('export async function refundEligibility'), gw.indexOf('// The writes'));
     const keys = [...body.matchAll(/forwarded\.(\w+) =/g)].map((m) => m[1]);
-    return body.includes('query: forwarded') && keys.sort().join() === 'amount,itemDefective,reasonKind';
+    return body.includes('query: forwarded') && keys.sort().join() === 'amount,deliveryFaultShipmentIds,itemDefective,reasonKind';
 });
 t.assert("eligibility: jovi-mall's query is strict on exactly those keys", () => {
     const v = readFileSync(join(JOVI_SRC, 'modules', 'payments', 'validators', 'admin-refund-request.validator.ts'), 'utf8');
     const block = v.slice(v.indexOf('AdminRefundEligibilityQuerySchema'));
-    return ['sourceKind', 'sourceId', 'reasonKind', 'itemDefective', 'amount'].every((k) => block.includes(`${k}`))
+    return ['sourceKind', 'sourceId', 'reasonKind', 'itemDefective', 'amount', 'deliveryFaultShipmentIds'].every((k) => block.includes(`${k}`))
         && block.slice(0, block.indexOf('.strict()')).length > 0;
 });
 t.assert('list: status is the contract vocabulary; an unknown status is a 400', () =>

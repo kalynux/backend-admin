@@ -17,6 +17,7 @@ import {
     RefundEligibilityQuerySchema,
     RefundIdParamSchema,
     RejectRefundSchema,
+    SetPartialReturnFaultSchema,
     ResolveUnknownRefundSchema,
     RetryRefundSchema,
     SettleExternalRefundSchema,
@@ -135,6 +136,17 @@ defineRoute(router, {
     validate: { params: RefundIdParamSchema, body: RejectRefundSchema },
     audit: records('orders.refund.reject'),
     handler: RefundController.reject,
+});
+
+/** Whose fault a partial order's returned parcel is. Replaces the request; approving it is separate. */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/:refundId/partial-return-fault',
+    access: permission('orders.refund'),
+    validate: { params: RefundIdParamSchema, body: SetPartialReturnFaultSchema },
+    audit: records('orders.refund.partial_return_fault'),
+    handler: RefundController.setPartialReturnFault,
 });
 
 defineRoute(router, {

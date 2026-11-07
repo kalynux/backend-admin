@@ -223,7 +223,7 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
     },
     [COLLECTIONS.BOOKING]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
-        note: 'Read for account STATEMENTS only (2026-09-27): a vendor\'s booking income is money on their account',
+        note: 'Read for account STATEMENTS (2026-09-27) and the BOOKINGS surface (2026-10-27); every write delegated to /internal/admin/bookings',
     },
     [COLLECTIONS.TRACKING_OUTBOX]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
@@ -298,6 +298,22 @@ export const PLATFORM_COLLECTIONS = Object.freeze({
     [COLLECTIONS.EARNINGS_ADJUSTMENT]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',
         note: 'Append-only refund clawbacks, debt recoveries and write-offs, each written inside the transaction that moved the balance; unique per (refund, allocation, kind)',
+    },
+    [COLLECTIONS.REFERRAL_SETTINGS]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'The referral program\'s global rates and durations; one document',
+    },
+    [COLLECTIONS.REFERRAL_PARTNER]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'Referral partners. Its status history decides whether a commission earned on a given day pays them',
+    },
+    [COLLECTIONS.REFERRAL_RELATIONSHIP]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'Who referred whom; written once at registration, unique per referred user',
+    },
+    [COLLECTIONS.REFERRAL_REWARD]: {
+        access: 'read', owner: 'jovi-mall', writes: 'internal-api',
+        note: 'One reward per referred account per commission, written with its wallet movement in one transaction',
     },
     [COLLECTIONS.EARNINGS_RESERVE_HOLD]: {
         access: 'read', owner: 'jovi-mall', writes: 'internal-api',

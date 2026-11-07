@@ -1,5 +1,7 @@
 # Backend requests
 
+**Amended 2026-11-01** — **round ten** added: BR-032 and BR-033 answered together in [`RESPONSE-2026-11-01-BR-032-033.md`](RESPONSE-2026-11-01-BR-032-033.md).
+
 **Amended 2026-10-15** — **round nine** added: BR-030 answered in [`RESPONSE-2026-10-15-BR-030.md`](RESPONSE-2026-10-15-BR-030.md), and BR-031 (two pages BR-030 left half-updated) in [`RESPONSE-2026-10-15-BR-031.md`](RESPONSE-2026-10-15-BR-031.md).
 
 **Amended 2026-10-13** — **round eight** added: BR-029 answered in [`RESPONSE-2026-10-13-BR-029.md`](RESPONSE-2026-10-13-BR-029.md).
@@ -21,11 +23,11 @@ Companion to the two registers already in this folder:
 | [`DATA-EXPOSURE-REGISTER.md`](../DATA-EXPOSURE-REGISTER.md) | What the API provides that perhaps it should not, or should provide differently |
 | **this folder** | What the API does **not** provide that an operator has asked for |
 
-Opened 2026-08-17, from a round of operator requests across eleven screens. **Five more rounds
-have run since**, and every request in them is closed **except BR-026**, which is open — see the
-index below. ⚠ This sentence read *“three more rounds … every one of them is closed”* until
-2026-09-15, when it was two rounds behind and about to be three: a count in prose beside the list
-it counts is exactly the drift this folder exists to catch elsewhere.
+Opened 2026-08-17, from a round of operator requests across eleven screens. **Nine more rounds
+have run since**, and every request in them has been answered — see the index below. ⚠ This
+sentence has now gone stale twice: it read *“three more rounds”* until 2026-09-15, and *“five more
+rounds … except BR-026”* until 2026-11-01, four rounds and one answered request behind. A count in
+prose beside the list it counts is exactly the drift this folder exists to catch elsewhere.
 
 The dashboard keeps a **verbatim copy** of this folder and is read-only on that side. Nothing there
 edits it; corrections to the contract belong upstream and get re-copied. ⚠ **The copy was
@@ -217,6 +219,21 @@ under a filter can be told apart from an id that belongs to no one. Contract:
 
 **BR-031 → corrected, plus one line it did not name** (`permissions.md` "4 of 142"). Both misses were
 older lines on pages whose new text was right; `test:authz` and `test:transactions` now pin them.
+
+### Round ten — opened 2026-10-25, doc gaps found while building two rounds of changelogs
+
+| # | Request | Answered in |
+|---|---|---|
+| [BR-032](BR-032-refund-fees-and-claims-doc-corrections.md) | Three doc gaps left by delivery pause, refund fees and damage claims | [`RESPONSE-2026-11-01-BR-032-033.md`](RESPONSE-2026-11-01-BR-032-033.md) |
+| [BR-033](BR-033-bookings-doc-gaps.md) | Doc gaps left by the bookings round, and one question about a cancel's refund | [`RESPONSE-2026-11-01-BR-032-033.md`](RESPONSE-2026-11-01-BR-032-033.md) |
+
+**Every doc gap is corrected, and the question became one new field.** Not deployed yet.
+
+- ⚠ **`permissions.md`'s composite section was six rows short**, not the one asked about. It now
+  states 19 `all` + 8 `any` = 27, and `test:authz` counts it against the route sources.
+- **`audit.md` now lists every action** (175), generated from the catalogue.
+- 🆕 **`result.refund`** on a booking cancel, and per seat on a session cancel: `none` · `requested`
+  · `refunded` · `manual` · `failed`. Absent until jovi-mall is deployed with it.
 
 ---
 

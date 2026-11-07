@@ -42,6 +42,9 @@ const SUBJECT_CLASS: Readonly<Record<AuditTargetType, AuditSubjectClass>> = Obje
     // A shared category is platform catalogue data, and Support can read the list itself
     // (`catalog.categories.read`) — so it may read what was done to it.
     category: 'platform_record',
+    // Support reads the program and decides on partners, so it may read what was done to one.
+    referral_partner: 'platform_record',
+    referral_settings: 'platform_record',
     // A review is platform data about a product or a delivery, and Support both reads and
     // moderates reviews — so it may read what was done to one.
     review: 'platform_record',

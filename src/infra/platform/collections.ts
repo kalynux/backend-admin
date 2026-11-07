@@ -159,6 +159,12 @@ export const COLLECTIONS = Object.freeze({
   // Append-only refund clawbacks, debt recoveries and write-offs (REFUND-FLOW-PLAN § 11.3).
   EARNINGS_ADJUSTMENT: 'earnings_adjustments',
 
+  // Referral program
+  REFERRAL_SETTINGS: 'referral_settings',
+  REFERRAL_PARTNER: 'referral_partners',
+  REFERRAL_RELATIONSHIP: 'referral_relationships',
+  REFERRAL_REWARD: 'referral_rewards',
+
   // Blog / editorial (the marketing site's article pages)
   ARTICLE: 'articles',
   ARTICLE_AUTHOR: 'article_authors',
