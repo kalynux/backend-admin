@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import { ObjectId } from 'mongodb';
 import { asyncHandler } from '../../../core/http/async-handler';
 import { createAppError } from '../../../core/errors/app-error';
 import { ERROR_CODES } from '../../../core/errors/error-codes';
@@ -161,11 +160,17 @@ export class ReferralController {
         sendPaginated(res, rewardRows(req, page.items, names), toPageMeta(page.total, page.page, page.limit));
     });
 
-    /** One reward, with every referred account that generated a reward on the same commission (document § 16). */
+    /**
+     * One reward, with every referred account that generated a reward on the same commission (document
+     * § 16) — or, for a provider reward (2026-11-08), on the same payment. Both answer under
+     * `onSameCommission` so the screen has one list to draw; `reward.payment` says which it is.
+     */
     static rewardDetail = asyncHandler(async (req: Request, res: Response) => {
         const reward = await rewards.findById(req.params.rewardId);
         if (!reward) throw createAppError(ERROR_CODES.NOT_FOUND, 404, 'Referral reward not found');
-        const siblings = await rewards.findForCommission(reward.commission_allocation_id as ObjectId);
+        const siblings = reward.commission_allocation_id
+            ? await rewards.findForCommission(reward.commission_allocation_id)
+            : await rewards.findForPayment(reward.source_type, reward.source_id);
         const names = await people.findByUserIds(siblings.map((row) => row.referred_user_id));
         const dtos = rewardRows(req, siblings, names);
         sendSuccess(res, {

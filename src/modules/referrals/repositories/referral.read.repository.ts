@@ -72,7 +72,8 @@ export interface ReferralRewardReadModel extends Document {
     relationship_id: ObjectId;
     referred_user_id: ObjectId;
     category: string;
-    commission_allocation_id: ObjectId;
+    /** Null on a provider reward (2026-11-08): its source is a plan purchase or a credit top-up. */
+    commission_allocation_id: ObjectId | null;
     source_type: string;
     source_id: ObjectId;
     order_id?: ObjectId | null;
@@ -265,6 +266,14 @@ export class ReferralRewardReadRepository extends PlatformReadRepository<Referra
     /** Every referred account that generated a reward on one commission (document § 16). */
     async findForCommission(allocationId: ObjectId): Promise<ReferralRewardReadModel[]> {
         return this.findBy({ commission_allocation_id: allocationId } as Filter<ReferralRewardReadModel>, { limit: 50 });
+    }
+
+    /**
+     * Every reward on one provider payment (2026-11-08). ⚠ Never `findForCommission(null)`: that
+     * matches every provider reward on the platform.
+     */
+    async findForPayment(sourceType: string, sourceId: ObjectId): Promise<ReferralRewardReadModel[]> {
+        return this.findBy({ source_type: sourceType, source_id: sourceId } as Filter<ReferralRewardReadModel>, { limit: 50 });
     }
 
     /**

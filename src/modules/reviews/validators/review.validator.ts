@@ -17,7 +17,8 @@ export const REVIEW_SORT = {
  * submission, so `pending` (held for a moderator) and `rejected` no longer exist.
  */
 export const REVIEW_STATUSES = ['published', 'unpublished'] as const;
-export const REVIEW_SUBJECT_TYPES = ['product', 'delivery'] as const;
+/** `listing` since 2026-11-08: a customer's review of a service listing (jovi-mall L-27). */
+export const REVIEW_SUBJECT_TYPES = ['product', 'delivery', 'listing'] as const;
 export const REVIEW_AUTHOR_ROLES = ['customer', 'vendor', 'agency'] as const;
 
 /**

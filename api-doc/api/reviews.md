@@ -13,6 +13,7 @@ thing. There are two kinds:
 |---|---|---|---|
 | `product` | a product | the **customer** who bought it | **public**: the storefront's product page and its average rating |
 | `delivery` | one **shipment** | the **customer**, the **vendor** and the **agency** | **internal only**: it feeds the delivery agent's and the agency's rating; no page ever shows the review itself |
+| `listing` 🆕 2026-11-08 | a **service listing** (a business paid in person) | the **customer** who unlocked at least one of its contacts | **public**: the listing's page and its average rating. The row carries `listing: { id, name }` (the listing's title, never a contact) |
 
 **Every review is public the moment it is written** (owner decision, 2026-10-05). Nothing waits
 for approval. Moderation happens **afterwards**, here, with three actions:
@@ -46,7 +47,7 @@ Every live (not deleted) review, newest first.
 | Query | Notes |
 |---|---|
 | `status` | `published` \| `unpublished`. Omit for both |
-| `subjectType` | `product` \| `delivery` |
+| `subjectType` | `product` \| `delivery` \| `listing` (2026-11-08) |
 | `authorRole` | `customer` \| `vendor` \| `agency` |
 | `rating` | `1`–`5` |
 | `hasText` | `true`: only reviews with a title or body (the ones that can contain abuse) · `false`: stars only |
@@ -91,7 +92,7 @@ The old statuses `pending` and `rejected` no longer exist and answer `400 VALIDA
 | Field | Meaning |
 |---|---|
 | `status` | `published` or `unpublished` |
-| `publiclyVisible` | `true` only for a **published product** review. A delivery review is always `false`, because no page shows delivery reviews, even when `status` is `published` |
+| `publiclyVisible` | `true` for a **published product or listing** review. A delivery review is always `false`, because no page shows delivery reviews, even when `status` is `published`. ⚠ On a listing review it does not check that the listing itself is visible right now: a paused listing's reviews are on no page until it is live again |
 | `hasText` | the review has a non-blank title or body |
 | `author.name` | Customer: their name. Vendor: their **shop** name. Agency: its **business** name. `null` if unknown |
 | `product` | product reviews only. `name` is the product title, and stays filled in even if the product was later deleted |

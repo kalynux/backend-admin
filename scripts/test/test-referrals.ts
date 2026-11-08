@@ -181,6 +181,31 @@ console.log('\n6. The two repositories agree');
     for (const [key, value] of [['ratePercent', '3'], ['durationMonths', '6'], ['minPayoutAmount', '1_000'], ['rewardWaitDays', '14'], ['enabled', 'false']]) {
         assert(`the default ${key} matches`, rules.includes(`${key}: ${value},`) && dto.includes(`${key}: ${value},`));
     }
+    assert('the earning categories match, provider included (2026-11-08)',
+        rules.includes("EARNING_CATEGORIES = ['vendor', 'customer', 'agency', 'provider'] as const")
+        && dto.includes("const CATEGORIES = ['vendor', 'customer', 'agency', 'provider'] as const"));
+    const validator = read('modules/referrals/validators/referral.validator.ts');
+    assert('provider terms are writable, globally and per partner', (validator.match(/provider: (Global|Partner)CategoryTerms\.optional\(\)/g) ?? []).length === 2);
+}
+
+console.log('\n7. Provider-payment rewards (2026-11-08, RS-3 … RS-7)');
+{
+    const base = {
+        _id: new ObjectId(), partner_id: new ObjectId(), relationship_id: new ObjectId(), referred_user_id: new ObjectId(),
+        category: 'provider', commission_allocation_id: null, source_type: 'credit_topup', source_id: new ObjectId(),
+        order_id: null, booking_id: null, vendor_id: new ObjectId(), commission_earned: 3_000,
+        share: { numerator: 1, denominator: 1 }, rate_percent: 3, rate_source: 'global', amount: 90, clawed_amount: 0,
+        currency: 'XAF', status: 'held', earned_at: new Date(), matures_at: new Date(), adjustments: [],
+    };
+    const dto = toRewardDto(base as never, undefined, true);
+    assert('a provider reward renders: no commission, the payment kind and the price paid', dto.commissionId === null
+        && dto.commissionEarned === null && dto.paymentKind === 'credits'
+        && dto.payment?.kind === 'credits' && dto.payment.amountPaid === 3_000);
+    const commission = toRewardDto({ ...base, category: 'vendor', commission_allocation_id: new ObjectId(), source_type: 'order' } as never, undefined, true);
+    assert('a commission reward carries no payment', commission.paymentKind === null && commission.payment === null && commission.commissionEarned === 3_000);
+    const controller = read('modules/referrals/controllers/referral.controller.ts');
+    assert('⚠ a provider reward\'s siblings are found by PAYMENT — findForCommission(null) would match every provider reward',
+        /reward\.commission_allocation_id\s*\?\s*await rewards\.findForCommission\(reward\.commission_allocation_id\)\s*:\s*await rewards\.findForPayment\(reward\.source_type, reward\.source_id\)/.test(controller));
 }
 
 console.log(`\n${failed === 0 ? '✅' : '❌'} ${passed} passed, ${failed} failed\n`);

@@ -15,6 +15,8 @@ import type {
 export interface ListingContactSetDto {
     whatsapp: string | null;
     phone: string | null;
+    /** The second phone number (2026-11-08), or null. A reviewer sees it replaced like any other. */
+    phone2: string | null;
     email: string | null;
     website: string | null;
     socials: Array<{ network: string | null; url: string | null }>;
@@ -53,6 +55,7 @@ function toContactSetDto(set: ListingContactSetReadModel | null | undefined): Li
     return {
         whatsapp: set.whatsapp ?? null,
         phone: set.phone ?? null,
+        phone2: set.phone2 ?? null,
         email: set.email ?? null,
         website: set.website ?? null,
         socials: (set.socials ?? []).map((s) => ({ network: s.network ?? null, url: s.url ?? null })),
@@ -96,7 +99,8 @@ export function presentFieldsOf(dto: ListingContactsDto): { published: string[];
         if (!set) return [];
         const present: string[] = [];
         if (set.whatsapp) present.push('whatsapp');
-        if (set.phone) present.push('phone');
+        // One field for both numbers, as jovi-mall unlocks and charges them (2026-11-08).
+        if (set.phone || set.phone2) present.push('phone');
         if (set.email) present.push('email');
         if (set.website) present.push('website');
         if (set.socials.length > 0) present.push('socials');

@@ -28,6 +28,10 @@ fail-closed (the intent row commits before the call).
 | `GET /listings?status&reviewState&…` | `read` | — |
 | `GET /listings/:listingId` | `read` | — |
 | `GET /listings/:listingId/contacts` | `contacts.read` | `catalog.listings.contacts.read` (`external`) |
+
+🆕 2026-11-08: each contact copy (`published`, `pending`) carries **`phone2`**, a second phone number or `null`. It
+belongs to the same `phone` field (unlocked and charged together), so the audit row's field list still says
+`phone` once.
 | `POST /listings/:listingId/approve` `{}` | `review` | `catalog.listings.approve` |
 | `POST /listings/:listingId/reject` `{ reasons[1..5] (3–500) }` | `review` | `catalog.listings.reject` |
 | `POST /listings/:listingId/suspend` `{ note (3–500) }` | `suspend` | `catalog.listings.suspend` |

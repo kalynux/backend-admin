@@ -53,6 +53,7 @@ export const UpdateSettingsSchema = z
                 vendor: GlobalCategoryTerms.optional(),
                 customer: GlobalCategoryTerms.optional(),
                 agency: GlobalCategoryTerms.optional(),
+                provider: GlobalCategoryTerms.optional(),
             })
             .strict()
             .optional(),
@@ -74,6 +75,7 @@ export const UpdatePartnerTermsSchema = z
                 vendor: PartnerCategoryTerms.optional(),
                 customer: PartnerCategoryTerms.optional(),
                 agency: PartnerCategoryTerms.optional(),
+                provider: PartnerCategoryTerms.optional(),
             })
             .strict(),
     })

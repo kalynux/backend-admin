@@ -11,6 +11,7 @@ import { AgentReadRepository } from '../../agents/repositories/agent.read.reposi
 import { findCustomerNamesByUserIds } from '../../users/repositories/role-profile.read.repository';
 import { StoreReadRepository } from '../../vendors/repositories/store.read.repository';
 import { VendorProductReadRepository } from '../../vendors/repositories/vendor-product.read.repository';
+import { ListingReadRepository } from '../../listings/repositories/listing.read.repository';
 import * as gateway from '../gateways/review.gateway';
 import { ReviewReadModel, ReviewReadRepository } from '../repositories/review.read.repository';
 import {
@@ -24,6 +25,7 @@ const products = new VendorProductReadRepository();
 const stores = new StoreReadRepository();
 const agents = new AgentReadRepository();
 const agencies = new AgencyReadRepository();
+const listings = new ListingReadRepository();
 
 function toIso(value: Date | string | undefined | null): string | null {
     return value ? new Date(value).toISOString() : null;
@@ -38,6 +40,7 @@ interface NameBook {
     stores: Map<string, string | null>;
     agents: Map<string, string | null>;
     agencies: Map<string, string | null>;
+    listings: Map<string, string | null>;
 }
 
 const idsOf = (rows: ReviewReadModel[], pick: (r: ReviewReadModel) => ObjectId | null | undefined): ObjectId[] => {
@@ -50,14 +53,22 @@ const idsOf = (rows: ReviewReadModel[], pick: (r: ReviewReadModel) => ObjectId |
 };
 
 async function nameBookFor(rows: ReviewReadModel[]): Promise<NameBook> {
-    const [customerNames, productTitles, storeNames, agentNames, agencyNames] = await Promise.all([
+    const [customerNames, productTitles, storeNames, agentNames, agencyNames, listingTitles] = await Promise.all([
         findCustomerNamesByUserIds(idsOf(rows.filter((r) => r.author_role === 'customer'), (r) => r.author_user_id)),
         products.findTitlesByIds(idsOf(rows, (r) => r.target_product_id)),
         stores.findNamesByVendorIds(idsOf(rows, (r) => r.target_vendor_id)),
         agents.findNamesByIds(idsOf(rows, (r) => r.target_agent_id)),
         agencies.findNamesByIds(idsOf(rows, (r) => r.target_agency_id)),
+        listings.findTitlesByIds(idsOf(rows, (r) => r.target_listing_id)),
     ]);
-    return { customers: customerNames, products: productTitles, stores: storeNames, agents: agentNames, agencies: agencyNames };
+    return {
+        customers: customerNames,
+        products: productTitles,
+        stores: storeNames,
+        agents: agentNames,
+        agencies: agencyNames,
+        listings: listingTitles,
+    };
 }
 
 const ref = (id: ObjectId | null | undefined, names: Map<string, string | null>) =>
@@ -101,7 +112,9 @@ function toReviewDto(row: ReviewReadModel, book: NameBook) {
         id: row._id.toString(),
         subjectType: row.subject_type,
         status,
-        publiclyVisible: row.subject_type === 'product' && status === 'published',
+        // A listing review is public too (2026-11-08), on the listing's page. Whether the listing itself
+        // is visible right now is not judged here: read it on the listing's own screen.
+        publiclyVisible: (row.subject_type === 'product' || row.subject_type === 'listing') && status === 'published',
         rating: row.rating,
         title: row.title ?? null,
         body: row.body ?? null,
@@ -112,6 +125,8 @@ function toReviewDto(row: ReviewReadModel, book: NameBook) {
             name: authorName(row, book),
         },
         product: ref(row.target_product_id, book.products),
+        /** The service listing, on a listing review (2026-11-08). Its title only, never a contact. */
+        listing: ref(row.target_listing_id, book.listings),
         vendor: ref(row.target_vendor_id, book.stores),
         agent: ref(row.target_agent_id, book.agents),
         agency: ref(row.target_agency_id, book.agencies),

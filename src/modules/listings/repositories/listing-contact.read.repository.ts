@@ -20,6 +20,8 @@ import { PlatformReadRepository } from '../../../infra/platform/platform.reposit
 export interface ListingContactSetReadModel {
     whatsapp?: string | null;
     phone?: string | null;
+    /** The second phone number (jovi-mall, 2026-11-08). Unlocked together with `phone`. */
+    phone2?: string | null;
     email?: string | null;
     website?: string | null;
     socials?: Array<{ network?: string; url?: string }>;
@@ -50,6 +52,7 @@ function contactSetPaths(copy: 'published' | 'pending'): Record<string, 1> {
     return {
         [`${copy}.whatsapp`]: 1,
         [`${copy}.phone`]: 1,
+        [`${copy}.phone2`]: 1,
         [`${copy}.email`]: 1,
         [`${copy}.website`]: 1,
         [`${copy}.socials.network`]: 1,

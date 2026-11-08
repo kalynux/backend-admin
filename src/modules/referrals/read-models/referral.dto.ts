@@ -24,7 +24,11 @@ const REFERRAL_DEFAULTS = {
     rewardWaitDays: 14,
 } as const;
 
-const CATEGORIES = ['vendor', 'customer', 'agency'] as const;
+/** `provider` since 2026-11-08 (jovi-mall RS-3): a service provider, earning on what it pays Wi-Mall. */
+const CATEGORIES = ['vendor', 'customer', 'agency', 'provider'] as const;
+
+/** jovi-mall's `paymentKindOf`: what a provider reward came from. Null on a commission reward. */
+const PAYMENT_KIND: Record<string, 'plan' | 'credits'> = { plan_purchase: 'plan', credit_topup: 'credits' };
 
 export function toSettingsDto(row: ReferralSettingsReadModel | null) {
     return {
@@ -155,9 +159,19 @@ export function toRewardDto(
         orderId: row.order_id ? row.order_id.toString() : null,
         bookingId: row.booking_id ? row.booking_id.toString() : null,
         vendorId: row.vendor_id.toString(),
-        commissionId: row.commission_allocation_id.toString(),
+        /** Null on a provider reward (2026-11-08), which comes from a payment, not a commission. */
+        commissionId: row.commission_allocation_id ? row.commission_allocation_id.toString() : null,
         commissionWithheld: !seesCommission,
-        commissionEarned: seesCommission ? row.commission_earned : null,
+        commissionEarned: seesCommission && row.commission_allocation_id ? row.commission_earned : null,
+        /**
+         * A provider reward's source (RS-3, RS-7): the plan purchase or credit top-up, its kind, and
+         * the price paid — the reward's base (RS-6). A plan's price is public, so every tier sees it;
+         * the PARTNER never does (their own DTO carries the kind alone). Null on a commission reward.
+         */
+        paymentKind: PAYMENT_KIND[row.source_type] ?? null,
+        payment: PAYMENT_KIND[row.source_type]
+            ? { kind: PAYMENT_KIND[row.source_type], id: row.source_id.toString(), amountPaid: row.commission_earned }
+            : null,
         /** The participant's part of the commission: 100, except a prepaid order's agency (owner R-7). */
         sharePercent: Math.round((row.share.numerator / row.share.denominator) * 10_000) / 100,
         ratePercent: row.rate_percent,

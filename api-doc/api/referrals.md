@@ -20,7 +20,8 @@ straight from the shared database; every write is delegated to jovi-mall and aud
   "terms": {
     "vendor": { "ratePercent": 3, "durationMonths": 6 },
     "customer": { "ratePercent": 3, "durationMonths": 6 },
-    "agency": { "ratePercent": 3, "durationMonths": 6 }
+    "agency": { "ratePercent": 3, "durationMonths": 6 },
+    "provider": { "ratePercent": 3, "durationMonths": 6 }
   },
   "minPayoutAmount": 1000,
   "rewardWaitDays": 14,
@@ -155,10 +156,26 @@ render that as zero.
 `sharePercent` is 100 except on a prepaid order with two agencies, where each agency's partner earns on its
 share by parcel value.
 
+🆕 **A provider reward (2026-11-08, jovi-mall RS-3).** `category: "provider"` is a service provider, who earns
+their partner a percentage of the **full price** they pay Wi-Mall for a plan or a credit pack, not a commission:
+
+```json
+{
+  "category": "provider", "sourceType": "credit_topup", "orderId": null, "bookingId": null,
+  "commissionId": null, "commissionWithheld": false, "commissionEarned": null,
+  "paymentKind": "credits", "payment": { "kind": "credits", "id": "…", "amountPaid": 3000 },
+  "sharePercent": 100, "ratePercent": 3, "amount": 90, "status": "held"
+}
+```
+
+`paymentKind` is `plan` | `credits` | `null` (null on a commission reward); `payment` is null on a commission
+reward. A plan's price is public, so `payment.amountPaid` is shown to **every tier**. A reversed payment (a lost
+card dispute, or a completed refund) claws the whole reward back. Filter with `?category=provider`.
+
 ### `GET /referrals/rewards/:rewardId`
 
 `{ reward, onSameCommission: [...] }`: this reward and every other referred account that generated one on the
-same commission.
+same commission — or, for a provider reward (2026-11-08), on the same payment (`reward.payment` says which).
 
 ## Summary
 

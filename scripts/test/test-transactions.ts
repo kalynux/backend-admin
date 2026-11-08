@@ -518,7 +518,11 @@ t.assert('the ledger\'s reason codes and the source types it links are still wha
     return reasons.includes('order_split') && reasons.includes('hold_release')
         // `agency_claim` (2026-10-22): a damage claim's credit to the vendor and fee to the platform.
         // The feed links no order for it — its `source` carries the type and the claim id.
-        && json([...sources].sort()) === json(['agency_claim', 'booking', 'cod_collection', 'order', 'shipment']);
+        // `plan_purchase` / `credit_topup` (2026-11-08): a referral reward on a referred PROVIDER's payment
+        // (jovi-mall LISTING-REVIEWS-SAVES-REFERRALS-PLAN § 3.3), on a `referral_partner` account only, with
+        // `allocation_id: null`. The feed links nothing for them (no order, booking or allocation); `source`
+        // carries the type and the purchase or top-up id.
+        && json([...sources].sort()) === json(['agency_claim', 'booking', 'cod_collection', 'credit_topup', 'order', 'plan_purchase', 'shipment']);
 });
 
 t.assert('the ledger owner types are the roles, the referral partner and the two platform accounts', () => {

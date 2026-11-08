@@ -18,7 +18,7 @@ import { REVIEW_SORT } from '../validators/review.validator';
  */
 export interface ReviewReadModel extends Document {
     _id: ObjectId;
-    subject_type: 'product' | 'delivery';
+    subject_type: 'product' | 'delivery' | 'listing';
     subject_id: ObjectId;
     author_user_id: ObjectId;
     author_role: 'customer' | 'vendor' | 'agency';
@@ -39,6 +39,8 @@ export interface ReviewReadModel extends Document {
     target_product_id?: ObjectId | null;
     target_agent_id?: ObjectId | null;
     target_agency_id?: ObjectId | null;
+    /** A service listing review's listing (2026-11-08). */
+    target_listing_id?: ObjectId | null;
     target_vendor_id?: ObjectId | null;
     createdAt: Date;
     updatedAt: Date;
@@ -62,6 +64,7 @@ const REVIEW_PROJECTION = {
     target_product_id: 1,
     target_agent_id: 1,
     target_agency_id: 1,
+    target_listing_id: 1,
     target_vendor_id: 1,
     createdAt: 1,
     updatedAt: 1,

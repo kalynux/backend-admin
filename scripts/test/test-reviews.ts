@@ -164,4 +164,22 @@ t.assert('unpublish/delete need a reason; republish does not; all strict', () =>
     && RepublishReviewSchema.safeParse({}).success
     && !ReviewReasonSchema.safeParse({ reason: 'Abusive', notifyAuthor: true }).success);
 
+// ─── §6 ──────────────────────────────────────────────────────────────────────
+t.section('§6 listing reviews (2026-11-08)');
+
+t.assert('the subject list matches jovi-mall, listing included', () =>
+    ListReviewsQuerySchema.safeParse({ subjectType: 'listing' }).success
+    && read(JOVI, 'modules/reviews/models/review.model.ts').includes("REVIEW_SUBJECT_TYPES: ReviewSubjectType[] = ['product', 'delivery', 'listing']"));
+t.assert('a listing review names its listing by TITLE, read from `listings` — never `listing_contacts`', () => {
+    const ctl = code(SRC, 'modules/reviews/controllers/review.controller.ts');
+    const repo = code(SRC, 'modules/listings/repositories/listing.read.repository.ts');
+    const lookup = repo.slice(repo.indexOf('async findTitlesByIds'));
+    return ctl.includes('listings.findTitlesByIds(idsOf(rows, (r) => r.target_listing_id))')
+        && ctl.includes('listing: ref(row.target_listing_id, book.listings)')
+        && /projection: \{ _id: 1, 'published\.title': 1, 'pending\.title': 1 \}/.test(lookup)
+        && !/LISTING_CONTACT/.test(lookup);
+});
+t.assert('the read projection carries target_listing_id', () =>
+    code(SRC, 'modules/reviews/repositories/review.read.repository.ts').includes('target_listing_id: 1,'));
+
 process.exit(t.finish());

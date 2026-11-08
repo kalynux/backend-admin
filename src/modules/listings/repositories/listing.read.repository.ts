@@ -220,4 +220,18 @@ export class ListingReadRepository extends PlatformReadRepository<ListingReadMod
         );
         return rows[0] ?? null;
     }
+
+    /**
+     * A page of listings' titles in one query, for the reviews screens (2026-11-08). The published
+     * title, else the pending one (a listing never published has no review anyway). Reads
+     * `listings` only — never `listing_contacts`.
+     */
+    async findTitlesByIds(ids: ObjectId[]): Promise<Map<string, string | null>> {
+        if (ids.length === 0) return new Map();
+        const rows = await this.findBy({ _id: { $in: ids } } as Filter<ListingReadModel>, {
+            projection: { _id: 1, 'published.title': 1, 'pending.title': 1 },
+            limit: ids.length,
+        });
+        return new Map(rows.map((row) => [row._id.toString(), row.published?.title ?? row.pending?.title ?? null]));
+    }
 }

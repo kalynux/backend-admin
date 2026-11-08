@@ -510,7 +510,9 @@ t.assert('contacts DTO: both copies, exact key sets, coordinates un-swapped', ()
     });
     const set = dto.published!;
     return sortedKeys(dto) === 'listingId,pending,published'
-        && sortedKeys(set) === [...LISTING_CONTACT_FIELDS].sort().join(',')
+        // `phone2` (2026-11-08) is a second VALUE of the `phone` field, not an eighth field.
+        && sortedKeys(set) === [...LISTING_CONTACT_FIELDS, 'phone2'].sort().join(',')
+        && set.phone2 === null
         && set.location?.latitude === 4.05 && set.location.longitude === 9.7
         && set.location.components.countryCode === null
         && set.video?.checkedAt === '2026-10-19T09:00:00.000Z' && dto.pending === null;
