@@ -1,3 +1,5 @@
+import { ticketLeadContextOf } from '../../listings/domain/listing-lead-reads';
+import type { TicketLeadMetadata } from '../../listings/read-models/listing-lead.dto';
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../../core/http/async-handler';
 import { createAppError } from '../../../core/errors/app-error';
@@ -133,8 +135,12 @@ async function detailOf(ticket: TicketReadModel, identity: { adminId: string; ti
         ticketFollowers.findByTicket(ticket._id.toString()),
     ]);
     const actors = await ticketActors.resolve(actorRefsOf([ticket], followers));
+    // A provider's lead report carries the lead beside it (SERVICE-LISTINGS-PLAN L-31).
+    const listingLead = ticket.entity_type === 'LISTING_LEAD'
+        ? await ticketLeadContextOf(ticket.entity_id, (ticket.metadata ?? null) as TicketLeadMetadata | null, identity.tier)
+        : null;
 
-    return toTicketDetailDto(ticket, identity, entity, actors, followers);
+    return toTicketDetailDto(ticket, identity, entity, actors, followers, listingLead);
 }
 
 /**

@@ -53,6 +53,8 @@ export interface TicketReadModel extends Document {
     entity_type: string;
     entity_id: string;
     tracking_number?: string | null;
+    /** Type-specific facts; only a LISTING_LEAD_REPORT carries any (`{ listingId, wants, revealIds }`). */
+    metadata?: Record<string, unknown> | null;
     created_by_role: string;
     created_by_user_id?: ObjectId | null;
     created_by_admin?: AdminSnapshotRead | null;
@@ -105,6 +107,8 @@ const TICKET_LIST_PROJECTION = {
 const TICKET_DETAIL_PROJECTION = {
     ...TICKET_LIST_PROJECTION,
     description: 1,
+    // The detail only: a lead report's listing, wishes and named reveals (SERVICE-LISTINGS-PLAN L-31).
+    metadata: 1,
 } as const;
 
 /**

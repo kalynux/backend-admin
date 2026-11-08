@@ -1,6 +1,16 @@
 import { Router } from 'express';
 import { defineRoute, permission, records } from '../../../api/route-manifest';
 import { ListingController } from '../controllers/listing.controller';
+import { ListingReportsController } from '../controllers/listing-reports.controller';
+import {
+    BlockCustomerSchema,
+    LeadIdParamSchema,
+    LiftBlockSchema,
+    ListListingLeadsQuerySchema,
+    RefundRevealSchema,
+    RevealBlockParamsSchema,
+    RevealIdParamSchema,
+} from '../validators/listing-reports.validator';
 import {
     ApproveListingSchema,
     ListingIdParamSchema,
@@ -24,12 +34,12 @@ import {
  * read), `catalog.listings.review` to approve / reject, `catalog.listings.suspend` to take a
  * listing offline and put it back. Every write is delegated to jovi-mall (§ C-3).
  *
- * ── Wave-2 seam ──────────────────────────────────────────────────────────────
- * The lead-report actions (reveal refund under `catalog.listings.reveals.refund`, block / lift
- * under `catalog.listings.reveal-block`) and the leads / reveals lists are built later. They
- * register on THIS router — one mount per prefix — and their audit actions
- * (`catalog.listings.reveals.refund`, `…reveal_block`, `…reveal_unblock`) stay producer-less
- * until then.
+ * ── Lead reports (L-25, L-29, L-31; routed 2026-11-07) ───────────────────────
+ * A provider's "Report" on a lead opens a `LISTING_LEAD_REPORT` ticket in jovi-mall. From it an
+ * administrator reads the lead in full (`/leads/:leadId`, `/:listingId/leads`), refunds reveals
+ * (`/reveals/:revealId/refund`, `catalog.listings.reveals.refund` — financial, tiers 1 + 2) and
+ * blocks or lifts the customer on that listing (`/:listingId/reveal-blocks/:customerId`,
+ * `catalog.listings.reveal-block`). All three writes are delegated and audited fail-closed.
  *
  * Design record: PRODUCTION-READINESS/SERVICE-LISTINGS-PLAN.md (§ Admin, § C-6).
  */
@@ -45,6 +55,33 @@ defineRoute(router, {
     handler: ListingController.list,
 });
 
+/**
+ * One lead in full — the customer's real identity and their other leads (L-29, L-31). Declared
+ * BEFORE `/:listingId` so `leads` is never read as a listing id.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/leads/:leadId',
+    access: permission('catalog.listings.read'),
+    validate: { params: LeadIdParamSchema },
+    handler: ListingReportsController.lead,
+});
+
+/**
+ * Refund one reveal from a provider's report (L-25). `financial`: it credits the provider's
+ * wallet. Named by the REVEAL, so it sits beside the lead routes rather than under a listing.
+ */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/reveals/:revealId/refund',
+    access: permission('catalog.listings.reveals.refund'),
+    validate: { params: RevealIdParamSchema, body: RefundRevealSchema },
+    audit: records('catalog.listings.reveals.refund'),
+    handler: ListingReportsController.refund,
+});
+
 defineRoute(router, {
     mountedAt,
     method: 'get',
@@ -52,6 +89,37 @@ defineRoute(router, {
     access: permission('catalog.listings.read'),
     validate: { params: ListingIdParamSchema },
     handler: ListingController.get,
+});
+
+/** Who unlocked this listing's contacts, newest first, the customer in full (L-31). */
+defineRoute(router, {
+    mountedAt,
+    method: 'get',
+    path: '/:listingId/leads',
+    access: permission('catalog.listings.read'),
+    validate: { params: ListingIdParamSchema, query: ListListingLeadsQuerySchema },
+    handler: ListingReportsController.leads,
+});
+
+/** Block a customer from unlocking this listing's contacts (L-29). Lifted by the DELETE below. */
+defineRoute(router, {
+    mountedAt,
+    method: 'post',
+    path: '/:listingId/reveal-blocks/:customerId',
+    access: permission('catalog.listings.reveal-block'),
+    validate: { params: RevealBlockParamsSchema, body: BlockCustomerSchema },
+    audit: records('catalog.listings.reveal_block'),
+    handler: ListingReportsController.block,
+});
+
+defineRoute(router, {
+    mountedAt,
+    method: 'delete',
+    path: '/:listingId/reveal-blocks/:customerId',
+    access: permission('catalog.listings.reveal-block'),
+    validate: { params: RevealBlockParamsSchema, body: LiftBlockSchema },
+    audit: records('catalog.listings.reveal_unblock'),
+    handler: ListingReportsController.unblock,
 });
 
 /**

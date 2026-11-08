@@ -397,11 +397,12 @@ t.assert('the DTO never re-derives the rules — it calls them', () => {
         && !/callerTier === 1/.test(dto);
 });
 
-t.assert('the detail adds description and followers, and nothing else', () => {
+// `listingLead` since 2026-11-07 (SERVICE-LISTINGS-PLAN L-31): null on every ticket but a lead report.
+t.assert('the detail adds description, followers and listingLead, and nothing else', () => {
     const list = toTicketDto(ticket(null), { adminId: SUP, tier: 3 });
     const detail = toTicketDetailDto(ticket(null), { adminId: SUP, tier: 3 });
     const extra = Object.keys(detail).filter((key) => !(key in list)).sort();
-    return extra.join() === 'description,followers';
+    return extra.join() === 'description,followers,listingLead' && detail.listingLead === null;
 });
 t.assert('a missing description maps to an empty string, never undefined', () =>
     toTicketDetailDto({ ...ticket(null), description: undefined } as TicketReadModel, { adminId: SUP, tier: 3 })

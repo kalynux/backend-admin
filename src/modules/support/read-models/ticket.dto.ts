@@ -1,3 +1,4 @@
+import type { ListingLeadTicketContextDto } from '../../listings/read-models/listing-lead.dto';
 import { AdminTier } from '../../admin-identity/domain/admin-identity.types';
 import { assignableTiers, mayClaim, TicketAssignmentState } from '../domain/assignment-authority';
 import { TicketActor, TicketFollowerRead, ticketActorKey } from '../repositories/ticket-actor.read.repository';
@@ -179,6 +180,12 @@ export interface TicketDto {
 export interface TicketDetailDto extends TicketDto {
     description: string;
     /**
+     * A `LISTING_LEAD_REPORT` ticket only: the lead the provider reported, the reveals they named
+     * with their refund state, and what they asked for (L-31). `null` on every other ticket.
+     * Withheld to ids and wishes for a tier without `catalog.listings.read`.
+     */
+    listingLead: ListingLeadTicketContextDto | null;
+    /**
      * Everyone following the ticket, oldest first — the detail only. A follower sees the
      * ticket in their own app and reads its public notes.
      */
@@ -327,6 +334,7 @@ export function toTicketDetailDto(
     entity: TicketEntityRef = UNRESOLVED_ENTITY,
     actors: ReadonlyMap<string, TicketActor> = NO_ACTORS,
     followers: readonly TicketFollowerRead[] = [],
+    listingLead: ListingLeadTicketContextDto | null = null,
 ): TicketDetailDto {
     const creatorId = ticket.created_by_user_id?.toString() ?? null;
     const assigneeId = ticket.assigned_to_user_id?.toString() ?? null;
@@ -334,6 +342,7 @@ export function toTicketDetailDto(
     return {
         ...toTicketDto(ticket, caller, entity, actors),
         description: ticket.description ?? '',
+        listingLead,
         followers: followers.map((follower) => {
             const userId = follower.user_id.toString();
             const identity = identityOf(userId, follower.role, actors);
