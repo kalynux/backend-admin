@@ -382,11 +382,15 @@ t.assert('wi-admin never writes a listing collection itself', () =>
 t.assert('the repositories never import the delegation client, and the gateway never imports a repository base', () =>
     moduleFiles.filter((f) => f.includes('/repositories/')).every((f) => !code(SRC, f).includes('platform.client'))
     && !gw.includes('platform.repository'));
-t.assert('the plan still states the four § C-3 internal-admin bodies this gateway sends', () => {
-    const plan = readFileSync(resolve(__dirname, '../../../PRODUCTION-READINESS/SERVICE-LISTINGS-PLAN.md'), 'utf-8');
-    return plan.includes('`POST /api/internal/admin/listings/:id/approve` | `{}`')
-        && plan.includes('`POST …/listings/:id/reject` | `{ reasons: string[1..5] (each 3–500) }`')
-        && plan.includes('`POST …/listings/:id/suspend` · `…/unsuspend` | `{ note (3–500) }` · `{ note? }`');
+// Against jovi-mall's validators, which CI checks out beside this repo, rather than the plan:
+// the plan lives in the workspace repo, which no CI job has (it failed ENOENT on 2026-11-08), and the
+// validator is what actually refuses a body this gateway sends.
+t.assert('jovi-mall still accepts the four bodies this gateway sends (approve {}, reject reasons, suspend note, unsuspend note?)', () => {
+    const v = code(JOVI, 'modules/listings/validators/listing.validator.ts');
+    return /AdminApproveSchema = z\.object\(\{\}\)\.strict\(\)/.test(v)
+        && /AdminRejectSchema = z\.object\(\{\s*reasons: z\.array\(z\.string\(\)\.trim\(\)\.min\(3\)\.max\(500\)\)\.min\(1\)\.max\(5\)/.test(v)
+        && /AdminSuspendSchema = z\.object\(\{\s*note: z\.string\(\)\.trim\(\)\.min\(3\)\.max\(500\),/.test(v)
+        && /AdminUnsuspendSchema = z\.object\(\{\s*note: z\.string\(\)\.trim\(\)\.min\(3\)\.max\(500\)\.optional\(\)/.test(v);
 });
 
 // ─── §8 ──────────────────────────────────────────────────────────────────────
